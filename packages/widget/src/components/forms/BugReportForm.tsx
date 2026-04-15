@@ -53,7 +53,6 @@ export function BugReportForm() {
     setSubmitting(true);
     try {
       await api.submitBugReport({
-        projectKey: config.projectKey,
         title: state.title.trim(),
         description: state.description.trim(),
         stepsToReproduce: state.steps.trim() || undefined,

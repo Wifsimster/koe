@@ -1,4 +1,13 @@
-import { pgTable, text, timestamp, integer, jsonb, uuid, pgEnum } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  jsonb,
+  uuid,
+  pgEnum,
+  primaryKey,
+} from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const ticketKindEnum = pgEnum('ticket_kind', ['bug', 'feature']);
@@ -18,6 +27,20 @@ export const projects = pgTable('projects', {
   name: text('name').notNull(),
   accentColor: text('accent_color').notNull().default('#4f46e5'),
   allowedOrigins: jsonb('allowed_origins').$type<string[]>().notNull().default([]),
+  /**
+   * Per-project HMAC secret used to verify reporter identity hashes
+   * supplied by the host app. Never expose this to the browser — it lives
+   * on the host app's backend.
+   */
+  identitySecret: text('identity_secret').notNull(),
+  /**
+   * When true, submissions MUST include a valid `X-Koe-User-Hash` header
+   * matching HMAC-SHA256(identitySecret, reporter.id). When false (the
+   * default in dev), the hash is verified if present but not required.
+   */
+  requireIdentityVerification: boolean('require_identity_verification')
+    .notNull()
+    .default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -34,19 +57,42 @@ export const tickets = pgTable('tickets', {
   reporterId: text('reporter_id').notNull(),
   reporterName: text('reporter_name'),
   reporterEmail: text('reporter_email'),
+  /**
+   * True when the reporter was validated via HMAC at submission time.
+   * Lets the admin UI distinguish verified vs. self-asserted identities.
+   */
+  reporterVerified: boolean('reporter_verified').notNull().default(false),
   // Bug-only fields.
   stepsToReproduce: text('steps_to_reproduce'),
   expectedBehavior: text('expected_behavior'),
   actualBehavior: text('actual_behavior'),
-  // Feature-only fields.
-  voteCount: integer('vote_count').notNull().default(0),
-  voters: jsonb('voters').$type<string[]>().notNull().default([]),
   // Captured environment.
   metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+  /** URL to screenshot stored on object storage — never base64 inline. */
   screenshotUrl: text('screenshot_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+/**
+ * Each row is one user's vote on one feature request. Composite PK on
+ * (ticketId, userId) prevents double-voting at the database level, which
+ * kills the read-modify-write race that the previous jsonb-array design
+ * had. `voteCount` is derived on read via `count(*)`.
+ */
+export const ticketVotes = pgTable(
+  'ticket_votes',
+  {
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references(() => tickets.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.ticketId, t.userId] }),
+  }),
+);
 
 export const conversations = pgTable('conversations', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -76,10 +122,18 @@ export const projectsRelations = relations(projects, ({ many }) => ({
   conversations: many(conversations),
 }));
 
-export const ticketsRelations = relations(tickets, ({ one }) => ({
+export const ticketsRelations = relations(tickets, ({ one, many }) => ({
   project: one(projects, {
     fields: [tickets.projectId],
     references: [projects.id],
+  }),
+  votes: many(ticketVotes),
+}));
+
+export const ticketVotesRelations = relations(ticketVotes, ({ one }) => ({
+  ticket: one(tickets, {
+    fields: [ticketVotes.ticketId],
+    references: [tickets.id],
   }),
 }));
 

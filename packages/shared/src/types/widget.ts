@@ -18,6 +18,13 @@ export interface WidgetTheme {
 export interface WidgetConfig {
   projectKey: string;
   user?: WidgetUser;
+  /**
+   * Opaque HMAC of `user.id` produced by your backend using the
+   * project's identity secret (`hex(HMAC-SHA256(secret, user.id))`).
+   * Required when the project has identity verification turned on.
+   * See: https://github.com/wifsimster/koe/blob/main/docs/identity.md
+   */
+  userHash?: string;
   /** API base URL. Defaults to https://api.koe.dev */
   apiUrl?: string;
   position?: WidgetPosition;

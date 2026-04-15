@@ -37,8 +37,13 @@ export interface TicketBase {
   status: TicketStatus;
   priority: TicketPriority;
   reporter: WidgetUser;
+  /** True when the reporter's identity was HMAC-verified at submission. */
+  reporterVerified: boolean;
   metadata?: BrowserMetadata;
-  /** Data-URL or uploaded asset URL for a screenshot attached at report time. */
+  /**
+   * URL to a screenshot stored on object storage (e.g. S3/R2 presigned
+   * upload). Never a base64 data URL — those are rejected at the API.
+   */
   screenshotUrl?: string;
   createdAt: string;
   updatedAt: string;
@@ -53,16 +58,16 @@ export interface BugReport extends TicketBase {
 
 export interface FeatureRequest extends TicketBase {
   kind: 'feature';
+  /** Derived via `count(*)` on `ticket_votes` — no denormalized counter. */
   voteCount: number;
-  /** User ids who have voted. */
-  voters: string[];
+  /** Whether the current viewer has already voted (server-evaluated). */
+  hasVoted: boolean;
 }
 
 export type Ticket = BugReport | FeatureRequest;
 
 /** Payload sent by the widget when submitting a new bug report. */
 export interface CreateBugReportInput {
-  projectKey: string;
   title: string;
   description: string;
   stepsToReproduce?: string;
@@ -70,12 +75,12 @@ export interface CreateBugReportInput {
   actualBehavior?: string;
   reporter: WidgetUser;
   metadata: BrowserMetadata;
-  screenshotDataUrl?: string;
+  /** Pre-uploaded screenshot URL — the widget never ships base64 inline. */
+  screenshotUrl?: string;
 }
 
 /** Payload sent by the widget when submitting a new feature request. */
 export interface CreateFeatureRequestInput {
-  projectKey: string;
   title: string;
   description: string;
   reporter: WidgetUser;

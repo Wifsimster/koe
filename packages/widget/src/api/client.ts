@@ -9,6 +9,13 @@ import type {
 export interface KoeApiClientOptions {
   apiUrl: string;
   projectKey: string;
+  /**
+   * Opaque HMAC of the reporter id signed with the project's identity
+   * secret, provided by the host app's backend. When the project has
+   * `requireIdentityVerification` turned on this is mandatory; otherwise
+   * it's optional but recommended to get a verified tick in the admin UI.
+   */
+  userHash?: string;
 }
 
 /**
@@ -18,24 +25,25 @@ export interface KoeApiClientOptions {
 export class KoeApiClient {
   private readonly apiUrl: string;
   private readonly projectKey: string;
+  private readonly userHash: string | undefined;
 
   constructor(opts: KoeApiClientOptions) {
     this.apiUrl = opts.apiUrl.replace(/\/$/, '');
     this.projectKey = opts.projectKey;
+    this.userHash = opts.userHash;
   }
 
   async submitBugReport(input: CreateBugReportInput): Promise<BugReport> {
     return this.post<BugReport>('/v1/widget/bugs', input);
   }
 
-  async submitFeatureRequest(
-    input: CreateFeatureRequestInput,
-  ): Promise<FeatureRequest> {
+  async submitFeatureRequest(input: CreateFeatureRequestInput): Promise<FeatureRequest> {
     return this.post<FeatureRequest>('/v1/widget/features', input);
   }
 
-  async listFeatureRequests(): Promise<FeatureRequest[]> {
-    return this.get<FeatureRequest[]>('/v1/widget/features');
+  async listFeatureRequests(userId?: string): Promise<FeatureRequest[]> {
+    const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    return this.get<FeatureRequest[]>(`/v1/widget/features${qs}`);
   }
 
   async voteFeature(id: string, userId: string): Promise<FeatureRequest> {
@@ -60,10 +68,12 @@ export class KoeApiClient {
   }
 
   private headers(): HeadersInit {
-    return {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Koe-Project-Key': this.projectKey,
     };
+    if (this.userHash) headers['X-Koe-User-Hash'] = this.userHash;
+    return headers;
   }
 
   private async unwrap<T>(res: Response): Promise<T> {
