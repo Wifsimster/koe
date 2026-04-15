@@ -35,6 +35,7 @@ export default defineConfig(() => {
           name: 'Koe',
           formats: ['iife'],
           fileName: () => 'koe.iife.js',
+          cssFileName: 'style',
         },
         rollupOptions: {
           // Nothing external — the CDN bundle must be self-contained.
@@ -50,7 +51,18 @@ export default defineConfig(() => {
   }
 
   return {
-    plugins: [react(), dts({ include: ['src'], rollupTypes: true })],
+    plugins: [
+      react(),
+      dts({
+        include: ['src'],
+        // Inline types from @koe/shared (workspace dep, not published)
+        // into the rolled-up declaration file. Without this api-extractor
+        // leaves `import { ... } from '@koe/shared'` in the output and
+        // consumers see phantom imports to a private package.
+        rollupTypes: true,
+        bundledPackages: ['@koe/shared'],
+      }),
+    ],
     build: {
       emptyOutDir: false,
       lib: {
@@ -58,6 +70,7 @@ export default defineConfig(() => {
         name: 'Koe',
         formats: ['es'],
         fileName: () => 'index.js',
+        cssFileName: 'style',
       },
       rollupOptions: {
         external: ['react', 'react-dom', 'react/jsx-runtime'],

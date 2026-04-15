@@ -17,7 +17,6 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@koe/shared": "workspace:*",
-    "better-auth": "^1.1.0",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.10",
     "postgres": "^3.4.5",
