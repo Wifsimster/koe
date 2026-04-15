@@ -62,7 +62,7 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 
 - Branche de base : `main`.
 - Branches observees : branches de travail de type `claude/...`.
-- Commits observes : messages courts a l'imperatif. La release utilise `chore: version packages`.
+- Commits observes : messages courts a l'imperatif. Les releases s'appuient sur Conventional Commits et `semantic-release`.
 - La release GitHub Actions se declenche sur `main` et s'appuie sur `semantic-release`.
 
 ## Fichiers et dossiers cles

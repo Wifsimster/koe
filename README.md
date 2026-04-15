@@ -114,6 +114,8 @@ Chaque push lance l'installation, le build et le typage. Les etapes lint et test
 - Verifier le pipeline de release avec `pnpm release:dry`.
 - La commande `pnpm test` est prevue, mais aucune suite n'est encore branchee.
 
+Les commits suivent [Conventional Commits](https://www.conventionalcommits.org/) comme `feat:` ou `fix:`. C'est ce format qui pilote les releases automatiques. Voir aussi [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ## Structure du monorepo
 
 | Package              | Role                                                    |
@@ -122,8 +124,6 @@ Chaque push lance l'installation, le build et le typage. Les etapes lint et test
 | `packages/api`       | API publique, securite projet et acces PostgreSQL.      |
 | `packages/dashboard` | Back-office React deja present, mais encore a brancher. |
 | `packages/shared`    | Types partages et capture de metadonnees navigateur.    |
-
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/) — `feat:` / `fix:` / etc. This is how releases are cut automatically. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contract.
 
 ## Documentation complementaire
 

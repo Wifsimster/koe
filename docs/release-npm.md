@@ -19,11 +19,11 @@ graph LR
     B --> C[Installation]
     C --> D[Build]
     D --> E[semantic-release]
-    E --> F[Commit de release]
-    E --> G[Publication npm et GitHub Release]
+    E --> F[Publication npm]
+    E --> G[Tag et GitHub Release]
 ```
 
-Un push sur `main` lance le workflow de release. Le build est rejoue, puis `semantic-release` analyse les commits Conventional Commits. S'il detecte une release, il met a jour `packages/widget/package.json`, cree un commit de release, publie `@wifsimster/koe` sur npm avec provenance puis cree le tag GitHub et la release associee.
+Un push sur `main` lance le workflow de release. Le build est rejoue, puis `semantic-release` analyse les commits Conventional Commits. S'il detecte une release, il publie `@wifsimster/koe` sur npm avec provenance puis cree le tag GitHub et la release associee.
 
 ## Verifications automatiques
 
@@ -43,7 +43,8 @@ Un push sur `main` lance le workflow de release. Le build est rejoue, puis `sema
 
 ## Points d'attention
 
-- `NPM_TOKEN` reste le secret recommande pour npm. Le workflow accepte aussi `NODE_AUTH_TOKEN` si c'est le secret deja configure dans le repository.
-- Le commit de release est genere automatiquement au format `chore(release): <version> [skip ci]`.
-- Le workflow demande un jeton GitHub pour creer le commit, le tag et la GitHub Release.
+- `NPM_TOKEN` est requis pour publier sur npm.
+- Le workflow ne commit pas de changement de version sur `main`.
+- `NODE_AUTH_TOKEN` est alimente dans le job a partir de `NPM_TOKEN`.
+- Le workflow demande un jeton GitHub pour creer le tag et la GitHub Release.
 - La provenance npm est active via `id-token` dans GitHub Actions.
