@@ -22,6 +22,7 @@ export function KoeProvider({ config, children }: KoeProviderProps) {
     const api = new KoeApiClient({
       apiUrl: config.apiUrl ?? 'https://api.koe.dev',
       projectKey: config.projectKey,
+      userHash: config.userHash,
     });
     return { config, locale, api };
   }, [config]);

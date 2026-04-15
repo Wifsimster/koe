@@ -46,7 +46,6 @@ export function FeatureRequestForm() {
     setSubmitting(true);
     try {
       await api.submitFeatureRequest({
-        projectKey: config.projectKey,
         title: title.trim(),
         description: description.trim(),
         reporter: config.user ?? { id: 'anonymous' },

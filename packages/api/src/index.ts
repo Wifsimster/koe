@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
 import { widgetRoutes } from './routes/widget';
@@ -9,16 +8,10 @@ import { fail } from './lib/response';
 const app = new Hono();
 
 app.use('*', logger());
-app.use(
-  '*',
-  cors({
-    origin: (origin) => origin,
-    allowHeaders: ['Content-Type', 'X-Koe-Project-Key', 'Authorization'],
-    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    credentials: true,
-  }),
-);
 
+// CORS is applied per-route group. The widget API has its own dynamic,
+// per-project allowlist (see `middleware/cors.ts`); the admin API (once
+// wired) will use a static env-driven allowlist for the dashboard origin.
 app.route('/health', healthRoutes);
 app.route('/v1/widget', widgetRoutes);
 
