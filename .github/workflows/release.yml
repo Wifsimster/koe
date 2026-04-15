@@ -1,24 +1,45 @@
 name: Release
 
+# Tag-based release flow. No automatic version bumps, no auto-opened PRs.
+#
+# Why not use `changesets/action` on push-to-main?
+#   It needs the repo setting "Allow GitHub Actions to create and approve
+#   pull requests" (Settings → Actions → General → Workflow permissions)
+#   AND an `NPM_TOKEN` secret. The workflow was noisily failing on every
+#   merge to main because those weren't configured. A tag-based flow
+#   avoids the PR-creation problem entirely and only runs when you
+#   actually intend to publish.
+#
+# Cutting a release:
+#   1. Run `pnpm changeset` locally to capture the bump (do this per PR).
+#   2. When you're ready to release, run `pnpm changeset version` on a
+#      release branch. This consumes `.changeset/*.md`, bumps versions,
+#      updates changelogs.
+#   3. Commit, open a "Release X.Y.Z" PR, merge.
+#   4. Tag the merge commit: `git tag v0.1.1 && git push origin v0.1.1`.
+#   5. This workflow fires on the tag and publishes to npm with
+#      provenance.
+
 on:
   push:
-    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
-  release:
-    name: Release
+  publish:
+    name: Publish to npm
     runs-on: ubuntu-latest
+    # Don't run in forks. Requires the NPM_TOKEN secret to exist on the
+    # main repo; the actual token check happens at publish time below.
+    if: github.repository == 'wifsimster/koe'
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       id-token: write # required for npm provenance
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -36,13 +57,18 @@ jobs:
       - name: Build
         run: pnpm turbo run build
 
-      - name: Create release PR or publish
-        uses: changesets/action@v1
-        with:
-          publish: pnpm changeset publish
-          version: pnpm changeset version
-          commit: "chore: version packages"
-          title: "chore: version packages"
+      - name: Verify NPM_TOKEN is set
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not set — cannot publish."
+            echo "Add it in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Publish @wifsimster/koe
+        working-directory: packages/widget
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm publish --access public --no-git-checks --provenance
