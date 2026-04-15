@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Koe widget styles. All selectors live under `.koe-root` so the widget
+ * stays isolated from the host application's global styles. The utility
+ * classes themselves are prefixed `koe-` via tailwind.config.js.
+ */
+.koe-root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--koe-text, #111827);
+  -webkit-font-smoothing: antialiased;
+}
+
+.koe-root *,
+.koe-root *::before,
+.koe-root *::after {
+  box-sizing: border-box;
+}
+
+.koe-root button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.koe-root input,
+.koe-root textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.koe-root textarea {
+  resize: vertical;
+}
+
+@media (prefers-color-scheme: dark) {
+  .koe-root[data-mode='auto'] {
+    --koe-bg: #111827;
+    --koe-bg-muted: #1f2937;
+    --koe-border: #374151;
+    --koe-text: #f9fafb;
+    --koe-text-muted: #9ca3af;
+  }
+}
+
+.koe-root[data-mode='dark'] {
+  --koe-bg: #111827;
+  --koe-bg-muted: #1f2937;
+  --koe-border: #374151;
+  --koe-text: #f9fafb;
+  --koe-text-muted: #9ca3af;
+}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Koe widget dev sandbox</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        padding: 2rem;
+        max-width: 700px;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Koe widget — dev sandbox</h1>
+    <p>
+      This page mounts the widget in isolation so you can iterate on it without
+      a host app. It points at a fake API URL — submissions will fail unless
+      you run <code>@koe/api</code> alongside.
+    </p>
+    <div id="root"></div>
+    <script type="module" src="/src/dev.tsx"></script>
+  </body>
+</html>
