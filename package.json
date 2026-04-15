@@ -12,17 +12,22 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "clean": "turbo run clean && rm -rf node_modules",
-    "changeset": "changeset"
+    "release": "semantic-release",
+    "release:dry": "semantic-release --dry-run --no-ci"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.9",
+    "@semantic-release/exec": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^11.0.1",
     "@types/node": "^22.9.0",
+    "conventional-changelog-conventionalcommits": "^8.0.0",
     "prettier": "^3.3.0",
+    "semantic-release": "^24.2.0",
     "turbo": "^2.3.0",
     "typescript": "^5.6.0"
   },
   "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.8.1"
   }
 }
