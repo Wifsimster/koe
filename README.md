@@ -69,6 +69,8 @@ pnpm build
 pnpm typecheck
 ```
 
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/) — `feat:` / `fix:` / etc. This is how releases are cut automatically. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contract.
+
 ## Architecture
 
 ```

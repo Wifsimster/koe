@@ -1,45 +1,52 @@
 name: Release
 
-# Tag-based release flow. No automatic version bumps, no auto-opened PRs.
+# Automated release driven by Conventional Commits + semantic-release.
 #
-# Why not use `changesets/action` on push-to-main?
-#   It needs the repo setting "Allow GitHub Actions to create and approve
-#   pull requests" (Settings → Actions → General → Workflow permissions)
-#   AND an `NPM_TOKEN` secret. The workflow was noisily failing on every
-#   merge to main because those weren't configured. A tag-based flow
-#   avoids the PR-creation problem entirely and only runs when you
-#   actually intend to publish.
+# How it works:
+#   - Every push to `main` triggers this workflow.
+#   - semantic-release reads commits since the last git tag, uses the
+#     Conventional Commits preset to decide the next version (`fix:` →
+#     patch, `feat:` → minor, `BREAKING CHANGE:` in the body → major).
+#   - If no releasable commits are present, the job is a no-op.
+#   - Otherwise it publishes `@wifsimster/koe` to npm with provenance,
+#     creates a git tag via the GitHub API, and opens a GitHub Release
+#     with auto-generated notes.
 #
-# Cutting a release:
-#   1. Run `pnpm changeset` locally to capture the bump (do this per PR).
-#   2. When you're ready to release, run `pnpm changeset version` on a
-#      release branch. This consumes `.changeset/*.md`, bumps versions,
-#      updates changelogs.
-#   3. Commit, open a "Release X.Y.Z" PR, merge.
-#   4. Tag the merge commit: `git tag v0.1.1 && git push origin v0.1.1`.
-#   5. This workflow fires on the tag and publishes to npm with
-#      provenance.
+# What it does NOT do:
+#   - It does NOT commit CHANGELOG or version bumps back to main
+#     (no `@semantic-release/git` plugin). The CHANGELOG lives on the
+#     Releases page. This keeps us off the "GitHub Actions can't
+#     create PRs or push to main" rails entirely.
+#   - It does NOT fire on branches other than main, tags, or forks.
+#
+# Required secrets:
+#   - NPM_TOKEN — an automation token for the `wifsimster` npm user
+#     with publish rights on `@wifsimster/koe`.
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
-  publish:
-    name: Publish to npm
+  release:
+    name: Release
     runs-on: ubuntu-latest
-    # Don't run in forks. Requires the NPM_TOKEN secret to exist on the
-    # main repo; the actual token check happens at publish time below.
     if: github.repository == 'wifsimster/koe'
     permissions:
-      contents: read
-      id-token: write # required for npm provenance
+      contents: write       # create tags and GitHub Releases via the API
+      issues: write         # semantic-release/github may comment on issues
+      pull-requests: write  # semantic-release/github may comment on PRs
+      id-token: write       # npm provenance (OIDC)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # semantic-release needs full history to analyze commits since
+          # the last tag.
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -67,8 +74,9 @@ jobs:
             exit 1
           fi
 
-      - name: Publish @wifsimster/koe
-        working-directory: packages/widget
+      - name: Release
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: pnpm publish --access public --no-git-checks --provenance
+        run: pnpm release
