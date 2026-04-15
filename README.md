@@ -114,6 +114,8 @@ Chaque push lance l'installation, le build et le typage. Les etapes lint et test
 - Verifier le pipeline de release avec `pnpm release:dry`.
 - La commande `pnpm test` est prevue, mais aucune suite n'est encore branchee.
 
+Les commits suivent [Conventional Commits](https://www.conventionalcommits.org/) comme `feat:` ou `fix:`. C'est ce format qui pilote les releases automatiques. Voir aussi [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ## Structure du monorepo
 
 | Package              | Role                                                    |

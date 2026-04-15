@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/semantic-release.json",
   "branches": ["main"],
+  "tagFormat": "v${version}",
   "plugins": [
     [
       "@semantic-release/commit-analyzer",
@@ -48,13 +49,6 @@
       "@semantic-release/exec",
       {
         "publishCmd": "cd packages/widget && pnpm publish --access public --no-git-checks --provenance"
-      }
-    ],
-    [
-      "@semantic-release/git",
-      {
-        "assets": ["packages/widget/package.json"],
-        "message": "chore(release): ${nextRelease.version} [skip ci]"
       }
     ],
     [
