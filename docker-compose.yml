@@ -48,7 +48,7 @@ services:
       PORT: 8787
       HOST: 0.0.0.0
       MIGRATE_ON_START: ${MIGRATE_ON_START:-true}
-      ENABLE_DASHBOARD: ${ENABLE_DASHBOARD:-false}
+      ENABLE_DASHBOARD: ${ENABLE_DASHBOARD:-true}
     ports:
       - '${KOE_API_PORT:-8787}:8787'
     healthcheck:

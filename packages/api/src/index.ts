@@ -15,9 +15,11 @@ app.use('*', logger());
 app.route('/health', healthRoutes);
 app.route('/v1/widget', widgetRoutes);
 
-// Optional admin dashboard. Opt-in because the dashboard is still a
-// placeholder and has no auth — don't expose it by accident.
-if ((process.env.ENABLE_DASHBOARD ?? 'false').toLowerCase() === 'true') {
+// Admin dashboard. Enabled by default so a fresh `docker compose up`
+// shows you the UI immediately. Operators exposing the API publicly
+// before admin auth lands should set `ENABLE_DASHBOARD=false` (or put
+// their own auth in front of `/admin/*`).
+if ((process.env.ENABLE_DASHBOARD ?? 'true').toLowerCase() === 'true') {
   app.route('/admin', createAdminRoutes());
 }
 
