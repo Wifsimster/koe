@@ -52,6 +52,7 @@ export function App() {
 Exemple minimal pour une application sans framework.
 
 ```html
+<link rel="stylesheet" href="https://cdn.koe.dev/style.css" />
 <script src="https://cdn.koe.dev/koe.iife.js"></script>
 <script>
   Koe.init({
@@ -66,6 +67,7 @@ Exemple minimal pour une application sans framework.
 
 - **Verification d'identite** : `userHash` doit venir de votre backend.
 - **Styles** : la version React attend l'import de `@wifsimster/koe/style.css`.
+- **Build autonome** : chargez aussi `style.css` en plus de `koe.iife.js`.
 - **Chat** : l'onglet existe, mais il reste local et sans temps reel.
 - **Build npm** : React est externe dans le package publie.
 - **Build autonome** : React est inclus dans `koe.iife.js`.
