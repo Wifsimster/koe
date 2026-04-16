@@ -1,73 +1,73 @@
 # Koe
 
-Koe vous permet d'ajouter un widget de support dans votre propre application SaaS. Vos utilisateurs peuvent signaler un bug, proposer une evolution et voter sur votre roadmap sans quitter votre interface.
+Koe vous permet d'ajouter un widget de support dans votre propre application SaaS. Vos utilisateurs peuvent signaler un bug, proposer une évolution et voter sur votre roadmap sans quitter votre interface.
 
-Le socle reellement exploitable aujourd'hui couvre le **widget embarquable** et l'**API publique**. Le **dashboard** existe deja, mais il reste surtout un squelette en attente de branchement.
+Le socle réellement exploitable aujourd'hui couvre le **widget embarquable** et l'**API publique**. Le **dashboard** existe déjà, mais il reste surtout un squelette en attente de branchement.
 
-## Table des matieres
+## Table des matières
 
-- [A quoi sert Koe](#a-quoi-sert-koe)
-- [Ce que vous devez deployer](#ce-que-vous-devez-deployer)
-- [Ce que vous devez preparer cote projet](#ce-que-vous-devez-preparer-cote-projet)
-- [Demarrage rapide](#demarrage-rapide)
-- [Integrer Koe dans une application React](#integrer-koe-dans-une-application-react)
-- [Integrer Koe sans framework](#integrer-koe-sans-framework)
+- [À quoi sert Koe](#à-quoi-sert-koe)
+- [Ce que vous devez déployer](#ce-que-vous-devez-déployer)
+- [Ce que vous devez préparer côté projet](#ce-que-vous-devez-préparer-côté-projet)
+- [Démarrage rapide](#démarrage-rapide)
+- [Intégrer Koe dans une application React](#intégrer-koe-dans-une-application-react)
+- [Intégrer Koe sans framework](#intégrer-koe-sans-framework)
 - [Options du widget](#options-du-widget)
-- [Verification d'identite](#verification-didentite)
-- [Parcours d'integration](#parcours-dintegration)
+- [Vérification d'identité](#vérification-didentité)
+- [Parcours d'intégration](#parcours-dintégration)
 - [Ce qui est disponible aujourd'hui](#ce-qui-est-disponible-aujourdhui)
-- [Deployer votre instance](#deployer-votre-instance)
-- [Developper ce depot](#developper-ce-depot)
+- [Déployer votre instance](#déployer-votre-instance)
+- [Développer ce dépôt](#développer-ce-dépôt)
 - [Stack technique](#stack-technique)
-- [Documentation complementaire](#documentation-complementaire)
+- [Documentation complémentaire](#documentation-complémentaire)
 - [Licence](#licence)
 
-## A quoi sert Koe
+## À quoi sert Koe
 
 - Ajouter un point de contact unique dans votre application.
-- Recevoir des bugs avec le contexte navigateur capture automatiquement.
-- Collecter des demandes d'evolution depuis la meme interface.
-- Laisser vos utilisateurs voter sur les demandes deja ouvertes.
-- Reutiliser le meme widget sur plusieurs applications via des `projectKey` differents.
+- Recevoir des bugs avec le contexte navigateur capturé automatiquement.
+- Collecter des demandes d'évolution depuis la même interface.
+- Laisser vos utilisateurs voter sur les demandes déjà ouvertes.
+- Réutiliser le même widget sur plusieurs applications via des `projectKey` différents.
 
-## Ce que vous devez deployer
+## Ce que vous devez déployer
 
-Pour utiliser Koe dans votre propre application, vous devez deployer ou consommer quatre briques.
+Pour utiliser Koe dans votre propre application, vous devez déployer ou consommer quatre briques.
 
-- **`packages/api`** : l'API Node qui recoit les bugs, les evolutions et les votes.
+- **`packages/api`** : l'API Node qui reçoit les bugs, les évolutions et les votes.
 - **PostgreSQL** : la base qui stocke les projets, tickets et votes.
-- **`@wifsimster/koe`** ou **`koe.iife.js`** : le widget a embarquer dans votre frontend.
-- **`packages/dashboard`** : optionnel pour le moment. Le back-office n'est pas encore branche sur des donnees reelles.
+- **`@wifsimster/koe`** ou **`koe.iife.js`** : le widget à embarquer dans votre frontend.
+- **`packages/dashboard`** : optionnel pour le moment. Le back-office n'est pas encore branché sur des données réelles.
 
-## Ce que vous devez preparer cote projet
+## Ce que vous devez préparer côté projet
 
-Chaque application hote doit etre rattachee a un projet Koe.
+Chaque application hôte doit être rattachée à un projet Koe.
 
-| Element                       | Obligatoire              | Role                                                        |
+| Élément                       | Obligatoire              | Rôle                                                        |
 | ----------------------------- | ------------------------ | ----------------------------------------------------------- |
 | `projectKey`                  | Oui                      | Identifie l'application qui embarque le widget.             |
-| `allowedOrigins`              | Oui en production        | Liste les domaines autorises a appeler l'API.               |
-| `identitySecret`              | Recommande               | Sert a signer `user.id` cote backend hote.                  |
-| `requireIdentityVerification` | Recommande en production | Rend `userHash` obligatoire pour accepter une contribution. |
+| `allowedOrigins`              | Oui en production        | Liste les domaines autorisés à appeler l'API.               |
+| `identitySecret`              | Recommandé               | Sert à signer `user.id` côté backend hôte.                  |
+| `requireIdentityVerification` | Recommandé en production | Rend `userHash` obligatoire pour accepter une contribution. |
 
 Points importants :
 
-- Aujourd'hui, la creation du projet se fait directement dans la table `projects`.
+- Aujourd'hui, la création du projet se fait directement dans la table `projects`.
 - Si `allowedOrigins` est vide, le projet reste permissif.
-- Si vous avez plusieurs applications ou plusieurs domaines, creez un projet par contexte d'usage.
+- Si vous avez plusieurs applications ou plusieurs domaines, créez un projet par contexte d'usage.
 - Le `projectKey` est public. Ce n'est pas un secret.
 
-## Demarrage rapide
+## Démarrage rapide
 
-1. Deployez `packages/api` et une base PostgreSQL.
-2. Creez un projet Koe avec un `projectKey`, des `allowedOrigins` et un `identitySecret`.
-3. Integrez le widget dans votre frontend avec `@wifsimster/koe` ou `koe.iife.js`.
+1. Déployez `packages/api` et une base PostgreSQL.
+2. Créez un projet Koe avec un `projectKey`, des `allowedOrigins` et un `identitySecret`.
+3. Intégrez le widget dans votre frontend avec `@wifsimster/koe` ou `koe.iife.js`.
 4. Passez un `user.id` stable pour distinguer les signalements et les votes.
-5. Generez `userHash` dans votre backend si vous activez la verification d'identite.
+5. Générez `userHash` dans votre backend si vous activez la vérification d'identité.
 
-## Integrer Koe dans une application React
+## Intégrer Koe dans une application React
 
-Le mode React est le plus simple si votre application utilise deja React.
+Le mode React est le plus simple si votre application utilise déjà React.
 
 ```tsx
 import { KoeWidget } from '@wifsimster/koe';
@@ -97,14 +97,14 @@ export function AppShell({ currentUser, koeUserHash }) {
 
 Bonnes pratiques :
 
-- Montez `KoeWidget` une seule fois, pres de la racine de votre application.
-- Importez `@wifsimster/koe/style.css`, sinon le widget ne sera pas style.
-- Renseignez `apiUrl` si vous hebergez votre propre API.
+- Montez `KoeWidget` une seule fois, près de la racine de votre application.
+- Importez `@wifsimster/koe/style.css`, sinon le widget ne sera pas stylé.
+- Renseignez `apiUrl` si vous hébergez votre propre API.
 - Fournissez un `user.id` stable. Sans cela, le widget retombe sur `anonymous`.
 
-## Integrer Koe sans framework
+## Intégrer Koe sans framework
 
-Le mode autonome convient a une application non React, a une page marketing ou a une integration via script tag.
+Le mode autonome convient à une application non React, à une page marketing ou à une intégration via script tag.
 
 ```html
 <link rel="stylesheet" href="https://cdn.votre-domaine.com/koe/style.css" />
@@ -127,19 +127,19 @@ Points importants :
 
 - Chargez **les deux assets** : `style.css` et `koe.iife.js`.
 - La build autonome expose `window.Koe` avec `init()` et `destroy()`.
-- Cette build embarque React. Vous n'avez pas besoin de React dans l'application hote.
+- Cette build embarque React. Vous n'avez pas besoin de React dans l'application hôte.
 
 ## Options du widget
 
-| Option       | Obligatoire          | Valeur par defaut     | Usage                                                    |
+| Option       | Obligatoire          | Valeur par défaut     | Usage                                                    |
 | ------------ | -------------------- | --------------------- | -------------------------------------------------------- |
 | `projectKey` | Oui                  | -                     | Rattache le widget au bon projet.                        |
-| `user`       | Non, mais recommande | `anonymous`           | Identifie le contributeur dans les tickets et les votes. |
-| `userHash`   | Selon le projet      | -                     | Prouve l'identite du contributeur.                       |
+| `user`       | Non, mais recommandé | `anonymous`           | Identifie le contributeur dans les tickets et les votes. |
+| `userHash`   | Selon le projet      | -                     | Prouve l'identité du contributeur.                       |
 | `apiUrl`     | Non                  | `https://api.koe.dev` | Pointe vers l'API Koe.                                   |
-| `position`   | Non                  | `bottom-right`        | Place le lanceur dans un coin de l'ecran.                |
-| `theme`      | Non                  | indigo, mode `auto`   | Regle couleur, mode et rayon.                            |
-| `features`   | Non                  | toutes actives        | Active ou masque les onglets bugs, evolutions et chat.   |
+| `position`   | Non                  | `bottom-right`        | Place le lanceur dans un coin de l'écran.                |
+| `theme`      | Non                  | indigo, mode `auto`   | Règle couleur, mode et rayon.                            |
+| `features`   | Non                  | toutes activées       | Active ou masque les onglets bugs, évolutions et chat.   |
 | `locale`     | Non                  | anglais               | Remplace les textes d'interface.                         |
 
 Conseils pratiques :
@@ -148,16 +148,16 @@ Conseils pratiques :
 - Passez un `user.id` stable si vous voulez un vote par utilisateur.
 - Utilisez `features.chat = false` si vous ne voulez pas exposer un onglet encore partiel.
 
-## Verification d'identite
+## Vérification d'identité
 
-La verification d'identite evite qu'un tiers usurpe un utilisateur en reutilisant seulement le `projectKey`.
+La vérification d'identité évite qu'un tiers usurpe un utilisateur en réutilisant seulement le `projectKey`.
 
 Le principe est simple :
 
-1. Votre backend genere un HMAC a partir de `user.id` et de `identitySecret`.
+1. Votre backend génère un HMAC à partir de `user.id` et de `identitySecret`.
 2. Votre frontend passe ce hash au widget via `userHash`.
-3. Le widget envoie automatiquement `X-Koe-User-Hash` a l'API.
-4. L'API recalcule le hash attendu avant d'accepter la requete.
+3. Le widget envoie automatiquement `X-Koe-User-Hash` à l'API.
+4. L'API recalcule le hash attendu avant d'accepter la requête.
 
 Exemple backend :
 
@@ -169,34 +169,34 @@ const userHash = createHmac('sha256', process.env.KOE_IDENTITY_SECRET)
   .digest('hex');
 ```
 
-A retenir :
+À retenir :
 
 - Ne construisez jamais `userHash` dans le navigateur.
 - Si `requireIdentityVerification` vaut `true`, un hash absent ou faux renvoie `401`.
 - Le `projectKey` reste public. Le vrai secret est `identitySecret`.
 
-## Parcours d'integration
+## Parcours d'intégration
 
 ```mermaid
 graph LR
-    A[Equipe produit] --> B[Projet Koe]
-    B --> C[Application hote]
+    A[Équipe produit] --> B[Projet Koe]
+    B --> C[Application hôte]
     C --> D[Widget Koe]
     D --> E[API Koe]
     E --> F[Base PostgreSQL]
 ```
 
-Vous creez d'abord un projet Koe. Votre application initialise ensuite le widget avec le bon `projectKey`. Le widget appelle l'API, qui verifie le projet, l'origine et l'identite avant de stocker les tickets.
+Vous créez d'abord un projet Koe. Votre application initialise ensuite le widget avec le bon `projectKey`. Le widget appelle l'API, qui vérifie le projet, l'origine et l'identité avant de stocker les tickets.
 
 ## Ce qui est disponible aujourd'hui
 
-- **Bugs** : fonctionnels, avec metadonnees navigateur et `screenshotUrl`.
-- **Demandes d'evolution** : fonctionnelles.
+- **Bugs** : fonctionnels, avec métadonnées navigateur et `screenshotUrl`.
+- **Demandes d'évolution** : fonctionnelles.
 - **Votes** : fonctionnels sur la roadmap publique.
-- **Chat** : onglet visible, mais conversation encore locale et sans temps reel.
-- **Dashboard** : navigation presente, mais pages encore placeholder.
+- **Chat** : onglet visible, mais conversation encore locale et sans temps réel.
+- **Dashboard** : navigation présente, mais pages encore placeholder.
 
-## Deployer votre instance
+## Déployer votre instance
 
 Commandes utiles depuis la racine du monorepo :
 
@@ -214,14 +214,14 @@ Variables minimales pour l'API :
 - `BETTER_AUTH_SECRET`
 - `BETTER_AUTH_URL`
 
-Repartition recommande pour une premiere mise en production :
+Répartition recommandée pour une première mise en production :
 
 - **API** sur Railway, Render ou Fly.io.
-- **Base PostgreSQL** sur un service manage.
-- **Widget React** consomme via npm.
+- **Base PostgreSQL** sur un service managé.
+- **Widget React** consommé via npm.
 - **Widget autonome** servi depuis votre CDN avec `style.css` et `koe.iife.js`.
 
-## Developper ce depot
+## Développer ce dépôt
 
 - `pnpm install`
 - `pnpm turbo run build`
@@ -239,16 +239,16 @@ Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour l
 - **Monorepo** : `pnpm` workspaces et Turborepo.
 - **Release** : GitHub Actions et `semantic-release` pour les tags et GitHub Releases du widget.
 
-## Documentation complementaire
+## Documentation complémentaire
 
 | Document                                                 | Description                                                                     |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [Integration du widget](docs/integration-widget.md)      | Modes React et script autonome, options de configuration et points d'attention. |
-| [Verification d'identite](docs/verification-identite.md) | Flux HMAC entre le backend hote, le widget et l'API.                            |
+| [Intégration du widget](docs/integration-widget.md)      | Modes React et script autonome, options de configuration et points d'attention. |
+| [Vérification d'identité](docs/verification-identite.md) | Flux HMAC entre le backend hôte, le widget et l'API.                            |
 | [API widget](docs/api-widget.md)                         | Routes publiques, headers requis et limites de l'API.                           |
-| [Schema de base de donnees](docs/schema-base-donnees.md) | Tables centrales, votes et elements prepares pour le chat.                      |
-| [Statut du dashboard](docs/statut-dashboard.md)          | Etat reel du back-office et parties encore placeholder.                         |
-| [Release](docs/release-npm.md)                           | Pipeline CI/CD et creation des GitHub Releases.                                 |
+| [Schéma de base de données](docs/schema-base-donnees.md) | Tables centrales, votes et éléments préparés pour le chat.                      |
+| [Statut du dashboard](docs/statut-dashboard.md)          | État réel du back-office et parties encore placeholder.                         |
+| [Release](docs/release-npm.md)                           | Pipeline CI/CD et création des GitHub Releases.                                 |
 
 ## Licence
 
