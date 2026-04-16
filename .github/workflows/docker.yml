@@ -34,7 +34,9 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/koe-api
+  # Hardcoded lowercase: GHCR rejects mixed-case refs and the GitHub
+  # owner is `Wifsimster`.
+  IMAGE_NAME: wifsimster/koe-api
 
 jobs:
   build-and-push:
