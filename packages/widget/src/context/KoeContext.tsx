@@ -23,6 +23,7 @@ export function KoeProvider({ config, children }: KoeProviderProps) {
       apiUrl: config.apiUrl ?? 'https://api.koe.dev',
       projectKey: config.projectKey,
       userHash: config.userHash,
+      identityToken: config.identityToken,
     });
     return { config, locale, api };
   }, [config]);

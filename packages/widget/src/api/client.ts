@@ -11,11 +11,23 @@ export interface KoeApiClientOptions {
   projectKey: string;
   /**
    * Opaque HMAC of the reporter id signed with the project's identity
-   * secret, provided by the host app's backend. When the project has
-   * `requireIdentityVerification` turned on this is mandatory; otherwise
-   * it's optional but recommended to get a verified tick in the admin UI.
+   * secret, provided by the host app's backend.
+   *
+   * @deprecated Prefer `identityToken` — v1 hashes have no TTL, no nonce,
+   * and no rotation story. v1 remains supported for backward
+   * compatibility with existing integrations.
    */
   userHash?: string;
+  /**
+   * Signed identity token (v2) minted by the host app's backend. Carries
+   * bound claims (`reporterId`, `projectId`, `iat`, `nonce`, `kid`) so a
+   * captured token cannot be replayed across sessions or projects, and
+   * secrets can be rotated without breaking live integrations.
+   *
+   * Sent via the `X-Koe-Identity-Token` header. Takes precedence over
+   * `userHash` when both are provided.
+   */
+  identityToken?: string;
 }
 
 /**
@@ -26,11 +38,13 @@ export class KoeApiClient {
   private readonly apiUrl: string;
   private readonly projectKey: string;
   private readonly userHash: string | undefined;
+  private readonly identityToken: string | undefined;
 
   constructor(opts: KoeApiClientOptions) {
     this.apiUrl = opts.apiUrl.replace(/\/$/, '');
     this.projectKey = opts.projectKey;
     this.userHash = opts.userHash;
+    this.identityToken = opts.identityToken;
   }
 
   async submitBugReport(input: CreateBugReportInput): Promise<BugReport> {
@@ -54,6 +68,12 @@ export class KoeApiClient {
     const res = await fetch(this.apiUrl + path, {
       method: 'GET',
       headers: this.headers(),
+      // Identity travels in explicit headers only. `omit` prevents host
+      // cookies from leaking to the Koe API and, more importantly, keeps
+      // host fetch wrappers (Sentry, Datadog RUM) that inspect
+      // credentialed requests from recording the identity header in
+      // breadcrumbs.
+      credentials: 'omit',
     });
     return this.unwrap<T>(res);
   }
@@ -63,6 +83,7 @@ export class KoeApiClient {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify(body),
+      credentials: 'omit',
     });
     return this.unwrap<T>(res);
   }
@@ -72,7 +93,13 @@ export class KoeApiClient {
       'Content-Type': 'application/json',
       'X-Koe-Project-Key': this.projectKey,
     };
-    if (this.userHash) headers['X-Koe-User-Hash'] = this.userHash;
+    // v2 identity token takes precedence. Sending both is redundant and
+    // risks confusing host-side ops, so we pick one.
+    if (this.identityToken) {
+      headers['X-Koe-Identity-Token'] = this.identityToken;
+    } else if (this.userHash) {
+      headers['X-Koe-User-Hash'] = this.userHash;
+    }
     return headers;
   }
 

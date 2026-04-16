@@ -21,6 +21,28 @@ export const ticketStatusEnum = pgEnum('ticket_status', [
 ]);
 export const ticketPriorityEnum = pgEnum('ticket_priority', ['low', 'medium', 'high', 'critical']);
 
+/**
+ * Lifecycle of a project identity secret. `active` accepts signatures;
+ * `retiring` still verifies (grace window during rotation) but is never
+ * handed out to new integrators; `revoked` is rejected.
+ */
+export const identitySecretStatusEnum = pgEnum('identity_secret_status', [
+  'active',
+  'retiring',
+  'revoked',
+]);
+
+/**
+ * Dashboard roles. Only `owner` is populated today — `member` and `viewer`
+ * exist so we don't rewrite every admin query the day a customer asks for
+ * a second seat. Wiring happens in the admin surface MR.
+ */
+export const projectMemberRoleEnum = pgEnum('project_member_role', [
+  'owner',
+  'member',
+  'viewer',
+]);
+
 export const projects = pgTable('projects', {
   id: uuid('id').defaultRandom().primaryKey(),
   key: text('key').notNull().unique(),
@@ -28,9 +50,14 @@ export const projects = pgTable('projects', {
   accentColor: text('accent_color').notNull().default('#4f46e5'),
   allowedOrigins: jsonb('allowed_origins').$type<string[]>().notNull().default([]),
   /**
-   * Per-project HMAC secret used to verify reporter identity hashes
-   * supplied by the host app. Never expose this to the browser — it lives
-   * on the host app's backend.
+   * Legacy per-project HMAC secret used to verify `X-Koe-User-Hash`
+   * (reporter-id-only hash). Kept for backward compatibility with
+   * integrations that signed under the v1 scheme. New integrations should
+   * use signed identity tokens (see `projectIdentitySecrets`) which bind
+   * the signature to `iat`, `nonce`, and `kid` — enabling TTL and
+   * non-breaking rotation.
+   *
+   * @deprecated Prefer signed identity tokens via `projectIdentitySecrets`.
    */
   identitySecret: text('identity_secret').notNull(),
   /**
@@ -117,9 +144,70 @@ export const messages = pgTable('messages', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+/**
+ * Versioned HMAC secrets per project. Multiple `active` rows are allowed
+ * during a rotation window — the verifier tries each active secret keyed
+ * by the `kid` the token carries. Host apps include the `kid` they used
+ * to sign, so flipping the default is a non-breaking operation.
+ *
+ * Composite PK (projectId, kid) keeps lookups index-only and prevents
+ * accidental duplicate kids within a project.
+ */
+export const projectIdentitySecrets = pgTable(
+  'project_identity_secrets',
+  {
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    kid: text('kid').notNull(),
+    secret: text('secret').notNull(),
+    status: identitySecretStatusEnum('status').notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.projectId, t.kid] }),
+  }),
+);
+
+/**
+ * Dashboard membership. Composite PK (projectId, userId) ensures a single
+ * role per user per project. The `role` column is the authorization
+ * decision — admin routes must check it, never the session alone.
+ */
+export const projectMembers = pgTable(
+  'project_members',
+  {
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    role: projectMemberRoleEnum('role').notNull().default('owner'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.projectId, t.userId] }),
+  }),
+);
+
 export const projectsRelations = relations(projects, ({ many }) => ({
   tickets: many(tickets),
   conversations: many(conversations),
+  identitySecrets: many(projectIdentitySecrets),
+  members: many(projectMembers),
+}));
+
+export const projectIdentitySecretsRelations = relations(projectIdentitySecrets, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectIdentitySecrets.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const projectMembersRelations = relations(projectMembers, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectMembers.projectId],
+    references: [projects.id],
+  }),
 }));
 
 export const ticketsRelations = relations(tickets, ({ one, many }) => ({
