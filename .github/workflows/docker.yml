@@ -131,7 +131,7 @@ jobs:
 
     steps:
       - name: Run Trivy against the freshly pushed image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name == 'main' && 'edge' || github.ref_name }}
           format: sarif
