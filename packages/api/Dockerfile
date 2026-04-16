@@ -21,18 +21,28 @@ RUN corepack enable
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json ./
 COPY packages/api/package.json packages/api/
 COPY packages/shared/package.json packages/shared/
+COPY packages/dashboard/package.json packages/dashboard/
 
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile \
-      --filter @koe/api... --filter @koe/shared
+      --filter @koe/api... \
+      --filter @koe/shared \
+      --filter @koe/dashboard
 
 # Copy source.
 COPY packages/shared packages/shared
 COPY packages/api packages/api
+COPY packages/dashboard packages/dashboard
 
 # Build @koe/shared first (the API bundle inlines it, but its tsc output
 # is still used for type resolution in dev/testing).
 RUN pnpm --filter @koe/shared run build
+
+# Build the dashboard SPA with a `/admin/` base path so asset URLs
+# resolve correctly when served from the API under `/admin/*`. The
+# output is copied into the runtime image and only served when the
+# operator sets `ENABLE_DASHBOARD=true`.
+RUN pnpm --filter @koe/dashboard exec vite build --base=/admin/
 
 # Generate SQL migrations from the Drizzle schema. Produces
 # `packages/api/drizzle/*.sql` + `drizzle/meta/_journal.json` that the
@@ -68,6 +78,7 @@ COPY --from=builder --chown=koe:koe /app/package.json ./package.json
 COPY --from=builder --chown=koe:koe /app/node_modules ./node_modules
 COPY --from=builder --chown=koe:koe /repo/packages/api/dist ./dist
 COPY --from=builder --chown=koe:koe /repo/packages/api/drizzle ./drizzle
+COPY --from=builder --chown=koe:koe /repo/packages/dashboard/dist ./dashboard
 
 USER koe
 

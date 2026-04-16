@@ -115,8 +115,26 @@ docker run --rm -p 8787:8787 \
 | `PORT`               | Non         | Port d'écoute HTTP. Par défaut `8787`.                                         |
 | `HOST`               | Non         | Interface d'écoute. Par défaut `0.0.0.0`.                                      |
 | `MIGRATE_ON_START`   | Non         | `true` (défaut) applique les migrations au boot. `false` en multi-réplicas.    |
+| `ENABLE_DASHBOARD`   | Non         | `true` expose le dashboard admin à `/admin/`. Désactivé par défaut.            |
 | `BETTER_AUTH_SECRET` | Réservée    | Prévue pour l'intégration future de `better-auth`. Non utilisée aujourd'hui.   |
 | `BETTER_AUTH_URL`    | Réservée    | Prévue pour l'intégration future de `better-auth`. Non utilisée aujourd'hui.   |
+
+### Dashboard admin (optionnel)
+
+Le dashboard est **embarqué dans l'image** mais **désactivé par défaut**. Pour l'activer, passez `ENABLE_DASHBOARD=true` à l'API. Il sera servi sur `/admin/` depuis la même origine que l'API :
+
+```bash
+# dans .env
+ENABLE_DASHBOARD=true
+```
+
+Puis ouvrez `http://localhost:8787/admin/`.
+
+Points d'attention :
+
+- Le dashboard est encore **un squelette** : la navigation fonctionne, mais les pages affichent des placeholders tant que l'API d'administration n'est pas branchée.
+- Il n'y a **pas encore d'authentification**. N'exposez pas `/admin/` sur Internet en production avant le câblage de `better-auth`. Pour un usage self-host sur votre réseau interne ou derrière un reverse-proxy avec auth, c'est exploitable.
+- Désactiver le flag suffit à retirer toutes les routes `/admin/*` (elles répondent `404` dans l'enveloppe JSON commune).
 
 ### Créer un projet
 
@@ -285,7 +303,7 @@ const userHash = createHmac('sha256', process.env.KOE_IDENTITY_SECRET)
 - **Demandes d'évolution** : fonctionnelles.
 - **Votes** : fonctionnels sur la roadmap publique.
 - **Chat** : onglet visible, mais conversation encore locale et sans temps réel.
-- **Dashboard** : navigation présente, mais pages encore placeholder. L'API d'administration n'est pas branchée.
+- **Dashboard** : navigation présente, mais pages encore placeholder. L'API d'administration n'est pas branchée. Embarqué dans l'image Docker et servi à `/admin/` quand `ENABLE_DASHBOARD=true` (opt-in, sans auth).
 - **`better-auth`** : prévu mais non câblé aujourd'hui.
 
 ## Développer ce dépôt

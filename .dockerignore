@@ -24,9 +24,11 @@
 **/.next
 **/.vite
 
-# Dashboard & widget: not part of the API image. Drop aggressively to
-# keep the build context small.
-packages/dashboard
+# Widget is never shipped inside the API image. The dashboard IS shipped
+# (served at /admin/* when ENABLE_DASHBOARD=true), so only exclude its
+# prebuilt dist — the Dockerfile runs `vite build` fresh.
+packages/dashboard/dist
+packages/widget
 packages/widget/dist
 
 # Logs, pnpm-store, misc.
