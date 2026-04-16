@@ -10,7 +10,7 @@
     "start": "node dist/serve.js",
     "migrate": "node dist/migrate.js",
     "bootstrap": "node dist/bootstrap.js",
-    "test": "node --import tsx --test src/lib/*.test.ts",
+    "test": "node --import tsx --test src/lib/*.test.ts src/middleware/*.test.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

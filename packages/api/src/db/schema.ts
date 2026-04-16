@@ -68,6 +68,18 @@ export const projects = pgTable('projects', {
   requireIdentityVerification: boolean('require_identity_verification')
     .notNull()
     .default(false),
+  /**
+   * Widget heartbeat. Stamped by the project-resolution middleware on
+   * every widget request so the dashboard can show
+   * "Last ping from yoursite.com, 3 min ago" on the empty state —
+   * which is what lets an operator tell whether the <script> tag is
+   * actually loading on their site.
+   *
+   * Non-indexed on purpose: we never query `WHERE last_ping_at > …`,
+   * only read it on a single-project lookup.
+   */
+  lastPingAt: timestamp('last_ping_at', { withTimezone: true }),
+  lastPingOrigin: text('last_ping_origin'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -237,5 +249,47 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.id],
+  }),
+}));
+
+/**
+ * Dashboard identity. Global per-human, not per-project — membership is
+ * carried by `projectMembers`. This is Koe's own user table (operators
+ * of the product), totally separate from widget `reporterId`.
+ */
+export const adminUsers = pgTable('admin_users', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: text('email').notNull().unique(),
+  displayName: text('display_name'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * Session tokens for dashboard users. Stored as SHA-256 of the raw
+ * token (see `adminAuth.hashSessionToken`), so a DB dump does not
+ * leak active credentials. The raw token lives only in the client's
+ * storage; the server never keeps it after the create call returns.
+ *
+ * `id` is separate from the token hash so we can invalidate a specific
+ * session without re-hashing, and list sessions per-user.
+ */
+export const adminSessions = pgTable('admin_sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => adminUsers.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const adminUsersRelations = relations(adminUsers, ({ many }) => ({
+  sessions: many(adminSessions),
+}));
+
+export const adminSessionsRelations = relations(adminSessions, ({ one }) => ({
+  user: one(adminUsers, {
+    fields: [adminSessions.userId],
+    references: [adminUsers.id],
   }),
 }));

@@ -8,6 +8,13 @@
       "when": 1776363618095,
       "tag": "0000_easy_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776364724653,
+      "tag": "0001_burly_loki",
+      "breakpoints": true
     }
   ]
 }
