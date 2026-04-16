@@ -20,7 +20,7 @@ RUN npm install -g corepack@latest && corepack enable
 
 # Copy workspace manifests first so layer caching holds across source
 # edits.
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
 COPY packages/api/package.json packages/api/
 COPY packages/shared/package.json packages/shared/
 COPY packages/dashboard/package.json packages/dashboard/
