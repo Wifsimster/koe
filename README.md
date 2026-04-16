@@ -230,14 +230,14 @@ Repartition recommande pour une premiere mise en production :
 - `pnpm turbo run lint`
 - `pnpm turbo run test`
 
-Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour le format attendu et le lien avec la release npm.
+Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour le format attendu et le lien avec la release.
 
 ## Stack technique
 
 - **Widget** : React 19, TypeScript, Vite, Tailwind CSS.
 - **API** : Hono, Zod, Drizzle ORM, PostgreSQL.
 - **Monorepo** : `pnpm` workspaces et Turborepo.
-- **Release** : GitHub Actions, Changesets et publication npm du package `@wifsimster/koe`.
+- **Release** : GitHub Actions et `semantic-release` pour les tags et GitHub Releases du widget.
 
 ## Documentation complementaire
 
@@ -248,7 +248,7 @@ Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour l
 | [API widget](docs/api-widget.md)                         | Routes publiques, headers requis et limites de l'API.                           |
 | [Schema de base de donnees](docs/schema-base-donnees.md) | Tables centrales, votes et elements prepares pour le chat.                      |
 | [Statut du dashboard](docs/statut-dashboard.md)          | Etat reel du back-office et parties encore placeholder.                         |
-| [Release npm](docs/release-npm.md)                       | Pipeline CI/CD et publication du package public.                                |
+| [Release](docs/release-npm.md)                           | Pipeline CI/CD et creation des GitHub Releases.                                 |
 
 ## Licence
 

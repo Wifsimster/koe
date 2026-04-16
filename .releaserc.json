@@ -39,19 +39,6 @@
       }
     ],
     [
-      "@semantic-release/npm",
-      {
-        "pkgRoot": "packages/widget",
-        "npmPublish": false
-      }
-    ],
-    [
-      "@semantic-release/exec",
-      {
-        "publishCmd": "cd packages/widget && pnpm publish --access public --no-git-checks --provenance"
-      }
-    ],
-    [
       "@semantic-release/github",
       {
         "successComment": false,
