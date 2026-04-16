@@ -13,8 +13,10 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /repo
 
 # corepack ships with Node 20 and resolves the pnpm version from the
-# workspace's `packageManager` field.
-RUN corepack enable
+# workspace's `packageManager` field. The bundled corepack in older
+# Node 20 patch releases can't verify pnpm's current signing key
+# ("Cannot find matching keyid"), so pull the latest corepack first.
+RUN npm install -g corepack@latest && corepack enable
 
 # Copy workspace manifests first so layer caching holds across source
 # edits.
