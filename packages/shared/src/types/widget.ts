@@ -21,10 +21,21 @@ export interface WidgetConfig {
   /**
    * Opaque HMAC of `user.id` produced by your backend using the
    * project's identity secret (`hex(HMAC-SHA256(secret, user.id))`).
-   * Required when the project has identity verification turned on.
-   * See: https://github.com/wifsimster/koe/blob/main/docs/identity.md
+   *
+   * @deprecated Prefer `identityToken`. Legacy v1 hashes have no TTL,
+   * no nonce, and no rotation story — a captured hash is valid forever.
+   * Existing integrations continue to work unchanged.
    */
   userHash?: string;
+  /**
+   * Signed identity token (v2) minted by your backend. Binds the
+   * signature to `iat`, `nonce`, `projectId`, and `kid` so a captured
+   * token cannot be replayed across sessions, projects, or forever, and
+   * secrets can be rotated without breaking live integrations.
+   * Required when the project has identity verification turned on
+   * (takes precedence over `userHash` when both are set).
+   */
+  identityToken?: string;
   /** API base URL. Defaults to https://api.koe.dev */
   apiUrl?: string;
   position?: WidgetPosition;

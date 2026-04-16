@@ -104,7 +104,7 @@ widgetRoutes.post('/bugs', async (c) => {
   const input = parsed.data;
   const project = c.get('project');
 
-  const verdict = c.get('verifyReporter')(input.reporter.id);
+  const verdict = await c.get('verifyReporter')(input.reporter.id);
   if (!verdict.ok) return fail(c, 'unauthorized', verdict.reason, 401);
 
   const row = firstOrThrow(
@@ -142,7 +142,7 @@ widgetRoutes.post('/features', async (c) => {
   const input = parsed.data;
   const project = c.get('project');
 
-  const verdict = c.get('verifyReporter')(input.reporter.id);
+  const verdict = await c.get('verifyReporter')(input.reporter.id);
   if (!verdict.ok) return fail(c, 'unauthorized', verdict.reason, 401);
 
   const row = firstOrThrow(
@@ -211,7 +211,7 @@ widgetRoutes.post('/features/:id/vote', async (c) => {
   }
   const { userId } = parsed.data;
 
-  const verdict = c.get('verifyReporter')(userId);
+  const verdict = await c.get('verifyReporter')(userId);
   if (!verdict.ok) return fail(c, 'unauthorized', verdict.reason, 401);
 
   const [ticket] = await db

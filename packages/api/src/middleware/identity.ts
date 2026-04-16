@@ -1,13 +1,25 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { MiddlewareHandler } from 'hono';
+import { eq } from 'drizzle-orm';
+import { db, dbAvailable, schema } from '../db';
+import {
+  createInMemoryNonceCache,
+  verifyIdentityToken,
+  type IdentitySecret,
+  type NonceCache,
+} from '../lib/identityToken';
 import type { ProjectContext } from './project';
 
 /**
- * Computes the canonical identity hash for a `(reporterId, projectSecret)`
- * pair. Exported so host apps can mirror the same algorithm on their
- * backend and hand the widget an opaque token at page-load time.
+ * Computes the legacy identity hash. Kept exported so host apps that
+ * already integrated against v1 do not need to change anything.
  *
- * Algorithm: `hex(HMAC-SHA256(identitySecret, reporterId))`.
+ * v1 algorithm: `hex(HMAC-SHA256(identitySecret, reporterId))` transported
+ * via header `X-Koe-User-Hash`.
+ *
+ * @deprecated New integrations should sign an identity token instead —
+ * see `packages/api/src/lib/identityToken.ts`. v1 tokens have no TTL,
+ * no nonce, and no rotation story, so a leaked hash is valid forever.
  */
 export function computeUserHash(reporterId: string, identitySecret: string): string {
   return createHmac('sha256', identitySecret).update(reporterId).digest('hex');
@@ -23,43 +35,95 @@ function constantTimeEquals(a: string, b: string): boolean {
 }
 
 /**
- * Verifies the `X-Koe-User-Hash` header against the project's HMAC
- * secret for the supplied reporter id.
+ * Verifies an identity header against the project's secrets.
  *
  * Behaviour:
- * - If `project.requireIdentityVerification` is true, a valid hash is
- *   mandatory. Missing or mismatched → 401.
- * - If false, the hash is verified when present (so verified reporters
- *   get `reporterVerified: true`) but is not required — letting dev
- *   projects work without a server-side signer.
- *
- * The reporter id is read from the request body after verification so
- * this middleware does not have to consume and re-emit the stream.
- * Instead we expose a `verifyReporter` helper the route calls once it
- * has the parsed body.
+ * - If `X-Koe-Identity-Token` is present, use the v2 scheme: the token's
+ *   bound claims (`projectId`, `reporterId`, `iat`, `nonce`, `kid`) are
+ *   checked against the project's active/retiring secrets. No silent
+ *   downgrade to v1 — a malformed v2 token fails the request.
+ * - Else if `X-Koe-User-Hash` is present, use the legacy v1 scheme for
+ *   backward compatibility with existing integrations.
+ * - Else, `project.requireIdentityVerification` decides: true → 401,
+ *   false → `{verified: false}`.
  */
 export type VerifyReporterFn = (
   reporterId: string,
-) => { ok: true; verified: boolean } | { ok: false; reason: string };
+) => Promise<{ ok: true; verified: boolean } | { ok: false; reason: string }>;
+
+/**
+ * Process-wide nonce cache. One cache covers all projects because nonces
+ * are keyed by `kid:nonce` inside the verifier and kids are per-project
+ * by design — collisions across projects are statistically impossible in
+ * practice. Swap for a shared Redis cache when we run more than one API
+ * replica (tracked for the infra MR).
+ */
+const nonceCache: NonceCache = createInMemoryNonceCache();
+
+/** Max age accepted for a v2 token. Matches the 10-minute window the
+ * meeting settled on — short enough to constrain replay, long enough to
+ * tolerate clock drift and the time between page-load and submit. */
+const V2_MAX_AGE_SECONDS = 600;
+
+async function loadActiveSecrets(projectId: string): Promise<Map<string, IdentitySecret>> {
+  if (!dbAvailable) return new Map();
+  const rows = await db
+    .select()
+    .from(schema.projectIdentitySecrets)
+    .where(eq(schema.projectIdentitySecrets.projectId, projectId));
+
+  const map = new Map<string, IdentitySecret>();
+  for (const r of rows) {
+    map.set(r.kid, { kid: r.kid, secret: r.secret, status: r.status });
+  }
+  return map;
+}
 
 export const attachVerifier: MiddlewareHandler<{
   Variables: ProjectContext & { verifyReporter: VerifyReporterFn };
 }> = async (c, next) => {
   const project = c.get('project');
+  const suppliedToken = c.req.header('X-Koe-Identity-Token') ?? null;
   const suppliedHash = c.req.header('X-Koe-User-Hash') ?? null;
 
-  const verify: VerifyReporterFn = (reporterId) => {
-    if (!suppliedHash) {
-      if (project.requireIdentityVerification) {
-        return { ok: false, reason: 'Missing X-Koe-User-Hash header' };
+  // Memoise the secret lookup so a single request does at most one DB
+  // hit, even if the route calls `verifyReporter` several times.
+  let secretsPromise: Promise<Map<string, IdentitySecret>> | null = null;
+  const getSecrets = () => {
+    if (!secretsPromise) secretsPromise = loadActiveSecrets(project.id);
+    return secretsPromise;
+  };
+
+  const verify: VerifyReporterFn = async (reporterId) => {
+    if (suppliedToken !== null) {
+      const secrets = await getSecrets();
+      const result = verifyIdentityToken(suppliedToken, secrets, {
+        maxAgeSeconds: V2_MAX_AGE_SECONDS,
+        expectedProjectId: project.id,
+        expectedReporterId: reporterId,
+        nonces: nonceCache,
+      });
+      if (!result.ok) {
+        return { ok: false, reason: `Identity token rejected: ${result.reason}` };
       }
-      return { ok: true, verified: false };
+      return { ok: true, verified: true };
     }
-    const expected = computeUserHash(reporterId, project.identitySecret);
-    if (!constantTimeEquals(expected, suppliedHash)) {
-      return { ok: false, reason: 'Identity hash mismatch' };
+
+    if (suppliedHash !== null) {
+      const expected = computeUserHash(reporterId, project.identitySecret);
+      if (!constantTimeEquals(expected, suppliedHash)) {
+        return { ok: false, reason: 'Identity hash mismatch' };
+      }
+      return { ok: true, verified: true };
     }
-    return { ok: true, verified: true };
+
+    if (project.requireIdentityVerification) {
+      return {
+        ok: false,
+        reason: 'Missing X-Koe-Identity-Token or X-Koe-User-Hash header',
+      };
+    }
+    return { ok: true, verified: false };
   };
 
   c.set('verifyReporter', verify);

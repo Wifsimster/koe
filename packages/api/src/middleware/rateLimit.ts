@@ -1,51 +1,95 @@
 import type { MiddlewareHandler } from 'hono';
 import { fail } from '../lib/response';
 
+export interface RateLimiterConfig {
+  /** Tokens added per second. */
+  refillPerSecond: number;
+  /** Maximum burst size. */
+  capacity: number;
+}
+
+export type RateLimitDecision =
+  | { allowed: true }
+  | { allowed: false; retryAfter: number };
+
+/**
+ * Pluggable rate limiter port. The widget CORS path uses the in-memory
+ * adapter today; the infra MR swaps in a Redis adapter (sliding window,
+ * keyed on projectId+ip+reporterId) without touching middleware call
+ * sites. `consume` is async so adapters that make network calls fit
+ * without refactoring.
+ */
+export interface RateLimiter {
+  consume(key: string, cost?: number): Promise<RateLimitDecision>;
+}
+
 interface Bucket {
   tokens: number;
   lastRefill: number;
 }
 
-export interface RateLimitOptions {
-  /** Tokens added per second. */
-  refillPerSecond: number;
-  /** Maximum burst size. */
-  capacity: number;
+/**
+ * In-memory token bucket. State never expires — that's fine because keys
+ * are bounded (project_id + ip). Per-replica only; the moment we add a
+ * second API pod, swap for Redis in the infra MR.
+ */
+export function createInMemoryRateLimiter(config: RateLimiterConfig): RateLimiter {
+  const buckets = new Map<string, Bucket>();
+
+  return {
+    async consume(key, cost = 1) {
+      const now = Date.now();
+      let bucket = buckets.get(key);
+
+      if (!bucket) {
+        bucket = { tokens: config.capacity, lastRefill: now };
+        buckets.set(key, bucket);
+      } else {
+        const elapsedSec = (now - bucket.lastRefill) / 1000;
+        bucket.tokens = Math.min(
+          config.capacity,
+          bucket.tokens + elapsedSec * config.refillPerSecond,
+        );
+        bucket.lastRefill = now;
+      }
+
+      if (bucket.tokens < cost) {
+        const retryAfter = Math.ceil((cost - bucket.tokens) / config.refillPerSecond);
+        return { allowed: false, retryAfter };
+      }
+
+      bucket.tokens -= cost;
+      return { allowed: true };
+    },
+  };
+}
+
+export interface RateLimitOptions extends RateLimiterConfig {
   /** Extract the key to bucket on. Called per request. */
   key: (c: Parameters<MiddlewareHandler>[0]) => string;
+  /**
+   * Override the limiter implementation. Defaults to a fresh in-memory
+   * limiter seeded with `refillPerSecond`/`capacity`. Provide a shared
+   * instance (or a Redis-backed adapter) to let multiple routes share
+   * buckets or survive process restarts.
+   */
+  limiter?: RateLimiter;
 }
 
 /**
- * Simple in-memory token bucket. Good enough for a single-instance dev
- * deployment; swap for Redis or Durable Objects before running multiple
- * API replicas. Per-key state never expires — that's fine because the
- * key is always bounded (project_id + ip) but you should set up a
- * periodic sweep if this runs for months at a time.
+ * Rate-limit middleware. Preserves the original call shape so existing
+ * routes don't need to change; the underlying limiter is now
+ * swappable via `opts.limiter`.
  */
 export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
-  const buckets = new Map<string, Bucket>();
+  const limiter = opts.limiter ?? createInMemoryRateLimiter(opts);
 
   return async (c, next) => {
-    const now = Date.now();
-    const id = opts.key(c);
-    let bucket = buckets.get(id);
-
-    if (!bucket) {
-      bucket = { tokens: opts.capacity, lastRefill: now };
-      buckets.set(id, bucket);
-    } else {
-      const elapsedSec = (now - bucket.lastRefill) / 1000;
-      bucket.tokens = Math.min(opts.capacity, bucket.tokens + elapsedSec * opts.refillPerSecond);
-      bucket.lastRefill = now;
-    }
-
-    if (bucket.tokens < 1) {
-      const retryAfter = Math.ceil((1 - bucket.tokens) / opts.refillPerSecond);
-      c.header('Retry-After', String(retryAfter));
+    const decision = await limiter.consume(opts.key(c));
+    if (!decision.allowed) {
+      c.header('Retry-After', String(decision.retryAfter));
       return fail(c, 'rate_limited', 'Too many requests', 429);
     }
-
-    bucket.tokens -= 1;
     await next();
   };
 }
