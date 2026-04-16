@@ -21,4 +21,9 @@ export default defineConfig({
   // Keep runtime deps external; they're installed via the production
   // `package.json` in the image. Only inline workspace packages.
   noExternal: [/^@koe\//],
+  // Each bin file has its own top-level `if (import.meta.url === …)` CLI
+  // block. If tsup inlined one into another (e.g. migrate into serve),
+  // that guard would match and the wrong CLI block would fire at boot.
+  // Keep sibling bin entries resolved at runtime via relative ESM import.
+  external: ['./migrate.js', './bootstrap.js', './serve.js'],
 });
