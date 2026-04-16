@@ -48,6 +48,11 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    outputs:
+      # Expose the pushed manifest digest to downstream jobs so the
+      # security scan targets the exact artifact signed above, not a
+      # mutable tag that might drift between jobs.
+      digest: ${{ steps.build.outputs.digest }}
 
     steps:
       - name: Checkout
@@ -133,7 +138,10 @@ jobs:
       - name: Run Trivy against the freshly pushed image
         uses: aquasecurity/trivy-action@0.35.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name == 'main' && 'edge' || github.ref_name }}
+          # Scan the digest, not a tag. Tags are mutable and can race with
+          # concurrent builds (or a re-cut `api-v*`), which would leave the
+          # signed/attested digest and the scanned digest out of sync.
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}
           format: sarif
           output: trivy.sarif
           exit-code: '1'

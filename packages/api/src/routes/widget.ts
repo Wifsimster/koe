@@ -95,7 +95,7 @@ widgetRoutes.use(
     limiter: widgetRateLimiter,
     key: (c) => {
       const key = c.req.header('X-Koe-Project-Key') ?? 'unknown';
-      const ip = clientIp(c.req.raw);
+      const ip = clientIp(c);
       return `${key}:${ip}`;
     },
   }),

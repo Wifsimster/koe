@@ -1,4 +1,5 @@
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { fail } from '../lib/response';
 import { getRedisFromEnv } from '../lib/redis';
 
@@ -213,11 +214,35 @@ export function createRateLimiterFromEnv(config: RateLimiterConfig & { prefix?: 
   return createInMemoryRateLimiter(config);
 }
 
-/** Extracts the best-effort client IP from common proxy headers. */
-export function clientIp(req: Request): string {
-  const forwarded = req.headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0]!.trim();
-  const real = req.headers.get('x-real-ip');
-  if (real) return real.trim();
+/**
+ * Extracts the client IP for rate-limit keying.
+ *
+ * Proxy headers (`X-Forwarded-For`, `X-Real-IP`) are **only** honored when
+ * the operator explicitly opts in with `TRUST_PROXY_HEADERS=true`. A
+ * direct-to-internet deployment that trusted them unconditionally would
+ * let any client rotate the header to get a fresh bucket on every
+ * request — defeating the limiter. When untrusted, we read the socket
+ * remote address via `@hono/node-server`'s conninfo helper, which cannot
+ * be spoofed by the client.
+ */
+export function clientIp(c: Context): string {
+  if (proxyHeadersTrusted()) {
+    const forwarded = c.req.header('x-forwarded-for');
+    if (forwarded) return forwarded.split(',')[0]!.trim();
+    const real = c.req.header('x-real-ip');
+    if (real) return real.trim();
+  }
+  try {
+    const info = getConnInfo(c);
+    const remote = info.remote?.address;
+    if (remote) return remote;
+  } catch {
+    // conninfo isn't available on non-node runtimes (tests, edge); fall
+    // through to the sentinel below.
+  }
   return 'unknown';
+}
+
+function proxyHeadersTrusted(): boolean {
+  return (process.env.TRUST_PROXY_HEADERS ?? 'false').toLowerCase() === 'true';
 }
