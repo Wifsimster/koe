@@ -83,9 +83,26 @@ export class AdminApiError extends Error {
 
 export interface AdminApiClientOptions {
   baseUrl: string;
-  /** Provider so we always read the current token — tokens can rotate
-   *  at runtime without recreating the client. */
-  getToken: () => string | null;
+  /**
+   * Optional fallback token. Used when the dashboard runs in
+   * dev-session mode (the paste-from-CLI flow). In OIDC mode the
+   * browser carries the session in a same-origin cookie and this
+   * stays null — `credentials: 'include'` on every request lets the
+   * cookie travel without explicit wiring.
+   */
+  getToken?: () => string | null;
+  /**
+   * Kick-off URL for the OIDC login flow (`/v1/admin/auth/login`).
+   * When set, a 401 response triggers a full-page redirect to this
+   * URL with a `redirect_to` param so the user lands back where they
+   * were after signing in.
+   */
+  loginUrl?: string;
+  /**
+   * POST target that invalidates the server-side session and clears
+   * the session cookie. Called by `logout()` in `AuthContext`.
+   */
+  logoutUrl?: string;
 }
 
 export class AdminApiClient {
@@ -110,9 +127,35 @@ export class AdminApiClient {
     );
   }
 
+  /**
+   * Full-page redirect to the OIDC login URL if configured, else
+   * no-op. Called after a 401 on any call.
+   */
+  redirectToLogin(returnTo?: string): void {
+    if (!this.opts.loginUrl) return;
+    const target = new URL(this.opts.loginUrl, window.location.origin);
+    if (returnTo) target.searchParams.set('redirect_to', returnTo);
+    window.location.assign(target.toString());
+  }
+
+  async logout(): Promise<void> {
+    if (!this.opts.logoutUrl) return;
+    await fetch(new URL(this.opts.logoutUrl, this.opts.baseUrl).toString(), {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => {
+      // Logout must not throw — even if the server call fails, the
+      // client-side state is cleared by the caller.
+    });
+  }
+
   private async get<T>(path: string): Promise<T> {
-    const token = this.opts.getToken();
+    const token = this.opts.getToken?.() ?? null;
     const res = await fetch(this.opts.baseUrl + path, {
+      // `include` sends cross-origin cookies when the API and
+      // dashboard are on different origins. For same-origin deploys
+      // it's a no-op but harmless.
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

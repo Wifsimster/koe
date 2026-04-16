@@ -42,7 +42,7 @@ export function AppShell({
       </div>
       <button
         type="button"
-        onClick={logout}
+        onClick={() => void logout()}
         className="mx-3 mt-1 text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-100"
       >
         Sign out

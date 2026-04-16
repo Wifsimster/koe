@@ -1,8 +1,19 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { MiddlewareHandler } from 'hono';
+import { getCookie } from 'hono/cookie';
 import { and, eq, gt } from 'drizzle-orm';
 import { db, dbAvailable, schema } from '../db';
 import { fail } from '../lib/response';
+
+/**
+ * Name of the session cookie set by the OIDC callback. Read here so
+ * the middleware can accept cookie-based browser sessions alongside
+ * the bearer-token CLI flow. Kept as a module-level constant rather
+ * than injected — both values are process-wide and the middleware
+ * must stay a plain `MiddlewareHandler` so existing call sites don't
+ * change.
+ */
+const SESSION_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE ?? 'koe_admin';
 
 /**
  * Admin authentication.
@@ -14,16 +25,19 @@ import { fail } from '../lib/response';
  * how a widget bug escalates into an admin-side compromise — see the
  * meeting analysis for why we kept them siblings.
  *
- * Today this is a bearer-token session scheme:
- *   - Session tokens are 32 random bytes, encoded base64url.
- *   - Only the SHA-256 hash is persisted (`admin_sessions.token_hash`),
- *     so a DB dump does not leak any usable credential.
- *   - Raw token travels only in `Authorization: Bearer <token>`, over
- *     HTTPS, to the admin API.
+ * Session transport: either `Authorization: Bearer <token>` (the dev
+ * CLI path) or a plain session cookie set by the OIDC callback. The
+ * value is the same 32-byte base64url token in both cases — the
+ * server hashes with SHA-256 and looks up. Only the hash persists in
+ * the DB, so a dump leaks no usable credential.
  *
- * OIDC integration arrives in a later MR — the contract here (a
- * session-validator that returns a user) is the seam the provider
- * callback will plug into.
+ * The session cookie is not signed. It doesn't need to be: the value
+ * is already cryptographically unguessable, and the middleware
+ * verifies it against the stored hash. Signing would add overhead
+ * without adding protection against any realistic attacker model.
+ * (The transient OIDC state cookie during the login dance IS signed
+ * — see `routes/oidcAuth.ts`. There the cookie carries unpredictable
+ * secrets the attacker must not forge.)
  */
 
 export interface AdminUser {
@@ -81,7 +95,10 @@ export const requireAdminSession: MiddlewareHandler<{ Variables: AdminContext }>
     return fail(c, 'internal_error', 'Database is not configured', 500);
   }
 
-  const raw = extractBearer(c.req.header('Authorization'));
+  // Bearer header wins when both are present — it's the explicit
+  // intent, used by the CLI and by service-to-admin callers.
+  const raw =
+    extractBearer(c.req.header('Authorization')) ?? getCookie(c, SESSION_COOKIE_NAME) ?? null;
   if (!raw) {
     return fail(c, 'unauthorized', 'Admin session required', 401);
   }

@@ -4,6 +4,8 @@ import { widgetRoutes } from './routes/widget';
 import { healthRoutes } from './routes/health';
 import { createAdminRoutes } from './routes/admin';
 import { createAdminApiRoutes } from './routes/adminApi';
+import { createOidcAuthRoutes } from './routes/oidcAuth';
+import { createOidcService } from './lib/oidc';
 import { fail } from './lib/response';
 
 export const app = new Hono();
@@ -20,8 +22,9 @@ app.route('/v1/widget', widgetRoutes);
 //   - `dev-session` → bearer-token session auth. Operators mint tokens
 //     with the `admin-session` CLI. Acceptable for local and staging;
 //     refused in production to prevent accidental exposure.
-//   - `oidc`        → not yet implemented; booting with this value
-//     fails loudly so the deployment config doesn't drift.
+//   - `oidc`        → provider-agnostic OIDC login via `openid-client`.
+//     Sets a same-origin session cookie on callback; the existing
+//     `admin_sessions` table stores only the SHA-256 hash.
 //   - unset         → admin API is not mounted. This is the intentional
 //     safe default so a fresh deploy never exposes an unauthenticated
 //     admin surface.
@@ -38,10 +41,65 @@ if (adminAuthMode === 'dev-session') {
     createAdminApiRoutes({ dashboardOrigin: process.env.ADMIN_DASHBOARD_ORIGIN }),
   );
 } else if (adminAuthMode === 'oidc') {
-  throw new Error(
-    'ADMIN_AUTH_MODE=oidc is declared but not yet implemented. The OIDC provider ' +
-      'integration ships in a follow-up MR. Unset the env to boot without the admin API.',
+  const {
+    OIDC_ISSUER_URL,
+    OIDC_CLIENT_ID,
+    OIDC_CLIENT_SECRET,
+    OIDC_REDIRECT_URI,
+    OIDC_SCOPES,
+    OIDC_DASHBOARD_URL,
+    OIDC_COOKIE_SECRET,
+    ADMIN_SESSION_COOKIE,
+    ADMIN_SESSION_TTL_DAYS,
+    ADMIN_COOKIES_SECURE,
+  } = process.env;
+
+  for (const [name, value] of Object.entries({
+    OIDC_ISSUER_URL,
+    OIDC_CLIENT_ID,
+    OIDC_CLIENT_SECRET,
+    OIDC_REDIRECT_URI,
+    OIDC_DASHBOARD_URL,
+    OIDC_COOKIE_SECRET,
+  })) {
+    if (!value) {
+      throw new Error(
+        `ADMIN_AUTH_MODE=oidc requires ${name} to be set. See packages/api/.env.example.`,
+      );
+    }
+  }
+
+  const oidc = createOidcService({
+    issuerUrl: OIDC_ISSUER_URL!,
+    clientId: OIDC_CLIENT_ID!,
+    clientSecret: OIDC_CLIENT_SECRET!,
+    redirectUri: OIDC_REDIRECT_URI!,
+    scopes: OIDC_SCOPES,
+  });
+
+  // Two sibling mounts under `/v1/admin`: the OIDC dance on
+  // `/auth/*` (public, no session required) and the JSON API on
+  // everything else (session-gated). Order matters — `/auth/*` must
+  // mount first so its handlers win before the catch-all session
+  // guard inside `createAdminApiRoutes`.
+  const adminRoot = new Hono();
+  adminRoot.route(
+    '/auth',
+    createOidcAuthRoutes({
+      oidc,
+      dashboardUrl: OIDC_DASHBOARD_URL!,
+      cookieName: ADMIN_SESSION_COOKIE ?? 'koe_admin',
+      sessionTtlDays: Number(ADMIN_SESSION_TTL_DAYS ?? '30'),
+      cookieSecret: OIDC_COOKIE_SECRET!,
+      secureCookies: (ADMIN_COOKIES_SECURE ?? 'true').toLowerCase() !== 'false',
+    }),
   );
+  adminRoot.route(
+    '/',
+    createAdminApiRoutes({ dashboardOrigin: process.env.ADMIN_DASHBOARD_ORIGIN }),
+  );
+
+  app.route('/v1/admin', adminRoot);
 } else if (adminAuthMode !== undefined) {
   throw new Error(`Unknown ADMIN_AUTH_MODE=${adminAuthMode}`);
 }
