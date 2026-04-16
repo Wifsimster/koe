@@ -1,0 +1,62 @@
+# One-command self-host for Koe.
+#
+#   cp .env.docker.example .env
+#   docker compose up -d
+#   docker compose run --rm api bootstrap
+#
+# The `api` service runs pending migrations on start (MIGRATE_ON_START=true)
+# and exposes the widget API on port 8787. Data lives in a named volume so
+# `docker compose down` (without -v) preserves it.
+#
+# For replicas or prod deploys where you want deterministic migration
+# runs, set MIGRATE_ON_START=false and run `docker compose run --rm api
+# migrate` explicitly before scaling.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-koe}
+      POSTGRES_USER: ${POSTGRES_USER:-koe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-koe}
+    volumes:
+      - koe-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-koe} -d ${POSTGRES_DB:-koe}',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    # Pull the published image by default. To build from source locally,
+    # comment `image:` and uncomment the `build:` block.
+    image: ghcr.io/wifsimster/koe-api:${KOE_API_TAG:-edge}
+    # build:
+    #   context: .
+    #   dockerfile: packages/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-koe}:${POSTGRES_PASSWORD:-koe}@db:5432/${POSTGRES_DB:-koe}
+      PORT: 8787
+      HOST: 0.0.0.0
+      MIGRATE_ON_START: ${MIGRATE_ON_START:-true}
+    ports:
+      - '${KOE_API_PORT:-8787}:8787'
+    healthcheck:
+      test:
+        ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:8787/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  koe-db-data:

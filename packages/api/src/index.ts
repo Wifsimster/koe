@@ -1,11 +1,10 @@
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
-import { serve } from '@hono/node-server';
 import { widgetRoutes } from './routes/widget';
 import { healthRoutes } from './routes/health';
 import { fail } from './lib/response';
 
-const app = new Hono();
+export const app = new Hono();
 
 app.use('*', logger());
 
@@ -21,15 +20,5 @@ app.onError((err, c) => {
 });
 
 app.notFound((c) => fail(c, 'not_found', 'Route not found', 404));
-
-const port = Number(process.env.PORT ?? 8787);
-
-// Only boot the server when this module is the entry point. Importing
-// `app` for tests or serverless adapters won't start listening.
-if (import.meta.url === `file://${process.argv[1]}`) {
-  serve({ fetch: app.fetch, port }, (info) => {
-    console.log(`[koe/api] listening on http://localhost:${info.port}`);
-  });
-}
 
 export default app;

@@ -1,0 +1,146 @@
+name: Docker — koe-api
+
+# Publishes `ghcr.io/wifsimster/koe-api`.
+#
+# Triggers:
+#   - Push to `main`            → `:edge` + `:sha-<short>` (rolling)
+#   - Push of `api-v*.*.*` tag  → `:x.y.z` + `:x.y` + `:latest` (stable)
+#   - Manual dispatch            → custom tag via input
+#
+# Release tags are API-scoped (`api-v*`) so widget releases don't churn
+# the API image. Cut one locally with:
+#
+#     git tag api-v0.1.0 && git push origin api-v0.1.0
+
+on:
+  push:
+    branches: [main]
+    tags: ['api-v*.*.*']
+    paths:
+      - 'packages/api/**'
+      - 'packages/shared/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Extra tag to apply (e.g. `rc1`). Leave blank for default.'
+        required: false
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/koe-api
+
+jobs:
+  build-and-push:
+    name: Build & push
+    runs-on: ubuntu-latest
+    if: github.repository == 'wifsimster/koe'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `api-v1.2.3` → 1.2.3 + 1.2 + 1 + latest
+          # `main`       → edge
+          # commit       → sha-<short>
+          # manual       → user-supplied tag
+          tags: |
+            type=match,pattern=api-v(\d+\.\d+\.\d+),group=1
+            type=match,pattern=api-v(\d+\.\d+)\.\d+,group=1
+            type=match,pattern=api-v(\d+)\.\d+\.\d+,group=1
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/api-v') }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
+
+      - name: Build & push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/api/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=koe-api
+          cache-to: type=gha,mode=max,scope=koe-api
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless, OIDC)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          for tag in $TAGS; do
+            cosign sign --yes "${tag}@${DIGEST}"
+          done
+
+  scan:
+    name: Trivy scan
+    runs-on: ubuntu-latest
+    if: github.repository == 'wifsimster/koe'
+    needs: build-and-push
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+
+    steps:
+      - name: Run Trivy against the freshly pushed image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name == 'main' && 'edge' || github.ref_name }}
+          format: sarif
+          output: trivy.sarif
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-koe-api

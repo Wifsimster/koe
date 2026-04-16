@@ -1,0 +1,40 @@
+# Secrets must never land in an image layer.
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# Git + CI metadata.
+.git
+.github
+.gitignore
+.gitattributes
+
+# Local tooling / editors.
+.idea
+.vscode
+.DS_Store
+
+# Build caches and artifacts — the Dockerfile produces fresh ones.
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+**/.cache
+**/.next
+**/.vite
+
+# Dashboard & widget: not part of the API image. Drop aggressively to
+# keep the build context small.
+packages/dashboard
+packages/widget/dist
+
+# Logs, pnpm-store, misc.
+**/*.log
+.pnpm-store
+.pnpm-debug.log*
+npm-debug.log*
+
+# Docs / markdown don't influence the build.
+*.md
+docs
