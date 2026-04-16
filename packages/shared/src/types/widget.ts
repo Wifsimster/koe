@@ -54,6 +54,25 @@ export interface WidgetLocale {
   launcherLabel: string;
   title: string;
   subtitle: string;
+  /**
+   * Labels for the intent picker — the first screen of the widget.
+   * Optional for backward compatibility with locales authored before
+   * the picker shipped; English fallbacks kick in when a key is missing.
+   */
+  picker?: {
+    prompt: string;
+    bug: string;
+    bugHint: string;
+    feature: string;
+    featureHint: string;
+  };
+  /** Label for the back button that returns to the intent picker. */
+  back?: string;
+  /**
+   * Legacy top-tab labels. Retained for type stability; no longer
+   * rendered since the widget switched to an intent-picker flow.
+   * @deprecated Use `picker` instead.
+   */
   tabs: {
     bug: string;
     feature: string;
@@ -65,15 +84,24 @@ export interface WidgetLocale {
     steps: string;
     expected: string;
     actual: string;
+    /** Label for the optional email field shown above submit. */
+    email?: string;
     submit: string;
     success: string;
   };
   featureForm: {
     title: string;
     description: string;
+    /** Label for the optional email field shown above submit. */
+    email?: string;
     submit: string;
     success: string;
   };
+  /**
+   * Chat strings retained for forward compatibility. The chat tab is
+   * not currently rendered — a real conversation backend is wired in a
+   * later MR.
+   */
   chat: {
     placeholder: string;
     empty: string;
@@ -84,7 +112,15 @@ export interface WidgetLocale {
 export const DEFAULT_LOCALE: WidgetLocale = {
   launcherLabel: 'Support',
   title: 'How can we help?',
-  subtitle: "Report a bug, request a feature, or chat with us.",
+  subtitle: 'Report a bug or suggest an idea — your feedback goes straight to the team.',
+  picker: {
+    prompt: "What's on your mind?",
+    bug: 'Report a bug',
+    bugHint: 'Something broken or confusing',
+    feature: 'Suggest an idea',
+    featureHint: 'New features, improvements',
+  },
+  back: 'Back',
   tabs: {
     bug: 'Bug',
     feature: 'Feature',
@@ -96,12 +132,14 @@ export const DEFAULT_LOCALE: WidgetLocale = {
     steps: 'Steps to reproduce',
     expected: 'Expected behavior',
     actual: 'Actual behavior',
+    email: 'Email (optional — so we can follow up)',
     submit: 'Send bug report',
     success: 'Thanks — your report has been received.',
   },
   featureForm: {
     title: 'Title',
     description: 'Describe your idea',
+    email: 'Email (optional — so we can follow up)',
     submit: 'Submit request',
     success: 'Thanks for the suggestion!',
   },

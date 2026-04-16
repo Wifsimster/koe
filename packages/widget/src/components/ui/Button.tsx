@@ -19,7 +19,9 @@ export function Button({
       {...rest}
       disabled={disabled || loading}
       className={clsx(
-        'koe-inline-flex koe-items-center koe-justify-center koe-px-4 koe-py-2 koe-rounded-md koe-text-sm koe-font-medium koe-transition-colors disabled:koe-opacity-60 disabled:koe-cursor-not-allowed',
+        // `min-h-[44px]` enforces WCAG 2.5.5 / Apple HIG minimum target
+        // so mobile users don't fat-finger the submit or close button.
+        'koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-px-4 koe-py-2 koe-rounded-md koe-text-sm koe-font-medium koe-transition-colors disabled:koe-opacity-60 disabled:koe-cursor-not-allowed',
         variant === 'primary' &&
           'koe-bg-koe-accent koe-text-white hover:koe-bg-koe-accent-hover',
         variant === 'ghost' &&

@@ -10,6 +10,7 @@ interface FormState {
   steps: string;
   expected: string;
   actual: string;
+  email: string;
 }
 
 const EMPTY: FormState = {
@@ -18,6 +19,7 @@ const EMPTY: FormState = {
   steps: '',
   expected: '',
   actual: '',
+  email: '',
 };
 
 export function BugReportForm() {
@@ -52,13 +54,19 @@ export function BugReportForm() {
 
     setSubmitting(true);
     try {
+      // The host-supplied user object wins over a widget-collected email.
+      // Only borrow the optional field when the host didn't give us one.
+      const baseReporter = config.user ?? { id: 'anonymous' };
+      const email = state.email.trim() || baseReporter.email;
+      const reporter = email ? { ...baseReporter, email } : baseReporter;
+
       await api.submitBugReport({
         title: state.title.trim(),
         description: state.description.trim(),
         stepsToReproduce: state.steps.trim() || undefined,
         expectedBehavior: state.expected.trim() || undefined,
         actualBehavior: state.actual.trim() || undefined,
-        reporter: config.user ?? { id: 'anonymous' },
+        reporter,
         metadata: captureBrowserMetadata(),
       });
       setSuccess(true);
@@ -69,8 +77,10 @@ export function BugReportForm() {
     }
   };
 
-  const update = <K extends keyof FormState>(key: K) => (value: string) =>
-    setState((s) => ({ ...s, [key]: value }));
+  const update =
+    <K extends keyof FormState>(key: K) =>
+    (value: string) =>
+      setState((s) => ({ ...s, [key]: value }));
 
   return (
     <form onSubmit={onSubmit} noValidate>
@@ -106,6 +116,18 @@ export function BugReportForm() {
         onChange={(e) => update('actual')(e.target.value)}
         rows={2}
       />
+      {/* Email field only shows when the host didn't already identify
+          the user — otherwise it's redundant and adds friction. */}
+      {!config.user?.email && (
+        <TextField
+          label={locale.bugForm.email ?? 'Email (optional)'}
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          value={state.email}
+          onChange={(e) => update('email')(e.target.value)}
+        />
+      )}
 
       {apiError && (
         <div className="koe-mb-3 koe-text-xs koe-text-red-500" role="alert">
@@ -113,12 +135,27 @@ export function BugReportForm() {
         </div>
       )}
 
-      <div className="koe-flex koe-justify-end">
+      <FormFooter>
         <Button type="submit" loading={submitting}>
           {locale.bugForm.submit}
         </Button>
-      </div>
+      </FormFooter>
     </form>
+  );
+}
+
+/**
+ * Sticky footer keeps the primary action reachable above the mobile
+ * virtual keyboard. Pairs with `--koe-vvh` written by
+ * `useVisualViewport` and the bottom-sheet CSS rules — together they
+ * keep the form scrollable area shrinking to track the visible viewport
+ * as the keyboard pops.
+ */
+function FormFooter({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="koe-panel-form-footer koe-flex koe-justify-end koe-gap-2">
+      {children}
+    </div>
   );
 }
 

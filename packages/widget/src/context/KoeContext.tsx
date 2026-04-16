@@ -44,6 +44,11 @@ function mergeLocale(override?: Partial<WidgetLocale>): WidgetLocale {
   return {
     ...DEFAULT_LOCALE,
     ...override,
+    // Nested groups are deep-merged so hosts can override a single key
+    // (e.g. just `picker.bug`) without losing the rest of the defaults.
+    picker: override.picker
+      ? { ...(DEFAULT_LOCALE.picker as NonNullable<WidgetLocale['picker']>), ...override.picker }
+      : DEFAULT_LOCALE.picker,
     tabs: { ...DEFAULT_LOCALE.tabs, ...(override.tabs ?? {}) },
     bugForm: { ...DEFAULT_LOCALE.bugForm, ...(override.bugForm ?? {}) },
     featureForm: { ...DEFAULT_LOCALE.featureForm, ...(override.featureForm ?? {}) },
