@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import { db, dbAvailable, schema } from '../db';
 import { fail } from '../lib/response';
 
@@ -13,6 +13,15 @@ export interface ProjectContext {
     requireIdentityVerification: boolean;
   };
 }
+
+/**
+ * Heartbeat throttle. Writing `last_ping_at` on every widget request
+ * is wasteful under any real traffic — one UPDATE per request —
+ * and the dashboard only cares whether the widget has been heard
+ * from "recently". 60 seconds of staleness is indistinguishable from
+ * live to the operator reading an empty state.
+ */
+const HEARTBEAT_THROTTLE_SECONDS = 60;
 
 /**
  * Resolves `X-Koe-Project-Key` to a project row and attaches it to the
@@ -55,5 +64,30 @@ export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = 
     identitySecret: project.identitySecret,
     requireIdentityVerification: project.requireIdentityVerification,
   });
+
+  // Heartbeat stamp. Conditional WHERE collapses the read-then-write
+  // race into a single round-trip: the update only fires when the
+  // previous stamp is older than the throttle (or null). Safe to
+  // fire-and-forget — heartbeat is observational, not on the hot path.
+  void db
+    .update(schema.projects)
+    .set({
+      lastPingAt: new Date(),
+      lastPingOrigin: origin ?? null,
+    })
+    .where(
+      and(
+        eq(schema.projects.id, project.id),
+        or(
+          isNull(schema.projects.lastPingAt),
+          lt(schema.projects.lastPingAt, sql`now() - make_interval(secs => ${HEARTBEAT_THROTTLE_SECONDS})`),
+        ),
+      ),
+    )
+    .catch((err) => {
+      // Heartbeat failure is never a request-blocker. Log and move on.
+      console.warn('[koe/api] heartbeat stamp failed', err);
+    });
+
   await next();
 };
