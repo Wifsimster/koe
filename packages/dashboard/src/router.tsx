@@ -1,70 +1,101 @@
 import type { ReactNode } from 'react';
-import { createRootRoute, createRoute, Outlet, Link } from '@tanstack/react-router';
-import { HomePage } from './pages/HomePage';
-import { BugsPage } from './pages/BugsPage';
-import { FeaturesPage } from './pages/FeaturesPage';
-import { ChatPage } from './pages/ChatPage';
+import { createRootRouteWithContext, createRoute, Outlet, redirect } from '@tanstack/react-router';
+import { LoginPage } from './pages/LoginPage';
+import { InboxPage } from './pages/InboxPage';
+import { TicketDetailPage } from './pages/TicketDetailPage';
+import { AppShell } from './components/AppShell';
+import { useAuth, type AuthContextValue } from './auth/AuthContext';
 
-const rootRoute = createRootRoute({
-  component: RootLayout,
+/**
+ * Router context: the auth state plugged into `createRouter` in
+ * main.tsx. Loaders read from here to decide whether to `redirect`
+ * to `/login`, so the guard is centralized at the route level (not
+ * duplicated in every page component).
+ */
+export interface RouterContext {
+  auth: AuthContextValue;
+}
+
+const rootRoute = createRootRouteWithContext<RouterContext>()({
+  component: RootGate,
 });
 
-const indexRoute = createRoute({
+const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
+  path: '/login',
+  component: LoginPage,
+});
+
+const authenticatedLayoutRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: '_authenticated',
+  // Bounce to /login unless we have an authenticated state. We
+  // don't await anything — the state is already resolved by the
+  // AuthProvider at mount; loaders see its current snapshot.
+  beforeLoad: ({ context, location }) => {
+    if (context.auth.state.status === 'unauthenticated') {
+      throw redirect({
+        to: '/login',
+        search: { redirectTo: location.pathname },
+      });
+    }
+  },
+  component: AuthenticatedLayout,
+});
+
+const inboxRoute = createRoute({
+  getParentRoute: () => authenticatedLayoutRoute,
   path: '/',
-  component: HomePage,
+  component: InboxPage,
 });
 
-const bugsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/bugs',
-  component: BugsPage,
+const ticketDetailRoute = createRoute({
+  getParentRoute: () => authenticatedLayoutRoute,
+  path: '/tickets/$id',
+  component: TicketDetailPage,
 });
 
-const featuresRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/features',
-  component: FeaturesPage,
-});
+export const routeTree = rootRoute.addChildren([
+  loginRoute,
+  authenticatedLayoutRoute.addChildren([inboxRoute, ticketDetailRoute]),
+]);
 
-const chatRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/chat',
-  component: ChatPage,
-});
+function RootGate() {
+  // Top-level outlet. The auth gate lives on the `_authenticated`
+  // parent route, so this layer just renders whatever matched.
+  return <Outlet />;
+}
 
-export const routeTree = rootRoute.addChildren([indexRoute, bugsRoute, featuresRoute, chatRoute]);
-
-function RootLayout() {
+function AuthenticatedLayout() {
+  const { state } = useAuth();
+  if (state.status === 'loading') {
+    return <LoadingScreen />;
+  }
+  // beforeLoad redirects unauthenticated; reaching here without
+  // being authenticated would be a guard bug — render loud.
+  if (state.status !== 'authenticated') {
+    return <div className="p-8 text-red-600">Auth guard bypassed.</div>;
+  }
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-60 bg-white border-r border-gray-200 p-4">
-        <div className="mb-8">
-          <h1 className="text-xl font-bold">Koe</h1>
-          <p className="text-xs text-gray-500">Admin dashboard</p>
+    <AppShell
+      header={
+        <div>
+          <h2 className="text-xl md:text-2xl font-semibold">Inbox</h2>
+          <p className="text-sm text-gray-600">
+            Triage incoming bug reports and feature requests.
+          </p>
         </div>
-        <nav className="flex flex-col gap-1">
-          <NavLink to="/">Overview</NavLink>
-          <NavLink to="/bugs">Bugs</NavLink>
-          <NavLink to="/features">Feature requests</NavLink>
-          <NavLink to="/chat">Chat</NavLink>
-        </nav>
-      </aside>
-      <main className="flex-1 p-8">
-        <Outlet />
-      </main>
-    </div>
+      }
+    >
+      <Outlet />
+    </AppShell>
   );
 }
 
-function NavLink({ to, children }: { to: string; children: ReactNode }) {
+function LoadingScreen(): ReactNode {
   return (
-    <Link
-      to={to}
-      className="px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-100"
-      activeProps={{ className: 'px-3 py-2 rounded-md text-sm bg-indigo-50 text-indigo-700' }}
-    >
-      {children}
-    </Link>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 text-sm text-gray-500">
+      Loading…
+    </div>
   );
 }
