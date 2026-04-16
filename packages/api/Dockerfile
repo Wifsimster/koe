@@ -58,7 +58,7 @@ RUN pnpm --filter @koe/api exec drizzle-kit generate --name init
 RUN pnpm --filter @koe/api run build
 
 # Produce a workspace-free, prod-only deployment tree under /app.
-RUN pnpm --filter @koe/api deploy --prod --legacy /app
+RUN pnpm --filter @koe/api deploy --prod /app
 
 # --- Runtime -------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
