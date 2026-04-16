@@ -16,7 +16,6 @@
     "release:dry": "semantic-release --dry-run --no-ci"
   },
   "devDependencies": {
-    "@semantic-release/exec": "^6.0.3",
     "@semantic-release/github": "^11.0.1",
     "@types/node": "^22.9.0",
     "conventional-changelog-conventionalcommits": "^8.0.0",

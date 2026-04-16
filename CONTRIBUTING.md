@@ -88,10 +88,12 @@ When a PR merges to `main`, the release workflow runs `semantic-release`. It:
 1. Walks the commits since the last `v*` tag.
 2. Decides the next version from the commit types above.
 3. If there's nothing releasable (only `docs`, `chore`, `test`, `build`, `ci`), it exits — **no release is cut**.
-4. Otherwise: publishes `@wifsimster/koe` to npm with provenance, creates a GitHub Release, and tags the commit.
+4. Otherwise: creates a GitHub Release with auto-generated notes and tags the commit with `vX.Y.Z`.
 
 No `CHANGELOG.md` is committed back to the repo — release notes live on the GitHub Releases page.
 
+The widget is not published to npm. Consumers pin to a git tag (e.g. `npm install github:Wifsimster/koe#v0.1.0`) or load the IIFE bundle from a GitHub-backed CDN such as jsDelivr.
+
 ## Required secrets (maintainers)
 
-For releases to actually publish to npm, `NPM_TOKEN` must be set under **Settings → Secrets and variables → Actions**. The workflow fails loudly with a helpful error if the token is missing, so a missing secret won't result in a silent broken release.
+None beyond the default `GITHUB_TOKEN` that GitHub Actions provides automatically.

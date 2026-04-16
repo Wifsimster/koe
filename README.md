@@ -27,7 +27,7 @@ Koe aide les equipes SaaS a recueillir les retours utilisateurs dans chaque appl
 | [Schema de base de donnees](docs/schema-base-donnees.md) | Tables centrales, relations et decisions de stockage.     |
 | [Integration du widget](docs/integration-widget.md)      | Modes d'integration React et script autonome.             |
 | [Statut du dashboard](docs/statut-dashboard.md)          | Etat reel du back-office et elements encore placeholder.  |
-| [Release npm](docs/release-npm.md)                       | Pipeline CI/CD et publication du package public.          |
+| [Release](docs/release-npm.md)                           | Pipeline CI/CD et creation des GitHub Releases.           |
 
 ## A quoi sert ce produit ?
 
@@ -46,7 +46,7 @@ Koe aide les equipes SaaS a recueillir les retours utilisateurs dans chaque appl
 
 ## Utilisation du widget
 
-- Installer le package public avec `npm install @wifsimster/koe`.
+- Installer le widget depuis un tag git avec `npm install github:Wifsimster/koe#v0.1.0`, ou charger la build autonome via un CDN base sur GitHub (ex. jsDelivr).
 - Integrer le widget dans une application React avec le composant `KoeWidget`.
 - Integrer le widget sans framework via la build autonome `koe.iife.js`.
 - Fournir `userHash` depuis votre backend si vous activez la verification d'identite.
@@ -120,7 +120,7 @@ Les commits suivent [Conventional Commits](https://www.conventionalcommits.org/)
 
 | Package              | Role                                                    |
 | -------------------- | ------------------------------------------------------- |
-| `packages/widget`    | Widget embarquable publie sur npm.                      |
+| `packages/widget`    | Widget embarquable distribue via tags git GitHub.       |
 | `packages/api`       | API publique, securite projet et acces PostgreSQL.      |
 | `packages/dashboard` | Back-office React deja present, mais encore a brancher. |
 | `packages/shared`    | Types partages et capture de metadonnees navigateur.    |
@@ -134,7 +134,7 @@ Les commits suivent [Conventional Commits](https://www.conventionalcommits.org/)
 | [Schema de base de donnees](docs/schema-base-donnees.md) | Visualiser le modele de donnees actif et le futur chat.         |
 | [Integration du widget](docs/integration-widget.md)      | Choisir et configurer le bon mode d'integration.                |
 | [Statut du dashboard](docs/statut-dashboard.md)          | Distinguer le back-office actif du back-office prepare.         |
-| [Release npm](docs/release-npm.md)                       | Suivre la verification et la publication du package public.     |
+| [Release](docs/release-npm.md)                           | Suivre la verification et la creation des GitHub Releases.      |
 
 ## Feuille de route
 

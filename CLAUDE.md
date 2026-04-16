@@ -28,7 +28,7 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 - `packages/dashboard` : shell de back-office React avec routes et pages placeholder.
 - `packages/shared` : types metier partages et helper `captureBrowserMetadata`.
 - `.github/workflows` : CI et release.
-- `.releaserc.json` : orchestration des releases automatiques du widget public.
+- `.releaserc.json` : orchestration des tags et GitHub Releases automatiques via `semantic-release`.
 - `tsconfig.base.json` : options TypeScript strictes partagees.
 
 ## Commandes utiles
@@ -83,7 +83,7 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 
 - Le dashboard est surtout un squelette UI. L'API d'administration n'est pas encore branchee.
 - Le chat temps reel n'est pas branche. Le widget affiche une conversation locale de previsualisation.
-- Seul `@wifsimster/koe` est publie sur npm. `@koe/api`, `@koe/dashboard` et `@koe/shared` restent prives.
+- Aucun package n'est publie sur npm. Les releases du widget se font via tags git et GitHub Releases. `@koe/api`, `@koe/dashboard` et `@koe/shared` restent prives.
 - `packages/api/.env.example` contient les variables indispensables. Sans `DATABASE_URL`, les routes DB renverront une erreur.
 - Toute modification de `packages/api/src/db/schema.ts` implique le workflow Drizzle.
 - Ne supposez pas que `better-auth` est deja cable. Ce snapshot ne montre aucune dependance active.
