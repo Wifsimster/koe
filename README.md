@@ -1,49 +1,99 @@
 # Koe
 
-Koe vous permet d'ajouter un widget de support dans votre propre application SaaS. Vos utilisateurs peuvent signaler un bug, proposer une évolution et voter sur votre roadmap sans quitter votre interface.
+Koe vous permet d'ajouter un widget de support dans vos applications SaaS. Vos utilisateurs peuvent signaler un bug, proposer une évolution et voter sur votre roadmap sans quitter votre interface.
 
-Le socle réellement exploitable aujourd'hui couvre le **widget embarquable** et l'**API publique**. Le **dashboard** existe déjà, mais il reste surtout un squelette en attente de branchement.
+Le socle réellement exploitable aujourd'hui couvre le **service Koe** (API + base de données) et le **widget Koe**. Le **dashboard** existe déjà, mais il reste surtout un squelette en attente de branchement.
+
+## Comment ça marche
+
+Koe est constitué de **deux composants distincts** que vous devez assembler :
+
+```mermaid
+graph LR
+    subgraph "Vos applications SaaS"
+        A1[App A + Widget Koe]
+        A2[App B + Widget Koe]
+    end
+    subgraph "Votre instance Koe (self-hosted)"
+        S[Service Koe - API Hono]
+        DB[(PostgreSQL)]
+    end
+    A1 -->|HTTPS| S
+    A2 -->|HTTPS| S
+    S --> DB
+```
+
+1. **Le service Koe** est un back-end que **vous hébergez une fois**. Il expose l'API publique et stocke les tickets, votes et projets dans PostgreSQL. C'est ce composant qui contient votre configuration et vos données.
+2. **Le widget Koe** est un composant front-end que **vous embarquez dans chacune de vos applications SaaS**. Il appelle le service via HTTPS.
+3. **Un seul service peut servir plusieurs applications.** Chaque application est rattachée à un `projectKey` distinct côté service, ce qui permet de cloisonner les données, les origines autorisées et l'identité.
+
+Aucun service Koe hébergé n'est fourni aujourd'hui : vous devez déployer votre propre instance avant d'intégrer le widget.
 
 ## Table des matières
 
-- [À quoi sert Koe](#à-quoi-sert-koe)
-- [Ce que vous devez déployer](#ce-que-vous-devez-déployer)
-- [Ce que vous devez préparer côté projet](#ce-que-vous-devez-préparer-côté-projet)
-- [Démarrage rapide](#démarrage-rapide)
-- [Intégrer Koe dans une application React](#intégrer-koe-dans-une-application-react)
-- [Intégrer Koe sans framework](#intégrer-koe-sans-framework)
-- [Options du widget](#options-du-widget)
-- [Vérification d'identité](#vérification-didentité)
-- [Parcours d'intégration](#parcours-dintégration)
+- [Comment ça marche](#comment-ça-marche)
+- [Partie 1 — Déployer le service Koe](#partie-1--déployer-le-service-koe)
+  - [Prérequis](#prérequis)
+  - [Déploiement de l'API et de la base](#déploiement-de-lapi-et-de-la-base)
+  - [Variables d'environnement](#variables-denvironnement)
+  - [Créer un projet](#créer-un-projet)
+- [Partie 2 — Intégrer le widget Koe](#partie-2--intégrer-le-widget-koe)
+  - [Intégration React](#intégration-react)
+  - [Intégration sans framework](#intégration-sans-framework)
+  - [Options du widget](#options-du-widget)
+  - [Vérification d'identité](#vérification-didentité)
 - [Ce qui est disponible aujourd'hui](#ce-qui-est-disponible-aujourdhui)
-- [Déployer votre instance](#déployer-votre-instance)
 - [Développer ce dépôt](#développer-ce-dépôt)
 - [Stack technique](#stack-technique)
 - [Documentation complémentaire](#documentation-complémentaire)
 - [Licence](#licence)
 
-## À quoi sert Koe
+## Partie 1 — Déployer le service Koe
 
-- Ajouter un point de contact unique dans votre application.
-- Recevoir des bugs avec le contexte navigateur capturé automatiquement.
-- Collecter des demandes d'évolution depuis la même interface.
-- Laisser vos utilisateurs voter sur les demandes déjà ouvertes.
-- Réutiliser le même widget sur plusieurs applications via des `projectKey` différents.
+Cette partie concerne **l'administrateur de l'instance Koe**. Elle décrit comment faire tourner l'API et la base qui reçoivent les contributions du widget.
 
-## Ce que vous devez déployer
+### Prérequis
 
-Pour utiliser Koe dans votre propre application, vous devez déployer ou consommer quatre briques.
+- Node.js `>=20`
+- `pnpm@9.12.0`
+- Une base PostgreSQL accessible depuis votre API (locale, managée, peu importe).
 
-- **`packages/api`** : l'API Node qui reçoit les bugs, les évolutions et les votes.
-- **PostgreSQL** : la base qui stocke les projets, tickets et votes.
-- **`@wifsimster/koe`** ou **`koe.iife.js`** : le widget à embarquer dans votre frontend.
-- **`packages/dashboard`** : optionnel pour le moment. Le back-office n'est pas encore branché sur des données réelles.
+### Déploiement de l'API et de la base
 
-## Ce que vous devez préparer côté projet
+Depuis la racine du monorepo :
 
-Chaque application hôte doit être rattachée à un projet Koe.
+```bash
+pnpm install
+cp packages/api/.env.example packages/api/.env
+pnpm --filter @koe/api db:generate
+pnpm --filter @koe/api db:migrate
+pnpm build
+pnpm --filter @koe/api start
+```
 
-| Élément                       | Obligatoire              | Rôle                                                        |
+Répartition recommandée pour une première mise en production :
+
+- **API** sur Railway, Render ou Fly.io.
+- **Base PostgreSQL** sur un service managé.
+- **Widget React** consommé depuis vos applications via `@wifsimster/koe`.
+- **Widget autonome** servi depuis votre CDN avec `style.css` et `koe.iife.js`.
+
+### Variables d'environnement
+
+Variables lues par l'API :
+
+| Variable             | Obligatoire | Description                                                                    |
+| -------------------- | ----------- | ------------------------------------------------------------------------------ |
+| `DATABASE_URL`       | Oui         | Chaîne de connexion PostgreSQL. Sans elle, les routes DB renvoient une erreur. |
+| `PORT`               | Non         | Port d'écoute HTTP. Par défaut `8787`.                                         |
+| `BETTER_AUTH_SECRET` | Réservée    | Prévue pour l'intégration future de `better-auth`. Non utilisée aujourd'hui.   |
+| `BETTER_AUTH_URL`    | Réservée    | Prévue pour l'intégration future de `better-auth`. Non utilisée aujourd'hui.   |
+
+### Créer un projet
+
+Chaque application hôte doit être rattachée à un projet Koe. **Aujourd'hui, la création se fait directement dans la table `projects`** : aucun back-office n'est encore branché.
+
+| Champ                         | Obligatoire              | Rôle                                                        |
 | ----------------------------- | ------------------------ | ----------------------------------------------------------- |
 | `projectKey`                  | Oui                      | Identifie l'application qui embarque le widget.             |
 | `allowedOrigins`              | Oui en production        | Liste les domaines autorisés à appeler l'API.               |
@@ -52,20 +102,21 @@ Chaque application hôte doit être rattachée à un projet Koe.
 
 Points importants :
 
-- Aujourd'hui, la création du projet se fait directement dans la table `projects`.
 - Si `allowedOrigins` est vide, le projet reste permissif.
-- Si vous avez plusieurs applications ou plusieurs domaines, créez un projet par contexte d'usage.
-- Le `projectKey` est public. Ce n'est pas un secret.
+- Si vous avez plusieurs applications ou plusieurs domaines, **créez un projet par contexte d'usage** : même service Koe, `projectKey` distincts.
+- Le `projectKey` est public. Ce n'est pas un secret. Le vrai secret est `identitySecret`.
 
-## Démarrage rapide
+## Partie 2 — Intégrer le widget Koe
 
-1. Déployez `packages/api` et une base PostgreSQL.
-2. Créez un projet Koe avec un `projectKey`, des `allowedOrigins` et un `identitySecret`.
-3. Intégrez le widget dans votre frontend avec `@wifsimster/koe` ou `koe.iife.js`.
-4. Passez un `user.id` stable pour distinguer les signalements et les votes.
-5. Générez `userHash` dans votre backend si vous activez la vérification d'identité.
+Cette partie concerne **le développeur d'une application SaaS** qui veut brancher le widget sur son front. Elle suppose qu'un service Koe est déjà déployé et qu'un projet a été créé avec un `projectKey`.
 
-## Intégrer Koe dans une application React
+Avant d'intégrer le widget, récupérez auprès de votre administrateur Koe :
+
+- le **`projectKey`** de votre application,
+- l'**`apiUrl`** de l'instance Koe (ex. `https://api.support.acme.com`),
+- l'**`identitySecret`** si votre projet exige la vérification d'identité.
+
+### Intégration React
 
 Le mode React est le plus simple si votre application utilise déjà React.
 
@@ -99,12 +150,12 @@ Bonnes pratiques :
 
 - Montez `KoeWidget` une seule fois, près de la racine de votre application.
 - Importez `@wifsimster/koe/style.css`, sinon le widget ne sera pas stylé.
-- Renseignez `apiUrl` si vous hébergez votre propre API.
+- Renseignez **toujours** `apiUrl` : le service Koe est self-hosted, il n'existe pas d'instance par défaut.
 - Fournissez un `user.id` stable. Sans cela, le widget retombe sur `anonymous`.
 
-## Intégrer Koe sans framework
+### Intégration sans framework
 
-Le mode autonome convient à une application non React, à une page marketing ou à une intégration via script tag.
+Le mode autonome convient à une application non React, à une page marketing ou à une intégration via balise `<script>`.
 
 ```html
 <link rel="stylesheet" href="https://cdn.votre-domaine.com/koe/style.css" />
@@ -129,26 +180,20 @@ Points importants :
 - La build autonome expose `window.Koe` avec `init()` et `destroy()`.
 - Cette build embarque React. Vous n'avez pas besoin de React dans l'application hôte.
 
-## Options du widget
+### Options du widget
 
 | Option       | Obligatoire          | Valeur par défaut     | Usage                                                    |
 | ------------ | -------------------- | --------------------- | -------------------------------------------------------- |
-| `projectKey` | Oui                  | -                     | Rattache le widget au bon projet.                        |
+| `projectKey` | Oui                  | -                     | Rattache le widget au bon projet côté service.           |
+| `apiUrl`     | Oui en pratique      | `https://api.koe.dev` | URL de votre service Koe. Le défaut est un placeholder. |
 | `user`       | Non, mais recommandé | `anonymous`           | Identifie le contributeur dans les tickets et les votes. |
 | `userHash`   | Selon le projet      | -                     | Prouve l'identité du contributeur.                       |
-| `apiUrl`     | Non                  | `https://api.koe.dev` | Pointe vers l'API Koe.                                   |
 | `position`   | Non                  | `bottom-right`        | Place le lanceur dans un coin de l'écran.                |
 | `theme`      | Non                  | indigo, mode `auto`   | Règle couleur, mode et rayon.                            |
 | `features`   | Non                  | toutes activées       | Active ou masque les onglets bugs, évolutions et chat.   |
 | `locale`     | Non                  | anglais               | Remplace les textes d'interface.                         |
 
-Conseils pratiques :
-
-- Passez toujours `apiUrl` si vous exploitez votre propre instance.
-- Passez un `user.id` stable si vous voulez un vote par utilisateur.
-- Utilisez `features.chat = false` si vous ne voulez pas exposer un onglet encore partiel.
-
-## Vérification d'identité
+### Vérification d'identité
 
 La vérification d'identité évite qu'un tiers usurpe un utilisateur en réutilisant seulement le `projectKey`.
 
@@ -156,8 +201,8 @@ Le principe est simple :
 
 1. Votre backend génère un HMAC à partir de `user.id` et de `identitySecret`.
 2. Votre frontend passe ce hash au widget via `userHash`.
-3. Le widget envoie automatiquement `X-Koe-User-Hash` à l'API.
-4. L'API recalcule le hash attendu avant d'accepter la requête.
+3. Le widget envoie automatiquement `X-Koe-User-Hash` au service Koe.
+4. Le service Koe recalcule le hash attendu avant d'accepter la requête.
 
 Exemple backend :
 
@@ -175,51 +220,14 @@ const userHash = createHmac('sha256', process.env.KOE_IDENTITY_SECRET)
 - Si `requireIdentityVerification` vaut `true`, un hash absent ou faux renvoie `401`.
 - Le `projectKey` reste public. Le vrai secret est `identitySecret`.
 
-## Parcours d'intégration
-
-```mermaid
-graph LR
-    A[Équipe produit] --> B[Projet Koe]
-    B --> C[Application hôte]
-    C --> D[Widget Koe]
-    D --> E[API Koe]
-    E --> F[Base PostgreSQL]
-```
-
-Vous créez d'abord un projet Koe. Votre application initialise ensuite le widget avec le bon `projectKey`. Le widget appelle l'API, qui vérifie le projet, l'origine et l'identité avant de stocker les tickets.
-
 ## Ce qui est disponible aujourd'hui
 
 - **Bugs** : fonctionnels, avec métadonnées navigateur et `screenshotUrl`.
 - **Demandes d'évolution** : fonctionnelles.
 - **Votes** : fonctionnels sur la roadmap publique.
 - **Chat** : onglet visible, mais conversation encore locale et sans temps réel.
-- **Dashboard** : navigation présente, mais pages encore placeholder.
-
-## Déployer votre instance
-
-Commandes utiles depuis la racine du monorepo :
-
-- `pnpm install`
-- `cp packages/api/.env.example packages/api/.env`
-- `pnpm --filter @koe/api db:generate`
-- `pnpm --filter @koe/api db:migrate`
-- `pnpm build`
-- `pnpm --filter @koe/api start`
-
-Variables minimales pour l'API :
-
-- `DATABASE_URL`
-- `PORT`
-- `BETTER_AUTH_SECRET`
-- `BETTER_AUTH_URL`
-
-Répartition recommandée pour une première mise en production :
-
-- **API** sur Railway, Render ou Fly.io.
-- **Base PostgreSQL** sur un service managé.
-- **Widget React** consommé via npm.
-- **Widget autonome** servi depuis votre CDN avec `style.css` et `koe.iife.js`.
+- **Dashboard** : navigation présente, mais pages encore placeholder. L'API d'administration n'est pas branchée.
+- **`better-auth`** : prévu mais non câblé aujourd'hui.
 
 ## Développer ce dépôt
 
@@ -235,7 +243,7 @@ Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour l
 ## Stack technique
 
 - **Widget** : React 19, TypeScript, Vite, Tailwind CSS.
-- **API** : Hono, Zod, Drizzle ORM, PostgreSQL.
+- **Service Koe (API)** : Hono, Zod, Drizzle ORM, PostgreSQL.
 - **Monorepo** : `pnpm` workspaces et Turborepo.
 - **Release** : GitHub Actions et `semantic-release` pour les tags et GitHub Releases du widget.
 
@@ -244,8 +252,8 @@ Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour l
 | Document                                                 | Description                                                                     |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [Intégration du widget](docs/integration-widget.md)      | Modes React et script autonome, options de configuration et points d'attention. |
-| [Vérification d'identité](docs/verification-identite.md) | Flux HMAC entre le backend hôte, le widget et l'API.                            |
-| [API widget](docs/api-widget.md)                         | Routes publiques, headers requis et limites de l'API.                           |
+| [Vérification d'identité](docs/verification-identite.md) | Flux HMAC entre le backend hôte, le widget et le service Koe.                   |
+| [API widget](docs/api-widget.md)                         | Routes publiques, headers requis et limites du service Koe.                     |
 | [Schéma de base de données](docs/schema-base-donnees.md) | Tables centrales, votes et éléments préparés pour le chat.                      |
 | [Statut du dashboard](docs/statut-dashboard.md)          | État réel du back-office et parties encore placeholder.                         |
 | [Release](docs/release-npm.md)                           | Pipeline CI/CD et création des GitHub Releases.                                 |
