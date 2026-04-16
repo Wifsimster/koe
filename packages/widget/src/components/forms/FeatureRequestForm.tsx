@@ -8,6 +8,7 @@ export function FeatureRequestForm() {
   const { locale, api, config } = useKoe();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [email, setEmail] = useState('');
   const [errors, setErrors] = useState<{ title?: string; description?: string }>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -25,6 +26,7 @@ export function FeatureRequestForm() {
             setSuccess(false);
             setTitle('');
             setDescription('');
+            setEmail('');
           }}
         >
           Submit another
@@ -45,10 +47,14 @@ export function FeatureRequestForm() {
 
     setSubmitting(true);
     try {
+      const baseReporter = config.user ?? { id: 'anonymous' };
+      const finalEmail = email.trim() || baseReporter.email;
+      const reporter = finalEmail ? { ...baseReporter, email: finalEmail } : baseReporter;
+
       await api.submitFeatureRequest({
         title: title.trim(),
         description: description.trim(),
-        reporter: config.user ?? { id: 'anonymous' },
+        reporter,
         metadata: captureBrowserMetadata(),
       });
       setSuccess(true);
@@ -76,6 +82,16 @@ export function FeatureRequestForm() {
         rows={4}
         required
       />
+      {!config.user?.email && (
+        <TextField
+          label={locale.featureForm.email ?? 'Email (optional)'}
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      )}
 
       {apiError && (
         <div className="koe-mb-3 koe-text-xs koe-text-red-500" role="alert">
@@ -83,7 +99,7 @@ export function FeatureRequestForm() {
         </div>
       )}
 
-      <div className="koe-flex koe-justify-end">
+      <div className="koe-panel-form-footer koe-flex koe-justify-end koe-gap-2">
         <Button type="submit" loading={submitting}>
           {locale.featureForm.submit}
         </Button>

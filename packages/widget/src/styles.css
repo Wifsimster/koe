@@ -42,6 +42,106 @@
   resize: vertical;
 }
 
+/*
+ * Panel shell — one component, two postures.
+ * Default (desktop): floating card 360px wide, anchored to the launcher.
+ * Mobile (@media max-width: 480px): bottom sheet that hugs the viewport
+ * bottom and tracks the visible viewport height via `--koe-vvh` so the
+ * virtual keyboard can't occlude the submit button.
+ */
+.koe-panel-shell {
+  /* Default (desktop) posture. */
+  width: 360px;
+  max-width: calc(100vw - 2rem);
+  /* `dvh` follows iOS Safari's URL-bar collapse; `--koe-vvh` (written by
+   * useVisualViewport) tracks the mobile keyboard. The earlier of the
+   * two wins via `min()`. Falls back to `vh` when neither is supported. */
+  max-height: min(60vh, var(--koe-vvh, 60vh));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /*
+   * Opt into container queries so later refactors (Shadow DOM, sized
+   * iframe embeds) can switch the media rules below to @container
+   * without changing JS. The media query works today.
+   */
+  container-type: inline-size;
+}
+
+/* Grab handle only relevant in bottom-sheet mode. Hidden on desktop. */
+.koe-panel-grab {
+  display: none;
+}
+
+.koe-panel-header {
+  flex-shrink: 0;
+}
+
+.koe-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Smooth momentum scroll on iOS. */
+  -webkit-overflow-scrolling: touch;
+}
+
+/*
+ * Sticky form footer — keeps the primary action visible when a long
+ * form scrolls under the visible viewport. Combined with `overflow-y`
+ * on `.koe-panel-body`, the submit button follows the user's scroll
+ * position without jumping above the keyboard.
+ */
+.koe-panel-form-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--koe-bg, #ffffff);
+  padding-block: 8px;
+  padding-inline: 0;
+  margin-top: 4px;
+}
+
+/* Bottom-sheet posture on narrow viewports. */
+@media (max-width: 480px) {
+  .koe-root {
+    /* Override the anchored position set by the positionToClasses
+     * helper — the sheet pins to the bottom of the viewport regardless
+     * of the widget's configured position. */
+    inset: auto 0 0 0 !important;
+    top: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+  }
+
+  .koe-panel-shell {
+    width: 100%;
+    max-width: 100%;
+    max-height: min(85dvh, calc(var(--koe-vvh, 100vh) - 24px));
+    border-radius: 16px 16px 0 0 !important;
+    /* Respect the iPhone home-indicator safe area so the submit button
+     * isn't hidden under the swipe gesture. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .koe-panel-grab {
+    display: block;
+    width: 40px;
+    height: 4px;
+    margin: 8px auto 4px;
+    border-radius: 2px;
+    background: var(--koe-border, #e5e7eb);
+    /* The handle is a visual affordance; an adjacent 44px tap zone is
+     * already provided by the close button in the header. */
+  }
+
+  /* The launcher stays in its own spot — only the opened panel flips
+   * posture. Apply a bit of right padding so it doesn't kiss the edge. */
+  .koe-root .koe-panel-shell ~ button[aria-expanded] {
+    margin-right: 16px;
+    margin-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   .koe-root[data-mode='auto'] {
     --koe-bg: #111827;

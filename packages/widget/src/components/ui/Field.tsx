@@ -20,7 +20,9 @@ export function TextField({
       <input
         {...rest}
         className={clsx(
-          'koe-w-full koe-px-3 koe-py-2 koe-rounded-md koe-border koe-border-koe-border koe-bg-koe-bg focus:koe-outline-none focus:koe-border-koe-accent',
+          // `text-base` is `16px`. Anything smaller triggers iOS Safari's
+          // auto-zoom on focus, which ruins the panel layout.
+          'koe-w-full koe-px-3 koe-py-2 koe-text-base koe-rounded-md koe-border koe-border-koe-border koe-bg-koe-bg focus:koe-outline-none focus:koe-border-koe-accent',
           error && 'koe-border-red-500',
           className,
         )}
@@ -45,7 +47,8 @@ export function TextAreaField({
         rows={3}
         {...rest}
         className={clsx(
-          'koe-w-full koe-px-3 koe-py-2 koe-rounded-md koe-border koe-border-koe-border koe-bg-koe-bg focus:koe-outline-none focus:koe-border-koe-accent',
+          // See `TextField`: 16px minimum to avoid iOS auto-zoom.
+          'koe-w-full koe-px-3 koe-py-2 koe-text-base koe-rounded-md koe-border koe-border-koe-border koe-bg-koe-bg focus:koe-outline-none focus:koe-border-koe-accent',
           error && 'koe-border-red-500',
           className,
         )}

@@ -1,100 +1,135 @@
-import { useState, type ReactNode } from 'react';
-import clsx from 'clsx';
+import { useRef, useState } from 'react';
 import { useKoe } from '../context/KoeContext';
+import { useVisualViewport } from '../hooks/useVisualViewport';
 import { BugReportForm } from './forms/BugReportForm';
 import { FeatureRequestForm } from './forms/FeatureRequestForm';
-import { ChatPanel } from './chat/ChatPanel';
-
-type TabId = 'bug' | 'feature' | 'chat';
+import { IntentPicker, type Intent } from './IntentPicker';
 
 export interface PanelProps {
   onClose: () => void;
 }
 
+/**
+ * The widget's main surface. Two screens:
+ *
+ *   1. `picker` — intent selection (bug / feature). Entry point.
+ *   2. `form`   — the selected form, with a back button.
+ *
+ * On narrow viewports (<480px) the shell flips to a bottom-sheet posture
+ * — see `styles.css` for the `@media` rule. Same component, no fork.
+ *
+ * The root element has `container-type: inline-size` so later refactors
+ * (Shadow DOM, sized iframe embeds) can switch the same rules over to
+ * `@container` without touching JS.
+ */
 export function Panel({ onClose }: PanelProps) {
   const { locale, config } = useKoe();
-  const features = config.features ?? { bugs: true, features: true, chat: true };
+  const features = config.features ?? { bugs: true, features: true };
 
-  const firstTab: TabId =
-    features.bugs !== false ? 'bug' : features.features !== false ? 'feature' : 'chat';
-  const [tab, setTab] = useState<TabId>(firstTab);
+  const initialIntent: Intent | null =
+    features.bugs === false && features.features !== false ? 'feature' : null;
+  const [screen, setScreen] = useState<Intent | null>(initialIntent);
+
+  // Track visual viewport so the panel body follows the keyboard on
+  // mobile. Writes a CSS variable; no React re-render per resize.
+  const shellRef = useRef<HTMLDivElement>(null);
+  useVisualViewport(shellRef.current);
+
+  const back = locale.back ?? 'Back';
 
   return (
     <div
+      ref={shellRef}
       role="dialog"
+      aria-modal="true"
       aria-labelledby="koe-panel-title"
-      className="koe-mb-3 koe-w-[360px] koe-max-w-[calc(100vw-2rem)] koe-bg-koe-bg koe-text-koe-text koe-rounded-xl koe-shadow-koe koe-border koe-border-koe-border koe-overflow-hidden"
+      className="koe-panel-shell koe-mb-3 koe-bg-koe-bg koe-text-koe-text koe-shadow-koe koe-border koe-border-koe-border"
       style={{ borderRadius: 'var(--koe-radius, 12px)' }}
     >
-      <header className="koe-p-4 koe-bg-koe-accent koe-text-white">
-        <div className="koe-flex koe-items-start koe-justify-between">
-          <div>
-            <h2 id="koe-panel-title" className="koe-text-base koe-font-semibold koe-m-0">
-              {locale.title}
-            </h2>
-            <p className="koe-text-xs koe-opacity-90 koe-mt-1 koe-m-0">{locale.subtitle}</p>
+      {/* Grab handle, only visible in bottom-sheet mode (CSS-controlled). */}
+      <div aria-hidden="true" className="koe-panel-grab" />
+
+      <header className="koe-panel-header koe-p-4 koe-bg-koe-accent koe-text-white">
+        <div className="koe-flex koe-items-start koe-justify-between koe-gap-2">
+          <div className="koe-flex koe-items-center koe-gap-2 koe-min-w-0">
+            {screen !== null && (
+              <button
+                type="button"
+                onClick={() => setScreen(null)}
+                aria-label={back}
+                // 44px hit target, visible chevron only.
+                className="koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-min-w-[44px] koe-text-white koe-opacity-90 hover:koe-opacity-100 koe-shrink-0"
+              >
+                <BackIcon />
+              </button>
+            )}
+            <div className="koe-min-w-0">
+              <h2 id="koe-panel-title" className="koe-text-base koe-font-semibold koe-m-0 koe-truncate">
+                {headerTitle(screen, locale)}
+              </h2>
+              <p className="koe-text-xs koe-opacity-90 koe-mt-1 koe-m-0">{locale.subtitle}</p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="koe-text-white koe-opacity-80 hover:koe-opacity-100"
+            // 44px hit target fixes the previous 24px ✕ fat-finger hazard.
+            className="koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-min-w-[44px] koe-text-white koe-opacity-80 hover:koe-opacity-100 koe-shrink-0"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
       </header>
 
-      <nav className="koe-flex koe-border-b koe-border-koe-border koe-bg-koe-bg-muted">
-        {features.bugs !== false && (
-          <TabButton active={tab === 'bug'} onClick={() => setTab('bug')}>
-            {locale.tabs.bug}
-          </TabButton>
-        )}
-        {features.features !== false && (
-          <TabButton active={tab === 'feature'} onClick={() => setTab('feature')}>
-            {locale.tabs.feature}
-          </TabButton>
-        )}
-        {features.chat !== false && (
-          <TabButton active={tab === 'chat'} onClick={() => setTab('chat')}>
-            {locale.tabs.chat}
-          </TabButton>
-        )}
-      </nav>
-
-      <div className="koe-p-4 koe-max-h-[60vh] koe-overflow-y-auto">
-        {tab === 'bug' && <BugReportForm />}
-        {tab === 'feature' && <FeatureRequestForm />}
-        {tab === 'chat' && <ChatPanel />}
+      <div className="koe-panel-body koe-p-4">
+        {screen === null && <IntentPicker onPick={setScreen} />}
+        {screen === 'bug' && <BugReportForm />}
+        {screen === 'feature' && <FeatureRequestForm />}
       </div>
     </div>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
+function headerTitle(screen: Intent | null, locale: ReturnType<typeof useKoe>['locale']): string {
+  if (screen === 'bug') return locale.picker?.bug ?? 'Report a bug';
+  if (screen === 'feature') return locale.picker?.feature ?? 'Suggest an idea';
+  return locale.title;
+}
+
+function CloseIcon() {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      role="tab"
-      aria-selected={active}
-      className={clsx(
-        'koe-flex-1 koe-py-3 koe-text-sm koe-font-medium koe-transition-colors',
-        active
-          ? 'koe-text-koe-accent koe-border-b-2 koe-border-koe-accent'
-          : 'koe-text-koe-text-muted hover:koe-text-koe-text',
-      )}
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
     >
-      {children}
-    </button>
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
   );
 }
