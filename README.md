@@ -81,13 +81,15 @@ L'image officielle est publiée sur GitHub Container Registry :
 ghcr.io/wifsimster/koe-api
 ```
 
-| Tag           | Usage                                                      |
-| ------------- | ---------------------------------------------------------- |
-| `latest`      | Dernière release stable. Pas de pinning. À éviter en prod. |
-| `x.y.z`       | Release exacte. **Recommandé en production.**              |
-| `x.y`         | Dernière version patch de la mineure `x.y`.                |
-| `edge`        | Build de `main`. Utile pour tester les correctifs rapides. |
-| `sha-<short>` | Commit précis, immuable. Utile pour les rollbacks.         |
+| Tag           | Disponibilité                  | Usage                                                      |
+| ------------- | ------------------------------ | ---------------------------------------------------------- |
+| `edge`        | Chaque push sur `main`         | Dernier `main`. Utile pour tester les correctifs rapides.  |
+| `sha-<short>` | Chaque push sur `main`         | Commit précis, immuable. Utile pour les rollbacks.         |
+| `latest`      | Sur push d'un tag `api-v*`     | Dernière release stable. Pas de pinning. À éviter en prod. |
+| `x.y.z`       | Sur push d'un tag `api-v*`     | Release exacte. **Recommandé en production.**              |
+| `x.y`         | Sur push d'un tag `api-v*`     | Dernière version patch de la mineure `x.y`.                |
+
+Les tags stables n'existent qu'après le push d'un tag git `api-vX.Y.Z`. Tant qu'aucun tag `api-v*` n'a été poussé, seuls `:edge` et `:sha-<short>` sont disponibles — c'est pourquoi `KOE_API_TAG=edge` est le défaut de `.env.docker.example`.
 
 Les images sont **multi-architecture** (`linux/amd64`, `linux/arm64`), signées via Sigstore cosign (keyless, OIDC GitHub), publiées avec une attestation de provenance SLSA et un SBOM. Elles sont scannées à chaque release par Trivy (le build échoue sur tout CVE HIGH/CRITICAL disposant d'un correctif).
 
@@ -321,7 +323,7 @@ Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour l
 - **Widget** : React 19, TypeScript, Vite, Tailwind CSS.
 - **Service Koe (API)** : Hono, Zod, Drizzle ORM, PostgreSQL. Bundlé avec tsup et publié en image Docker multi-arch.
 - **Monorepo** : `pnpm` workspaces et Turborepo.
-- **Release** : GitHub Actions + `semantic-release` (widget, tags `v*`) + build Docker déclenché sur tags `api-v*` (image de l'API).
+- **Release** : deux pistes indépendantes sur `main`. Widget via `semantic-release` (tags `v*` + GitHub Releases). Image API via workflow Docker (tags roulants `:edge` + `:sha-*` à chaque push, tags stables `:latest` + `:x.y.z` sur push d'un tag git `api-v*`).
 
 ## Documentation complémentaire
 

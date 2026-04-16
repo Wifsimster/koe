@@ -83,7 +83,9 @@ BREAKING CHANGE: React 18 is now the minimum.
 
 ### What triggers an actual release
 
-When a PR merges to `main`, the release workflow runs `semantic-release`. It:
+Two pipelines run in parallel on `main`. They don't share tags.
+
+**Widget (`semantic-release`)** — every push to `main`:
 
 1. Walks the commits since the last `v*` tag.
 2. Decides the next version from the commit types above.
@@ -93,6 +95,20 @@ When a PR merges to `main`, the release workflow runs `semantic-release`. It:
 No `CHANGELOG.md` is committed back to the repo — release notes live on the GitHub Releases page.
 
 The widget is not published to npm. Consumers pin to a git tag (e.g. `npm install github:Wifsimster/koe#v0.1.0`) or load the IIFE bundle from a GitHub-backed CDN such as jsDelivr.
+
+**API image (`Docker` workflow)** — triggered by push to `main` touching `packages/api/**`, `packages/shared/**` or the lockfile:
+
+1. Builds `packages/api/Dockerfile` as multi-arch (amd64 + arm64).
+2. Pushes to `ghcr.io/wifsimster/koe-api` with rolling tags `:edge` and `:sha-<short>`.
+3. Signs the image (cosign keyless, OIDC), attaches SLSA provenance + SBOM, scans with Trivy (fails on fixable HIGH/CRITICAL CVEs).
+
+For a **stable** image tag (`:latest`, `:X.Y.Z`, `:X.Y`, `:X`), cut an API-scoped git tag:
+
+```bash
+git tag api-v0.1.0 && git push origin api-v0.1.0
+```
+
+Widget releases and API releases are independent — a `v1.2.3` tag does not rebuild the image, and an `api-v1.2.3` tag does not cut a widget release.
 
 ## Required secrets (maintainers)
 
