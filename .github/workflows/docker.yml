@@ -19,6 +19,7 @@ on:
     paths:
       - 'packages/api/**'
       - 'packages/shared/**'
+      - 'packages/dashboard/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - '.github/workflows/docker.yml'
