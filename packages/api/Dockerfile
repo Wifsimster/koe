@@ -1,21 +1,20 @@
 # syntax=docker/dockerfile:1.7
 
 # --- Base image ----------------------------------------------------------
-# Pinned to a specific Node + Alpine release. Operators wiring Renovate or
-# Dependabot should update this tag (and re-pin the digest) on every image
-# cut. The `@sha256:...` suffix is deliberately omitted here so the repo
-# stays buildable without a registry auth; CI rebuilds it against a
-# digest-pinned base (see .github/workflows/docker.yml).
-ARG NODE_IMAGE=node:20.18.1-alpine3.20
+# Tracks the current Node.js LTS on Alpine. The floating tag trades strict
+# reproducibility for always landing on a distro that still receives
+# security updates — Alpine branches go EOL on a ~2-year cadence and
+# Trivy fails the pipeline once the base stops getting patches.
+ARG NODE_IMAGE=node:lts-alpine
 
 # --- Builder -------------------------------------------------------------
 FROM ${NODE_IMAGE} AS builder
 WORKDIR /repo
 
-# corepack ships with Node 20 and resolves the pnpm version from the
-# workspace's `packageManager` field. The bundled corepack in older
-# Node 20 patch releases can't verify pnpm's current signing key
-# ("Cannot find matching keyid"), so pull the latest corepack first.
+# corepack ships with Node and resolves the pnpm version from the
+# workspace's `packageManager` field. The bundled corepack in older Node
+# patch releases can't verify pnpm's current signing key ("Cannot find
+# matching keyid"), so pull the latest corepack first.
 RUN npm install -g corepack@latest && corepack enable
 
 # Copy workspace manifests first so layer caching holds across source
