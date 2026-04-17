@@ -8,7 +8,7 @@ import {
 } from 'hono/cookie';
 import { eq } from 'drizzle-orm';
 import { db, firstOrThrow, schema } from '../db';
-import { fail } from '../lib/response';
+import { ok, fail } from '../lib/response';
 import {
   createRawSessionToken,
   hashSessionToken,
@@ -52,6 +52,11 @@ const STATE_TTL_SECONDS = 600; // 10 min — long enough for the OIDC round-trip
 
 export function createOidcAuthRoutes(cfg: OidcAuthConfig): Hono {
   const app = new Hono();
+
+  // Public mode discovery. The SPA fetches this at boot to pick the
+  // right login form without a build-time `VITE_ADMIN_AUTH_MODE` — a
+  // single published image serves every auth mode.
+  app.get('/config', (c) => ok(c, { mode: 'oidc' as const }));
 
   app.get('/login', async (c) => {
     const returnTo = c.req.query('redirect_to') ?? null;

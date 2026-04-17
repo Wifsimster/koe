@@ -71,6 +71,11 @@ export function createPasswordAuthRoutes(cfg: PasswordAuthConfig): Hono {
     key: (c) => `ip:${clientIp(c)}`,
   });
 
+  // Public mode discovery. The SPA fetches this at boot to pick the
+  // right login form without a build-time `VITE_ADMIN_AUTH_MODE` — a
+  // single published image serves every auth mode.
+  app.get('/config', (c) => ok(c, { mode: 'password' as const }));
+
   app.post('/password', rateGate, async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = loginSchema.safeParse(body);

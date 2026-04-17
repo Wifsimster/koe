@@ -7,7 +7,7 @@ import { createAdminApiRoutes } from './routes/adminApi';
 import { createOidcAuthRoutes } from './routes/oidcAuth';
 import { createPasswordAuthRoutes } from './routes/passwordAuth';
 import { createOidcService } from './lib/oidc';
-import { fail } from './lib/response';
+import { ok, fail } from './lib/response';
 
 export const app = new Hono();
 
@@ -40,10 +40,18 @@ if (adminAuthMode === 'dev-session') {
         'once an OIDC provider is configured.',
     );
   }
-  app.route(
-    '/v1/admin',
+  // Expose the same `/auth/config` discovery endpoint as the other
+  // modes so the SPA can resolve its login form at runtime. No other
+  // `/auth/*` routes here — the CLI flow is out-of-band.
+  const adminRoot = new Hono();
+  const devAuth = new Hono();
+  devAuth.get('/config', (c) => ok(c, { mode: 'dev-session' as const }));
+  adminRoot.route('/auth', devAuth);
+  adminRoot.route(
+    '/',
     createAdminApiRoutes({ dashboardOrigin: process.env.ADMIN_DASHBOARD_ORIGIN }),
   );
+  app.route('/v1/admin', adminRoot);
 } else if (adminAuthMode === 'oidc') {
   const {
     OIDC_ISSUER_URL,
