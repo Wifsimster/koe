@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { captureBrowserMetadata } from '@koe/shared';
 import { useKoe } from '../../context/KoeContext';
+import { KoeApiError } from '../../api/client';
 import { TextField, TextAreaField } from '../ui/Field';
 import { Button } from '../ui/Button';
 
@@ -22,6 +23,11 @@ const EMPTY: FormState = {
   email: '',
 };
 
+// Minimal shape check. Empty strings are treated as "not provided" and
+// skipped by the caller — the email field is optional.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidEmail = (value: string) => EMAIL_RE.test(value);
+
 export function BugReportForm() {
   const { locale, api, config } = useKoe();
   const [state, setState] = useState<FormState>(EMPTY);
@@ -29,6 +35,11 @@ export function BugReportForm() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  // Cancel the in-flight request if the widget closes mid-submit so we
+  // don't update state on an unmounted component and don't waste bytes on
+  // a response nobody will read.
+  const controllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => controllerRef.current?.abort(), []);
 
   if (success) {
     return (
@@ -47,11 +58,17 @@ export function BugReportForm() {
     setApiError(null);
 
     const nextErrors: Partial<Record<keyof FormState, string>> = {};
-    if (!state.title.trim()) nextErrors.title = 'Required';
-    if (!state.description.trim()) nextErrors.description = 'Required';
+    if (!state.title.trim()) nextErrors.title = locale.errors.required;
+    if (!state.description.trim()) nextErrors.description = locale.errors.required;
+    const trimmedEmail = state.email.trim();
+    if (trimmedEmail && !isValidEmail(trimmedEmail)) {
+      nextErrors.email = locale.errors.invalidEmail;
+    }
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setSubmitting(true);
     try {
       // The host-supplied user object wins over a widget-collected email.
@@ -60,20 +77,29 @@ export function BugReportForm() {
       const email = state.email.trim() || baseReporter.email;
       const reporter = email ? { ...baseReporter, email } : baseReporter;
 
-      await api.submitBugReport({
-        title: state.title.trim(),
-        description: state.description.trim(),
-        stepsToReproduce: state.steps.trim() || undefined,
-        expectedBehavior: state.expected.trim() || undefined,
-        actualBehavior: state.actual.trim() || undefined,
-        reporter,
-        metadata: captureBrowserMetadata(),
-      });
+      await api.submitBugReport(
+        {
+          title: state.title.trim(),
+          description: state.description.trim(),
+          stepsToReproduce: state.steps.trim() || undefined,
+          expectedBehavior: state.expected.trim() || undefined,
+          actualBehavior: state.actual.trim() || undefined,
+          reporter,
+          metadata: captureBrowserMetadata(),
+        },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       setSuccess(true);
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Something went wrong');
+      if (controller.signal.aborted) return;
+      if (err instanceof KoeApiError && err.code === 'network_error') {
+        setApiError(locale.errors.network);
+      } else {
+        setApiError(err instanceof Error ? err.message : locale.errors.generic);
+      }
     } finally {
-      setSubmitting(false);
+      if (!controller.signal.aborted) setSubmitting(false);
     }
   };
 
@@ -126,6 +152,7 @@ export function BugReportForm() {
           inputMode="email"
           value={state.email}
           onChange={(e) => update('email')(e.target.value)}
+          error={errors.email}
         />
       )}
 

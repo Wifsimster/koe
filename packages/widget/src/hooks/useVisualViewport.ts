@@ -27,6 +27,12 @@ export function useVisualViewport(target: HTMLElement | null): void {
       target.style.setProperty('--koe-vvh', `${vv.height}px`);
     };
 
+    // Listeners live on `window.visualViewport` (not on `target`), and
+    // `[target]` as the dep array means React runs this cleanup with the
+    // same `vv` + `write` references captured on mount before re-running
+    // the effect with a new target. No leak across target identity
+    // changes: the old `write` is detached by reference before the new
+    // one is registered.
     write();
     vv.addEventListener('resize', write);
     vv.addEventListener('scroll', write);

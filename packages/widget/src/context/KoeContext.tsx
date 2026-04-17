@@ -17,16 +17,28 @@ export interface KoeProviderProps {
 }
 
 export function KoeProvider({ config, children }: KoeProviderProps) {
-  const value = useMemo<KoeContextValue>(() => {
-    const locale = mergeLocale(config.locale);
-    const api = new KoeApiClient({
-      apiUrl: assertApiUrl(config.apiUrl),
-      projectKey: config.projectKey,
-      userHash: config.userHash,
-      identityToken: config.identityToken,
-    });
-    return { config, locale, api };
-  }, [config]);
+  // Depend on the primitive fields the client cares about, not the whole
+  // `config` reference. Hosts commonly pass an inline object literal —
+  // `<KoeProvider config={{ apiUrl, projectKey }}>` — which would otherwise
+  // rebuild the API client (and drop in-flight requests) on every render.
+  const { apiUrl, projectKey, userHash, identityToken } = config;
+  const api = useMemo(
+    () =>
+      new KoeApiClient({
+        apiUrl: assertApiUrl(apiUrl),
+        projectKey,
+        userHash,
+        identityToken,
+      }),
+    [apiUrl, projectKey, userHash, identityToken],
+  );
+
+  const locale = useMemo(() => mergeLocale(config.locale), [config.locale]);
+
+  const value = useMemo<KoeContextValue>(
+    () => ({ config, locale, api }),
+    [config, locale, api],
+  );
 
   return <KoeContext.Provider value={value}>{children}</KoeContext.Provider>;
 }
@@ -83,5 +95,6 @@ function mergeLocale(override?: Partial<WidgetLocale>): WidgetLocale {
     bugForm: { ...DEFAULT_LOCALE.bugForm, ...(override.bugForm ?? {}) },
     featureForm: { ...DEFAULT_LOCALE.featureForm, ...(override.featureForm ?? {}) },
     chat: { ...DEFAULT_LOCALE.chat, ...(override.chat ?? {}) },
+    errors: { ...DEFAULT_LOCALE.errors, ...(override.errors ?? {}) },
   };
 }

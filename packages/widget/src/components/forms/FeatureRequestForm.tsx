@@ -1,18 +1,36 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { captureBrowserMetadata } from '@koe/shared';
 import { useKoe } from '../../context/KoeContext';
+import { KoeApiError } from '../../api/client';
 import { TextField, TextAreaField } from '../ui/Field';
 import { Button } from '../ui/Button';
 
+interface FormState {
+  title: string;
+  description: string;
+  email: string;
+}
+
+const EMPTY: FormState = {
+  title: '',
+  description: '',
+  email: '',
+};
+
+// Minimal shape check. Empty strings are treated as "not provided" and
+// skipped by the caller — the email field is optional.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidEmail = (value: string) => EMAIL_RE.test(value);
+
 export function FeatureRequestForm() {
   const { locale, api, config } = useKoe();
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [email, setEmail] = useState('');
-  const [errors, setErrors] = useState<{ title?: string; description?: string }>({});
+  const [state, setState] = useState<FormState>(EMPTY);
+  const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => controllerRef.current?.abort(), []);
 
   if (success) {
     return (
@@ -24,9 +42,7 @@ export function FeatureRequestForm() {
           type="button"
           onClick={() => {
             setSuccess(false);
-            setTitle('');
-            setDescription('');
-            setEmail('');
+            setState(EMPTY);
           }}
         >
           Submit another
@@ -39,45 +55,65 @@ export function FeatureRequestForm() {
     e.preventDefault();
     setApiError(null);
 
-    const nextErrors: typeof errors = {};
-    if (!title.trim()) nextErrors.title = 'Required';
-    if (!description.trim()) nextErrors.description = 'Required';
+    const nextErrors: Partial<Record<keyof FormState, string>> = {};
+    if (!state.title.trim()) nextErrors.title = locale.errors.required;
+    if (!state.description.trim()) nextErrors.description = locale.errors.required;
+    const trimmedEmail = state.email.trim();
+    if (trimmedEmail && !isValidEmail(trimmedEmail)) {
+      nextErrors.email = locale.errors.invalidEmail;
+    }
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setSubmitting(true);
     try {
       const baseReporter = config.user ?? { id: 'anonymous' };
-      const finalEmail = email.trim() || baseReporter.email;
+      const finalEmail = trimmedEmail || baseReporter.email;
       const reporter = finalEmail ? { ...baseReporter, email: finalEmail } : baseReporter;
 
-      await api.submitFeatureRequest({
-        title: title.trim(),
-        description: description.trim(),
-        reporter,
-        metadata: captureBrowserMetadata(),
-      });
+      await api.submitFeatureRequest(
+        {
+          title: state.title.trim(),
+          description: state.description.trim(),
+          reporter,
+          metadata: captureBrowserMetadata(),
+        },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       setSuccess(true);
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Something went wrong');
+      if (controller.signal.aborted) return;
+      if (err instanceof KoeApiError && err.code === 'network_error') {
+        setApiError(locale.errors.network);
+      } else {
+        setApiError(err instanceof Error ? err.message : locale.errors.generic);
+      }
     } finally {
-      setSubmitting(false);
+      if (!controller.signal.aborted) setSubmitting(false);
     }
   };
+
+  const update =
+    <K extends keyof FormState>(key: K) =>
+    (value: string) =>
+      setState((s) => ({ ...s, [key]: value }));
 
   return (
     <form onSubmit={onSubmit} noValidate>
       <TextField
         label={locale.featureForm.title}
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
+        value={state.title}
+        onChange={(e) => update('title')(e.target.value)}
         error={errors.title}
         required
       />
       <TextAreaField
         label={locale.featureForm.description}
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
+        value={state.description}
+        onChange={(e) => update('description')(e.target.value)}
         error={errors.description}
         rows={4}
         required
@@ -88,8 +124,9 @@ export function FeatureRequestForm() {
           type="email"
           autoComplete="email"
           inputMode="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          value={state.email}
+          onChange={(e) => update('email')(e.target.value)}
+          error={errors.email}
         />
       )}
 

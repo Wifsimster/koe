@@ -1,10 +1,34 @@
 import type {
-  ApiResponse,
   BugReport,
   CreateBugReportInput,
   CreateFeatureRequestInput,
   FeatureRequest,
 } from '@koe/shared';
+import { z } from 'zod';
+
+/**
+ * Validates the API response envelope shape only. The inner `data` payload
+ * is left as `unknown` and trusted via the caller's generic — the server
+ * is first-party and TypeScript already describes each endpoint's shape
+ * through the public client methods. What we guard against here is a
+ * malformed or impostor response (reverse proxy error page, captive
+ * portal, etc.) slipping past the cast and blowing up downstream.
+ *
+ * Declared at module scope so the schema is compiled once per bundle,
+ * not rebuilt on every request.
+ */
+const envelopeSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: z.unknown() }),
+  z.object({
+    ok: z.literal(false),
+    error: z.object({ code: z.string(), message: z.string() }),
+  }),
+]);
+
+export interface RequestOptions {
+  /** Abort the request when the host component unmounts or navigates away. */
+  signal?: AbortSignal;
+}
 
 export interface KoeApiClientOptions {
   apiUrl: string;
@@ -47,25 +71,35 @@ export class KoeApiClient {
     this.identityToken = opts.identityToken;
   }
 
-  async submitBugReport(input: CreateBugReportInput): Promise<BugReport> {
-    return this.post<BugReport>('/v1/widget/bugs', input);
+  async submitBugReport(
+    input: CreateBugReportInput,
+    opts: RequestOptions = {},
+  ): Promise<BugReport> {
+    return this.post<BugReport>('/v1/widget/bugs', input, opts.signal);
   }
 
-  async submitFeatureRequest(input: CreateFeatureRequestInput): Promise<FeatureRequest> {
-    return this.post<FeatureRequest>('/v1/widget/features', input);
+  async submitFeatureRequest(
+    input: CreateFeatureRequestInput,
+    opts: RequestOptions = {},
+  ): Promise<FeatureRequest> {
+    return this.post<FeatureRequest>('/v1/widget/features', input, opts.signal);
   }
 
-  async listFeatureRequests(userId?: string): Promise<FeatureRequest[]> {
+  async listFeatureRequests(userId?: string, opts: RequestOptions = {}): Promise<FeatureRequest[]> {
     const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
-    return this.get<FeatureRequest[]>(`/v1/widget/features${qs}`);
+    return this.get<FeatureRequest[]>(`/v1/widget/features${qs}`, opts.signal);
   }
 
-  async voteFeature(id: string, userId: string): Promise<FeatureRequest> {
-    return this.post<FeatureRequest>(`/v1/widget/features/${id}/vote`, { userId });
+  async voteFeature(
+    id: string,
+    userId: string,
+    opts: RequestOptions = {},
+  ): Promise<FeatureRequest> {
+    return this.post<FeatureRequest>(`/v1/widget/features/${id}/vote`, { userId }, opts.signal);
   }
 
-  private async get<T>(path: string): Promise<T> {
-    const res = await fetch(this.apiUrl + path, {
+  private async get<T>(path: string, signal?: AbortSignal): Promise<T> {
+    const res = await this.fetchSafe(this.apiUrl + path, {
       method: 'GET',
       headers: this.headers(),
       // Identity travels in explicit headers only. `omit` prevents host
@@ -74,18 +108,35 @@ export class KoeApiClient {
       // credentialed requests from recording the identity header in
       // breadcrumbs.
       credentials: 'omit',
+      signal,
     });
     return this.unwrap<T>(res);
   }
 
-  private async post<T>(path: string, body: unknown): Promise<T> {
-    const res = await fetch(this.apiUrl + path, {
+  private async post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    const res = await this.fetchSafe(this.apiUrl + path, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify(body),
       credentials: 'omit',
+      signal,
     });
     return this.unwrap<T>(res);
+  }
+
+  // Wrap `fetch` so network failures surface as typed `KoeApiError` with a
+  // stable `network_error` code. Host error reporting (Sentry breadcrumbs,
+  // analytics) can then filter on the code instead of string-matching the
+  // browser's locale-dependent `TypeError: Failed to fetch`. AbortError is
+  // re-thrown untouched so callers can detect cancellation via the signal.
+  private async fetchSafe(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      const message = err instanceof Error ? err.message : 'Network request failed';
+      throw new KoeApiError('network_error', message);
+    }
   }
 
   private headers(): HeadersInit {
@@ -104,16 +155,24 @@ export class KoeApiClient {
   }
 
   private async unwrap<T>(res: Response): Promise<T> {
-    let payload: ApiResponse<T>;
+    let raw: unknown;
     try {
-      payload = (await res.json()) as ApiResponse<T>;
+      raw = await res.json();
     } catch {
-      throw new Error(`Koe API returned non-JSON response (status ${res.status})`);
+      throw new KoeApiError(
+        'invalid_response',
+        `Koe API returned non-JSON response (status ${res.status}${res.statusText ? ` ${res.statusText}` : ''})`,
+      );
     }
+    const parsed = envelopeSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new KoeApiError('invalid_response', 'Koe API returned an unexpected envelope shape');
+    }
+    const payload = parsed.data;
     if (!payload.ok) {
       throw new KoeApiError(payload.error.code, payload.error.message);
     }
-    return payload.data;
+    return payload.data as T;
   }
 }
 

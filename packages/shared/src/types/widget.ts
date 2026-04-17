@@ -107,6 +107,13 @@ export interface WidgetLocale {
     empty: string;
     send: string;
   };
+  /** Inline error messages surfaced by the widget forms. */
+  errors: {
+    required: string;
+    invalidEmail: string;
+    network: string;
+    generic: string;
+  };
 }
 
 export const DEFAULT_LOCALE: WidgetLocale = {
@@ -147,5 +154,11 @@ export const DEFAULT_LOCALE: WidgetLocale = {
     placeholder: 'Type a message…',
     empty: 'No messages yet. Say hi!',
     send: 'Send',
+  },
+  errors: {
+    required: 'Required',
+    invalidEmail: 'Enter a valid email',
+    network: 'Network error — check your connection',
+    generic: 'Something went wrong',
   },
 };
