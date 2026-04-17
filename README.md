@@ -117,19 +117,19 @@ docker run --rm -p 8787:8787 \
 | `PORT`               | Non         | Port d'écoute HTTP. Par défaut `8787`.                                         |
 | `HOST`               | Non         | Interface d'écoute. Par défaut `0.0.0.0`.                                      |
 | `MIGRATE_ON_START`   | Non         | `true` (défaut) applique les migrations au boot. `false` en multi-réplicas.    |
-| `ENABLE_DASHBOARD`   | Non         | `true` (défaut) expose le dashboard admin à `/admin/`. Mettre `false` pour exposition publique sans auth proxy. |
+| `ENABLE_DASHBOARD`   | Non         | `false` (défaut) : le dashboard admin n'est pas servi. Passer à `true` uniquement derrière votre reverse-proxy + auth (pas d'auth intégrée tant que `better-auth` n'est pas câblé). |
 | `BETTER_AUTH_SECRET` | Réservée    | Prévue pour l'intégration future de `better-auth`. Non utilisée aujourd'hui.   |
 | `BETTER_AUTH_URL`    | Réservée    | Prévue pour l'intégration future de `better-auth`. Non utilisée aujourd'hui.   |
 
 ### Dashboard admin
 
-Le dashboard est **embarqué dans l'image et activé par défaut**. Après `docker compose up`, ouvrez `http://localhost:8787/admin/`.
+Le dashboard est **embarqué dans l'image mais désactivé par défaut**. Pour l'activer, mettez `ENABLE_DASHBOARD=true` dans votre `.env`, redémarrez l'API, puis ouvrez `http://localhost:8787/admin/`.
 
 Points d'attention :
 
 - Le dashboard est encore **un squelette** : la navigation fonctionne, mais les pages affichent des placeholders tant que l'API d'administration n'est pas branchée.
-- Il n'y a **pas encore d'authentification** native (`better-auth` est prévu mais non câblé). Pour une exposition publique, mettez votre propre reverse-proxy avec auth devant `/admin/*`, ou désactivez le dashboard avec `ENABLE_DASHBOARD=false`.
-- Désactiver le flag retire toutes les routes `/admin/*` (elles répondent `404` dans l'enveloppe JSON commune).
+- Il n'y a **pas encore d'authentification** native (`better-auth` est prévu mais non câblé). Tant que ce n'est pas le cas, n'activez `/admin/*` que derrière votre propre reverse-proxy avec auth — ou sur un réseau privé.
+- Désactiver le flag (ou le laisser sur son défaut) retire toutes les routes `/admin/*` (elles répondent `404` dans l'enveloppe JSON commune).
 
 ### Créer un projet
 

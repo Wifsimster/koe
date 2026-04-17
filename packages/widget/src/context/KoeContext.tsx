@@ -20,7 +20,7 @@ export function KoeProvider({ config, children }: KoeProviderProps) {
   const value = useMemo<KoeContextValue>(() => {
     const locale = mergeLocale(config.locale);
     const api = new KoeApiClient({
-      apiUrl: config.apiUrl ?? 'https://api.koe.dev',
+      apiUrl: assertApiUrl(config.apiUrl),
       projectKey: config.projectKey,
       userHash: config.userHash,
       identityToken: config.identityToken,
@@ -29,6 +29,36 @@ export function KoeProvider({ config, children }: KoeProviderProps) {
   }, [config]);
 
   return <KoeContext.Provider value={value}>{children}</KoeContext.Provider>;
+}
+
+/**
+ * Validate the `apiUrl` the host passes to the widget. The widget forwards
+ * reporter identity (`X-Koe-User-Hash` / `X-Koe-Identity-Token`) on every
+ * request, so a misconfigured or attacker-influenced `apiUrl` would
+ * silently send identity-bearing payloads to an arbitrary endpoint. We
+ * parse it, require an `http(s):` scheme, and refuse `javascript:`,
+ * `data:`, protocol-relative, and non-URL inputs.
+ *
+ * Exported so the standalone `Koe.init()` entrypoint can reuse it.
+ */
+export function assertApiUrl(raw: string | undefined): string {
+  if (!raw || typeof raw !== 'string') {
+    throw new Error(
+      'Koe: `apiUrl` is required. Pass the URL of your self-hosted Koe service (e.g. "https://api.support.acme.com").',
+    );
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`Koe: \`apiUrl\` is not a valid absolute URL (got "${raw}").`);
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(
+      `Koe: \`apiUrl\` must use http(s). Got "${parsed.protocol}" — refusing to send identity headers to a non-http(s) endpoint.`,
+    );
+  }
+  return raw;
 }
 
 export function useKoe(): KoeContextValue {

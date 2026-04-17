@@ -19,7 +19,11 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-koe}
       POSTGRES_USER: ${POSTGRES_USER:-koe}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-koe}
+      # No default: unset `POSTGRES_PASSWORD` must fail compose up rather
+      # than silently seeding Postgres with a predictable literal. Copy
+      # `.env.docker.example` → `.env` and replace the placeholder before
+      # `docker compose up`.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env (copy from .env.docker.example).}
     volumes:
       - koe-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -44,11 +48,14 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-koe}:${POSTGRES_PASSWORD:-koe}@db:5432/${POSTGRES_DB:-koe}
+      DATABASE_URL: postgres://${POSTGRES_USER:-koe}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env (copy from .env.docker.example).}@db:5432/${POSTGRES_DB:-koe}
       PORT: 8787
       HOST: 0.0.0.0
       MIGRATE_ON_START: ${MIGRATE_ON_START:-true}
-      ENABLE_DASHBOARD: ${ENABLE_DASHBOARD:-true}
+      # Dashboard is opt-in: there is no built-in auth yet, so exposing
+      # `/admin/*` requires an explicit `ENABLE_DASHBOARD=true` in `.env`
+      # plus your own reverse-proxy / auth in front of the port.
+      ENABLE_DASHBOARD: ${ENABLE_DASHBOARD:-false}
     ports:
       - '${KOE_API_PORT:-8787}:8787'
     healthcheck:

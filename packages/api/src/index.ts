@@ -104,11 +104,14 @@ if (adminAuthMode === 'dev-session') {
   throw new Error(`Unknown ADMIN_AUTH_MODE=${adminAuthMode}`);
 }
 
-// Admin dashboard SPA. Enabled by default so a fresh `docker compose up`
-// shows you the UI immediately. Operators exposing the API publicly
-// before admin auth lands should set `ENABLE_DASHBOARD=false` (or put
-// their own auth in front of `/admin/*`).
-if ((process.env.ENABLE_DASHBOARD ?? 'true').toLowerCase() === 'true') {
+// Admin dashboard SPA. Opt-in via `ENABLE_DASHBOARD=true`: until the
+// dashboard has its own auth wired (better-auth lands in a follow-up
+// MR), serving the UI by default on a self-hosted image would leak an
+// unauthenticated admin surface to any operator who exposes port 8787
+// without a reverse proxy. Operators who want the UI must consciously
+// flip the flag and accept responsibility for putting auth in front of
+// `/admin/*`.
+if ((process.env.ENABLE_DASHBOARD ?? 'false').toLowerCase() === 'true') {
   app.route('/admin', createAdminRoutes());
 }
 

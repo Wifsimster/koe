@@ -2,6 +2,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createElement } from 'react';
 import type { WidgetConfig } from '@koe/shared';
 import { KoeWidget } from './components/KoeWidget';
+import { assertApiUrl } from './context/KoeContext';
 
 interface MountedInstance {
   root: Root;
@@ -22,6 +23,9 @@ export function init(config: WidgetConfig): void {
   if (!config?.projectKey) {
     throw new Error('Koe.init() requires a projectKey');
   }
+  // Fail fast on a bad `apiUrl` before mounting — identity headers would
+  // otherwise be sent to the misconfigured endpoint on first submission.
+  assertApiUrl(config.apiUrl);
   if (instance) {
     destroy();
   }
