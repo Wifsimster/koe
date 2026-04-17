@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { and, count, desc, eq, gte, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
 import { ok, fail } from '../lib/response';
@@ -783,6 +783,199 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         },
         201,
       );
+    },
+  );
+
+  /**
+   * Bulk mutation — apply the same patch to up to 100 tickets in one
+   * call. Sibling of the single-ticket PATCH, not a replacement: the
+   * single form keeps its audit + response shape, this one optimises
+   * the "close these 20 duplicates" flow without making the UI walk a
+   * for-loop of requests.
+   *
+   * Semantics:
+   *   - Writer-gated, same as the single PATCH.
+   *   - All ids are scoped to the caller's project via the same
+   *     `(id, project_id)` WHERE the single form uses. Ids that
+   *     don't match are reported as `failed` with `reason: 'not_found'`.
+   *   - Assignee membership is validated once up front (the patch is
+   *     the same for every id); if it's bad we fail the whole batch
+   *     with a 422 — the caller never gets a partial write for that
+   *     case.
+   *   - Audit events are emitted per actually-changed field per
+   *     ticket, same shape as the single PATCH. A noop-for-this-row
+   *     ticket is silent.
+   *   - One transaction for the whole batch. Either every row lands
+   *     or none do.
+   */
+  const bulkPatchSchema = z
+    .object({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+      patch: z
+        .object({
+          status: ticketStatusSchema.optional(),
+          priority: ticketPrioritySchema.optional(),
+          assignedToUserId: z.string().uuid().nullable().optional(),
+        })
+        .refine(
+          (v) =>
+            v.status !== undefined ||
+            v.priority !== undefined ||
+            v.assignedToUserId !== undefined,
+          {
+            message:
+              'At least one of status, priority, or assignedToUserId is required',
+          },
+        ),
+    });
+
+  api.post(
+    '/projects/:key/tickets/bulk',
+    requireProjectMember,
+    requireProjectWriter,
+    async (c) => {
+      const project = c.get('project');
+      const user = c.get('user');
+
+      const body = await c.req.json().catch(() => null);
+      const parsed = bulkPatchSchema.safeParse(body);
+      if (!parsed.success) {
+        return fail(c, 'validation_failed', 'Invalid bulk payload', 422, {
+          issues: parsed.error.issues,
+        });
+      }
+      const { ids, patch } = parsed.data;
+
+      type Failure = { id: string; reason: 'not_found' };
+      const result = await db.transaction(async (tx) => {
+        // Validate the assignee once. The same patch applies to every
+        // id, so checking per-row would be wasted round-trips.
+        if (patch.assignedToUserId !== undefined && patch.assignedToUserId !== null) {
+          const [assignee] = await tx
+            .select({ userId: schema.projectMembers.userId })
+            .from(schema.projectMembers)
+            .where(
+              and(
+                eq(schema.projectMembers.projectId, project.id),
+                eq(schema.projectMembers.userId, patch.assignedToUserId),
+              ),
+            )
+            .limit(1);
+          if (!assignee) {
+            return { invalidAssignee: true } as const;
+          }
+        }
+
+        // Fetch the before-state for every id that actually belongs
+        // to this project. Ids that aren't in the result set = not
+        // ours, and land in `failed` with a uniform reason.
+        const before = await tx
+          .select()
+          .from(schema.tickets)
+          .where(
+            and(
+              eq(schema.tickets.projectId, project.id),
+              inArray(schema.tickets.id, ids),
+            ),
+          );
+        const beforeById = new Map(before.map((t) => [t.id, t]));
+        const failed: Failure[] = ids
+          .filter((id) => !beforeById.has(id))
+          .map((id) => ({ id, reason: 'not_found' }));
+
+        if (before.length === 0) {
+          return { invalidAssignee: false, updatedCount: 0, failed } as const;
+        }
+
+        // A single UPDATE with an `IN (…)` WHERE. Drizzle batches
+        // values + where, Postgres executes one statement.
+        const updated = await tx
+          .update(schema.tickets)
+          .set({
+            ...(patch.status ? { status: patch.status } : {}),
+            ...(patch.priority ? { priority: patch.priority } : {}),
+            ...(patch.assignedToUserId !== undefined
+              ? { assignedToUserId: patch.assignedToUserId }
+              : {}),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.tickets.projectId, project.id),
+              inArray(
+                schema.tickets.id,
+                before.map((t) => t.id),
+              ),
+            ),
+          )
+          .returning({ id: schema.tickets.id });
+
+        // One audit event per actually-changed field per ticket.
+        // Same shape as the single PATCH — the Activity feed can't
+        // tell whether a change came from bulk or not, which is
+        // intentional: the log is about what happened, not how.
+        const events: Array<{
+          ticketId: string;
+          actorUserId: string;
+          kind: 'status_changed' | 'priority_changed' | 'assigned';
+          payload: Record<string, unknown>;
+        }> = [];
+        for (const row of before) {
+          if (patch.status && patch.status !== row.status) {
+            events.push({
+              ticketId: row.id,
+              actorUserId: user.id,
+              kind: 'status_changed',
+              payload: { from: row.status, to: patch.status },
+            });
+          }
+          if (patch.priority && patch.priority !== row.priority) {
+            events.push({
+              ticketId: row.id,
+              actorUserId: user.id,
+              kind: 'priority_changed',
+              payload: { from: row.priority, to: patch.priority },
+            });
+          }
+          if (
+            patch.assignedToUserId !== undefined &&
+            patch.assignedToUserId !== row.assignedToUserId
+          ) {
+            events.push({
+              ticketId: row.id,
+              actorUserId: user.id,
+              kind: 'assigned',
+              payload: {
+                fromUserId: row.assignedToUserId,
+                toUserId: patch.assignedToUserId,
+              },
+            });
+          }
+        }
+        if (events.length > 0) {
+          await tx.insert(schema.adminTicketEvents).values(events);
+        }
+
+        return {
+          invalidAssignee: false,
+          updatedCount: updated.length,
+          failed,
+        } as const;
+      });
+
+      if ('invalidAssignee' in result && result.invalidAssignee) {
+        return fail(
+          c,
+          'validation_failed',
+          'assignedToUserId must refer to a member of this project',
+          422,
+        );
+      }
+
+      return ok(c, {
+        updated: result.updatedCount,
+        failed: result.failed,
+      });
     },
   );
 

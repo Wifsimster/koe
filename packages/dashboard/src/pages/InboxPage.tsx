@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import clsx from 'clsx';
-import type { TicketKind, TicketStatus } from '@koe/shared';
+import type { TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type { AdminProject, AdminTicket, AssigneeFilter } from '../api/client';
+import type {
+  AdminProject,
+  AdminTicket,
+  AssigneeFilter,
+  ProjectMember,
+} from '../api/client';
 import { HeartbeatBadge } from '../components/HeartbeatBadge';
 
 /**
@@ -36,8 +41,21 @@ export function InboxPage() {
   // `all` is client-side only (omits the query param); `me` and
   // `unassigned` are the two shortcuts the server resolves.
   const [assignee, setAssignee] = useState<AssigneeFilter | 'all'>('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [members, setMembers] = useState<ProjectMember[] | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
+
+  // Role gate for the bulk actions toolbar — viewers see checkboxes
+  // too but the apply button is blocked at render time (and the
+  // server would refuse anyway via `requireProjectWriter`).
+  const role =
+    state.status === 'authenticated'
+      ? state.me.memberships.find((m) => m.projectKey === activeKey)?.role ?? 'viewer'
+      : 'viewer';
+  const canWrite = role === 'owner' || role === 'member';
 
   // Resolve the active project object — needed for the heartbeat
   // display, and `/projects` returns it already so we pay one call.
@@ -84,6 +102,67 @@ export function InboxPage() {
     void loadTickets();
   }, [loadTickets]);
 
+  // Members load lazily when a writer is on the page — viewers never
+  // see the bulk assign picker, so spare them the round-trip.
+  useEffect(() => {
+    if (!activeKey || !canWrite) return;
+    let alive = true;
+    api
+      .listProjectMembers(activeKey)
+      .then((rows) => {
+        if (alive) setMembers(rows);
+      })
+      .catch((err) => {
+        console.warn('[koe/dashboard] listProjectMembers failed', err);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeKey, api, canWrite]);
+
+  // Clear the selection whenever the filter set changes or the
+  // ticket list reloads — otherwise an operator can select a row,
+  // switch filters, and silently lose track of what's about to apply.
+  useEffect(() => {
+    setSelected(new Set());
+    setBulkError(null);
+  }, [activeKey, kind, status, assignee]);
+
+  const applyBulk = async (patch: {
+    status?: TicketStatus;
+    priority?: TicketPriority;
+    assignedToUserId?: string | null;
+  }) => {
+    if (!activeKey || selected.size === 0) return;
+    setBulkError(null);
+    setBulkSubmitting(true);
+    try {
+      await api.bulkUpdateTickets(activeKey, Array.from(selected), patch);
+      // Re-fetch rather than optimistic: the status filter may cause
+      // rows to leave the current page (e.g. "Open → Resolved" hides
+      // them), which is simpler to handle via a fresh server query
+      // than to replay client-side.
+      setSelected(new Set());
+      await loadTickets();
+    } catch (err) {
+      setBulkError(err instanceof Error ? err.message : 'Bulk update failed');
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = (ids: string[]) => setSelected(new Set(ids));
+  const clearSelection = () => setSelected(new Set());
+
   const counts = useMemo(() => {
     const map = { all: tickets?.length ?? 0, bug: 0, feature: 0 };
     for (const t of tickets ?? []) map[t.kind] += 1;
@@ -128,16 +207,65 @@ export function InboxPage() {
         </div>
       )}
 
+      {canWrite && selected.size > 0 && (
+        <BulkToolbar
+          count={selected.size}
+          members={members}
+          submitting={bulkSubmitting}
+          error={bulkError}
+          onStatus={(s) => void applyBulk({ status: s })}
+          onPriority={(p) => void applyBulk({ priority: p })}
+          onAssignee={(a) => void applyBulk({ assignedToUserId: a })}
+          onClear={clearSelection}
+        />
+      )}
+
       {loading && tickets === null ? (
         <div className="text-sm text-gray-500">Loading…</div>
       ) : tickets && tickets.length === 0 ? (
         <EmptyTickets project={project} />
       ) : (
-        <ul className="divide-y divide-gray-200 bg-white border border-gray-200 rounded-lg overflow-hidden">
-          {(tickets ?? []).map((t) => (
-            <TicketRow key={t.id} ticket={t} />
-          ))}
-        </ul>
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          {canWrite && tickets && tickets.length > 0 && (
+            <div className="px-4 py-2 border-b border-gray-200 text-xs text-gray-500 flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={selected.size === tickets.length && tickets.length > 0}
+                // `indeterminate` is a runtime DOM property, not a
+                // React prop — set it via a ref callback so the
+                // "some rows selected" tri-state shows up correctly.
+                ref={(el) => {
+                  if (el) {
+                    el.indeterminate =
+                      selected.size > 0 && selected.size < tickets.length;
+                  }
+                }}
+                onChange={(e) => {
+                  if (e.target.checked) selectAll(tickets.map((t) => t.id));
+                  else clearSelection();
+                }}
+                aria-label="Select all tickets on this page"
+                className="h-4 w-4"
+              />
+              <span>
+                {selected.size > 0
+                  ? `${selected.size} of ${tickets.length} selected`
+                  : 'Select all'}
+              </span>
+            </div>
+          )}
+          <ul className="divide-y divide-gray-200">
+            {(tickets ?? []).map((t) => (
+              <TicketRow
+                key={t.id}
+                ticket={t}
+                selectable={canWrite}
+                selected={selected.has(t.id)}
+                onToggleSelect={() => toggleSelected(t.id)}
+              />
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
@@ -230,13 +358,39 @@ function Chip({
   );
 }
 
-function TicketRow({ ticket }: { ticket: AdminTicket }) {
+function TicketRow({
+  ticket,
+  selectable,
+  selected,
+  onToggleSelect,
+}: {
+  ticket: AdminTicket;
+  selectable: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
+}) {
   return (
-    <li>
+    <li className="flex items-start">
+      {selectable && (
+        <label
+          className="flex items-center px-4 pt-4 min-h-[44px] cursor-pointer"
+          // Keep the checkbox tap separate from the card navigation
+          // so a thumb-tap on the row still opens the detail.
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            aria-label={`Select ticket "${ticket.title}"`}
+            className="h-4 w-4"
+          />
+        </label>
+      )}
       <Link
         to="/tickets/$id"
         params={{ id: ticket.id }}
-        className="block p-4 hover:bg-gray-50 transition-colors focus:outline-none focus-visible:bg-gray-50"
+        className="flex-1 block p-4 hover:bg-gray-50 transition-colors focus:outline-none focus-visible:bg-gray-50"
       >
         <div className="flex items-start gap-3">
           <span aria-hidden="true" className="text-lg leading-6">
@@ -259,6 +413,131 @@ function TicketRow({ ticket }: { ticket: AdminTicket }) {
         </div>
       </Link>
     </li>
+  );
+}
+
+/**
+ * Bulk actions toolbar. Appears above the list when ≥1 ticket is
+ * selected. Three dropdowns — status, priority, assignee — each
+ * submits the patch on change. No "apply" button: the choice IS the
+ * commit. Keeps the UX scannable (one decision per dropdown) and
+ * matches the inline edit pattern on the ticket detail page.
+ *
+ * The assignee dropdown uses an empty-string sentinel for "Unassign"
+ * because native select can't carry null. The translation to `null`
+ * lives at the onChange.
+ */
+function BulkToolbar({
+  count,
+  members,
+  submitting,
+  error,
+  onStatus,
+  onPriority,
+  onAssignee,
+  onClear,
+}: {
+  count: number;
+  members: ProjectMember[] | null;
+  submitting: boolean;
+  error: string | null;
+  onStatus: (v: TicketStatus) => void;
+  onPriority: (v: TicketPriority) => void;
+  onAssignee: (v: string | null) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex flex-wrap items-center gap-3 text-sm">
+      <span className="font-medium text-indigo-900">
+        {count} selected
+      </span>
+      <BulkSelect
+        disabled={submitting}
+        placeholder="Mark as…"
+        onChange={(v) => onStatus(v as TicketStatus)}
+        options={[
+          { value: 'open', label: 'Open' },
+          { value: 'in_progress', label: 'In progress' },
+          { value: 'planned', label: 'Planned' },
+          { value: 'resolved', label: 'Resolved' },
+          { value: 'closed', label: 'Closed' },
+          { value: 'wont_fix', label: "Won't fix" },
+        ]}
+      />
+      <BulkSelect
+        disabled={submitting}
+        placeholder="Priority…"
+        onChange={(v) => onPriority(v as TicketPriority)}
+        options={[
+          { value: 'low', label: 'Low' },
+          { value: 'medium', label: 'Medium' },
+          { value: 'high', label: 'High' },
+          { value: 'critical', label: 'Critical' },
+        ]}
+      />
+      <BulkSelect
+        disabled={submitting || members === null}
+        placeholder="Assign to…"
+        onChange={(v) => onAssignee(v === '__unassign__' ? null : v)}
+        options={[
+          { value: '__unassign__', label: 'Unassign' },
+          ...(members ?? []).map((m) => ({
+            value: m.userId,
+            label: m.displayName ?? m.email,
+          })),
+        ]}
+      />
+      <button
+        type="button"
+        onClick={onClear}
+        disabled={submitting}
+        className="text-xs text-indigo-700 hover:text-indigo-900 underline underline-offset-2"
+      >
+        Clear
+      </button>
+      {error && (
+        <p role="alert" className="text-xs text-red-700 w-full">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function BulkSelect({
+  disabled,
+  placeholder,
+  onChange,
+  options,
+}: {
+  disabled: boolean;
+  placeholder: string;
+  onChange: (v: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <select
+      disabled={disabled}
+      value=""
+      onChange={(e) => {
+        const v = e.target.value;
+        if (v === '') return;
+        onChange(v);
+        // Reset so the placeholder shows again — the dropdown is a
+        // fire-and-forget control, not a persistent filter.
+        e.target.value = '';
+      }}
+      className="text-sm px-2 rounded-md border border-gray-300 bg-white min-h-[36px] disabled:opacity-60 max-w-[180px]"
+    >
+      <option value="" disabled>
+        {placeholder}
+      </option>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   );
 }
 
