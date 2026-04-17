@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import clsx from 'clsx';
+import { Link } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
 import { ProjectSwitcher } from './ProjectSwitcher';
 
@@ -31,12 +32,37 @@ export function AppShell({
     return <div className="p-8 text-red-600">AppShell rendered without auth.</div>;
   }
 
+  const closeDrawer = () => setDrawerOpen(false);
+
   const nav = (
     <nav className="flex flex-col gap-1">
       <div className="px-3 py-2 text-xs uppercase tracking-wide text-gray-500">Project</div>
       <div className="px-3 pb-3">
-        <ProjectSwitcher onChange={() => setDrawerOpen(false)} />
+        <ProjectSwitcher onChange={closeDrawer} />
       </div>
+
+      <div className="mt-2 border-t border-gray-200 pt-3 px-3 text-xs uppercase tracking-wide text-gray-500">
+        Pages
+      </div>
+      <Link
+        to="/"
+        search={{ kind: 'all', status: 'open', assignee: 'all' }}
+        onClick={closeDrawer}
+        className="mx-3 px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-100"
+        activeProps={{ className: 'mx-3 px-3 py-2 rounded-md text-sm bg-indigo-50 text-indigo-700' }}
+        activeOptions={{ exact: true }}
+      >
+        Inbox
+      </Link>
+      <Link
+        to="/batches"
+        onClick={closeDrawer}
+        className="mx-3 px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-100"
+        activeProps={{ className: 'mx-3 px-3 py-2 rounded-md text-sm bg-indigo-50 text-indigo-700' }}
+      >
+        Recent batches
+      </Link>
+
       <div className="mt-2 border-t border-gray-200 pt-3 px-3 text-xs text-gray-500 truncate">
         {state.me.user.email}
       </div>
