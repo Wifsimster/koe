@@ -48,7 +48,7 @@ export function InboxPage() {
   // deep generic inference gives up when a sibling route has its
   // own search shape (the `/login` route uses `redirectTo`). The
   // runtime shape is guaranteed by `validateSearch` itself.
-  const { kind, status, assignee } = useSearch({
+  const { kind, status, assignee, q } = useSearch({
     from: '/_authenticated/',
   }) as unknown as InboxSearch;
   const navigate = useNavigate();
@@ -73,6 +73,17 @@ export function InboxPage() {
       void navigate({
         to: '/',
         search: (prev) => ({ ...(prev as unknown as InboxSearch), assignee: v }),
+      }),
+    [navigate],
+  );
+  const setQ = useCallback(
+    (v: string) =>
+      void navigate({
+        to: '/',
+        search: (prev) => ({ ...(prev as unknown as InboxSearch), q: v }),
+        // Replace instead of push so typing doesn't spam the back
+        // button with a dozen history entries.
+        replace: true,
       }),
     [navigate],
   );
@@ -132,6 +143,7 @@ export function InboxPage() {
         kind: kind === 'all' ? undefined : kind,
         status: status === 'all' ? undefined : status,
         assignee: assignee === 'all' ? undefined : assignee,
+        search: q ? q : undefined,
       });
       setTickets(page.items);
     } catch (err) {
@@ -139,7 +151,7 @@ export function InboxPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeKey, api, kind, status, assignee]);
+  }, [activeKey, api, kind, status, assignee, q]);
 
   useEffect(() => {
     void loadTickets();
@@ -169,7 +181,7 @@ export function InboxPage() {
   useEffect(() => {
     setSelected(new Set());
     setBulkError(null);
-  }, [activeKey, kind, status, assignee]);
+  }, [activeKey, kind, status, assignee, q]);
 
   const applyBulk = useCallback(
     async (patch: {
@@ -255,6 +267,8 @@ export function InboxPage() {
           variant="block"
         />
       )}
+
+      <SearchBox value={q} onChange={setQ} />
 
       <FilterChips
         kind={kind}
@@ -412,6 +426,50 @@ function FilterChips({
         <option value="wont_fix">Won't fix</option>
       </select>
     </div>
+  );
+}
+
+/**
+ * Free-text search input. Debounces keystrokes to avoid a server
+ * round-trip on every character. Server matches title, description,
+ * reporter email, and assignee email.
+ *
+ * Local state tracks the typed value so the input stays responsive;
+ * a 250ms timer commits the value to the URL, which is what
+ * triggers the server call via the list effect.
+ */
+function SearchBox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  // Re-sync if the URL value changes from elsewhere (filter reset,
+  // back button, shared link). Compare against `draft` to avoid a
+  // render loop while the user is still typing.
+  useEffect(() => {
+    if (value !== draft) setDraft(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  useEffect(() => {
+    if (draft === value) return;
+    const t = setTimeout(() => onChange(draft), 250);
+    return () => clearTimeout(t);
+  }, [draft, value, onChange]);
+  return (
+    <label className="block">
+      <span className="sr-only">Search tickets</span>
+      <input
+        type="search"
+        placeholder="Search title, description, email…"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        maxLength={200}
+        className="w-full text-sm px-3 py-2 rounded-md border border-gray-300 bg-white focus:outline-none focus:border-indigo-500 min-h-[36px]"
+      />
+    </label>
   );
 }
 

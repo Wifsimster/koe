@@ -3,6 +3,7 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { Link } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
+import { INBOX_DEFAULT_SEARCH } from '../router';
 import { ProjectSwitcher } from './ProjectSwitcher';
 
 /**
@@ -46,7 +47,7 @@ export function AppShell({
       </div>
       <Link
         to="/"
-        search={{ kind: 'all', status: 'open', assignee: 'all' }}
+        search={INBOX_DEFAULT_SEARCH}
         onClick={closeDrawer}
         className="mx-3 px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-100"
         activeProps={{ className: 'mx-3 px-3 py-2 rounded-md text-sm bg-indigo-50 text-indigo-700' }}

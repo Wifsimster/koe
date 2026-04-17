@@ -9,6 +9,7 @@ import type {
   TicketEvent,
 } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { INBOX_DEFAULT_SEARCH } from '../router';
 
 /**
  * Ticket detail view with inline status + priority edits.
@@ -728,7 +729,7 @@ function BackLink() {
       // `validateSearch` overwrites these with the same defaults
       // anyway, so the explicit values are the cheapest way to
       // satisfy the type.
-      search={{ kind: 'all', status: 'open', assignee: 'all' }}
+      search={INBOX_DEFAULT_SEARCH}
       className="text-sm text-indigo-700 hover:underline"
     >
       ← Back to inbox
