@@ -15,6 +15,13 @@
       "when": 1776364724653,
       "tag": "0001_burly_loki",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776423112735,
+      "tag": "0002_warm_elektra",
+      "breakpoints": true
     }
   ]
 }

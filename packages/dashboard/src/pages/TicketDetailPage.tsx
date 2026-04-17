@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type { AdminTicket } from '../api/client';
+import type { AdminTicket, TicketEvent } from '../api/client';
 
 /**
  * Ticket detail view with inline status + priority edits.
@@ -24,6 +24,7 @@ export function TicketDetailPage() {
   const { id } = useParams({ from: '/_authenticated/tickets/$id' });
   const { state, api } = useAuth();
   const [ticket, setTicket] = useState<AdminTicket | null>(null);
+  const [events, setEvents] = useState<TicketEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
@@ -64,6 +65,22 @@ export function TicketDetailPage() {
     };
   }, [activeKey, api, id]);
 
+  const loadEvents = useCallback(async () => {
+    if (!activeKey) return;
+    try {
+      const rows = await api.listTicketEvents(activeKey, id);
+      setEvents(rows);
+    } catch (err) {
+      // Audit trail is a nice-to-have on this page. A failure here
+      // should not fail the page — the ticket itself is still useful.
+      console.warn('[koe/dashboard] listTicketEvents failed', err);
+    }
+  }, [activeKey, api, id]);
+
+  useEffect(() => {
+    void loadEvents();
+  }, [loadEvents]);
+
   const applyPatch = async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
     if (!activeKey || !ticket) return;
     const prev = ticket;
@@ -74,6 +91,11 @@ export function TicketDetailPage() {
     try {
       const next = await api.updateTicket(activeKey, ticket.id, patch);
       setTicket(next);
+      // Pull the new event(s) so the Activity section reflects what
+      // just happened. The server only emits events for values that
+      // actually changed, so the re-read is harmless when the patch
+      // was a no-op.
+      void loadEvents();
     } catch (err) {
       // Roll back and surface the reason.
       setTicket(prev);
@@ -210,8 +232,69 @@ export function TicketDetailPage() {
           </a>
         </Section>
       )}
+
+      <Section title="Activity">
+        <ActivityList events={events} />
+      </Section>
     </div>
   );
+}
+
+function ActivityList({ events }: { events: TicketEvent[] | null }) {
+  if (events === null) {
+    return <p className="text-sm text-gray-500">Loading…</p>;
+  }
+  if (events.length === 0) {
+    return (
+      <p className="text-sm text-gray-500">
+        No changes yet. Future status and priority edits will show up here.
+      </p>
+    );
+  }
+  return (
+    <ol className="space-y-2">
+      {events.map((ev) => (
+        <li key={ev.id} className="text-sm text-gray-700 border-l-2 border-gray-200 pl-3">
+          <div>
+            <span className="font-medium">{ev.actorEmail ?? 'deleted user'}</span>{' '}
+            {describeEvent(ev)}
+          </div>
+          <div className="text-xs text-gray-500">
+            {new Date(ev.createdAt).toLocaleString()}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * Turn an event row into a readable sentence. The payload shape is
+ * per-kind; we narrow each one here and fall back to a generic line
+ * when we hit a kind we don't render yet (assignment, comments).
+ */
+function describeEvent(ev: TicketEvent): string {
+  if (ev.kind === 'status_changed') {
+    const from = readString(ev.payload.from);
+    const to = readString(ev.payload.to);
+    return `changed status from ${from} to ${to}`;
+  }
+  if (ev.kind === 'priority_changed') {
+    const from = readString(ev.payload.from);
+    const to = readString(ev.payload.to);
+    return `changed priority from ${from} to ${to}`;
+  }
+  if (ev.kind === 'assigned') {
+    return 'updated the assignment';
+  }
+  if (ev.kind === 'commented') {
+    return 'left a comment';
+  }
+  return `performed ${ev.kind}`;
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/_/g, ' ') : '?';
 }
 
 const STATUS_OPTIONS: Array<{ value: TicketStatus; label: string }> = [

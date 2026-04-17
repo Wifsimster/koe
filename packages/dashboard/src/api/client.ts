@@ -5,6 +5,22 @@ export interface TicketPatch {
   priority?: TicketPriority;
 }
 
+export type TicketEventKind =
+  | 'status_changed'
+  | 'priority_changed'
+  | 'assigned'
+  | 'commented';
+
+export interface TicketEvent {
+  id: string;
+  ticketId: string;
+  kind: TicketEventKind;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  actorUserId: string | null;
+  actorEmail: string | null;
+}
+
 /**
  * Admin dashboard → `/v1/admin/*` HTTP client. Thin on purpose: the
  * surface is read-only today, mutations join when the triage UI needs
@@ -147,6 +163,12 @@ export class AdminApiClient {
       'PATCH',
       `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}`,
       patch,
+    );
+  }
+
+  listTicketEvents(projectKey: string, id: string): Promise<TicketEvent[]> {
+    return this.get<TicketEvent[]>(
+      `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}/events`,
     );
   }
 
