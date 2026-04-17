@@ -45,72 +45,72 @@ function baseOpts(nonces: NonceCache, iatOffset = 0) {
 }
 
 describe('identityToken', () => {
-  it('round-trips a valid token', () => {
+  it('round-trips a valid token', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const payload = makePayload();
     const token = signIdentityToken(payload, secretV1);
 
-    const result = verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, true);
     if (result.ok) assert.deepEqual(result.payload, payload);
   });
 
-  it('rejects a tampered payload', () => {
+  it('rejects a tampered payload', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload(), secretV1);
     const [enc, mac] = token.split('.');
     // Flip one char in the encoded payload.
     const flipped = (enc![0] === 'a' ? 'b' : 'a') + enc!.slice(1) + '.' + mac!;
 
-    const result = verifyIdentityToken(flipped, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(flipped, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, false);
     if (!result.ok) assert.ok(['malformed', 'signature_mismatch'].includes(result.reason));
   });
 
-  it('rejects a signature signed with the wrong secret', () => {
+  it('rejects a signature signed with the wrong secret', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload(), 'attacker-secret');
 
-    const result = verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, 'signature_mismatch');
   });
 
-  it('rejects an unknown kid', () => {
+  it('rejects an unknown kid', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload({ kid: 'v99' }), secretV1);
 
-    const result = verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, 'unknown_kid');
   });
 
-  it('rejects a revoked kid even with a valid signature', () => {
+  it('rejects a revoked kid even with a valid signature', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1, status: 'revoked' }]);
     const token = signIdentityToken(makePayload(), secretV1);
 
-    const result = verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, 'revoked_kid');
   });
 
-  it('verifies under a `retiring` kid during a rotation window', () => {
+  it('verifies under a `retiring` kid during a rotation window', async () => {
     const secrets = makeSecrets([
       { kid: 'v1', secret: secretV1, status: 'retiring' },
       { kid: 'v2', secret: secretV2, status: 'active' },
     ]);
     const token = signIdentityToken(makePayload({ kid: 'v1' }), secretV1);
 
-    const result = verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, true);
   });
 
-  it('rejects an expired token', () => {
+  it('rejects an expired token', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload({ iat: 1_700_000_000 }), secretV1);
 
     // Jump 20 minutes into the future — outside the 10-minute window.
-    const result = verifyIdentityToken(
+    const result = await verifyIdentityToken(
       token,
       secrets,
       baseOpts(createInMemoryNonceCache(), 20 * 60),
@@ -119,56 +119,56 @@ describe('identityToken', () => {
     if (!result.ok) assert.equal(result.reason, 'token_expired');
   });
 
-  it('rejects a token issued too far in the future', () => {
+  it('rejects a token issued too far in the future', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload({ iat: 1_700_000_000 + 600 }), secretV1);
 
-    const result = verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, 'token_in_future');
   });
 
-  it('rejects a replayed nonce', () => {
+  it('rejects a replayed nonce', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const nonces = createInMemoryNonceCache();
     const token = signIdentityToken(makePayload({ nonce: 'fixed-nonce' }), secretV1);
 
-    const first = verifyIdentityToken(token, secrets, baseOpts(nonces));
+    const first = await verifyIdentityToken(token, secrets, baseOpts(nonces));
     assert.equal(first.ok, true);
 
-    const second = verifyIdentityToken(token, secrets, baseOpts(nonces));
+    const second = await verifyIdentityToken(token, secrets, baseOpts(nonces));
     assert.equal(second.ok, false);
     if (!second.ok) assert.equal(second.reason, 'replayed_nonce');
   });
 
-  it('rejects cross-project tokens', () => {
+  it('rejects cross-project tokens', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload({ projectId: 'other-project' }), secretV1);
 
-    const result = verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, 'project_mismatch');
   });
 
-  it('rejects cross-reporter tokens', () => {
+  it('rejects cross-reporter tokens', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload({ reporterId: 'other-user' }), secretV1);
 
-    const result = verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
+    const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, 'reporter_mismatch');
   });
 
-  it('rejects malformed tokens', () => {
+  it('rejects malformed tokens', async () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const cases = ['', '.', 'no-dot', 'a.', '.b', 'not-base64.deadbeef'];
     for (const t of cases) {
-      const result = verifyIdentityToken(t, secrets, baseOpts(createInMemoryNonceCache()));
+      const result = await verifyIdentityToken(t, secrets, baseOpts(createInMemoryNonceCache()));
       assert.equal(result.ok, false, `expected malformed for ${JSON.stringify(t)}`);
     }
   });
 
-  it('nonce cache binds nonces to kid to avoid cross-key masking', () => {
+  it('nonce cache binds nonces to kid to avoid cross-key masking', async () => {
     const secrets = makeSecrets([
       { kid: 'v1', secret: secretV1, status: 'retiring' },
       { kid: 'v2', secret: secretV2, status: 'active' },
@@ -178,8 +178,8 @@ describe('identityToken', () => {
     const tokenV1 = signIdentityToken(makePayload({ kid: 'v1', nonce: 'shared' }), secretV1);
     const tokenV2 = signIdentityToken(makePayload({ kid: 'v2', nonce: 'shared' }), secretV2);
 
-    const r1 = verifyIdentityToken(tokenV1, secrets, baseOpts(nonces));
-    const r2 = verifyIdentityToken(tokenV2, secrets, baseOpts(nonces));
+    const r1 = await verifyIdentityToken(tokenV1, secrets, baseOpts(nonces));
+    const r2 = await verifyIdentityToken(tokenV2, secrets, baseOpts(nonces));
     assert.equal(r1.ok, true);
     assert.equal(r2.ok, true);
   });

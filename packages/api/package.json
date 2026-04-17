@@ -22,13 +22,16 @@
     "@koe/shared": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.10",
+    "ioredis": "^5.10.1",
     "openid-client": "5",
     "postgres": "^3.4.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/ioredis-mock": "^8.2.7",
     "@types/node": "^22.9.0",
     "drizzle-kit": "^0.28.0",
+    "ioredis-mock": "^8.13.1",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.6.0"

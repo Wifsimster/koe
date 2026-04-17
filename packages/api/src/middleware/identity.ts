@@ -3,11 +3,13 @@ import type { MiddlewareHandler } from 'hono';
 import { eq } from 'drizzle-orm';
 import { db, dbAvailable, schema } from '../db';
 import {
-  createInMemoryNonceCache,
+  createNonceCacheFromEnv,
   verifyIdentityToken,
   type IdentitySecret,
   type NonceCache,
+  type RedisSetNxClient,
 } from '../lib/identityToken';
+import { getRedisFromEnv } from '../lib/redis';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
 import type { ProjectContext } from './project';
 
@@ -53,13 +55,18 @@ export type VerifyReporterFn = (
 ) => Promise<{ ok: true; verified: boolean } | { ok: false; reason: string }>;
 
 /**
- * Process-wide nonce cache. One cache covers all projects because nonces
- * are keyed by `kid:nonce` inside the verifier and kids are per-project
- * by design — collisions across projects are statistically impossible in
- * practice. Swap for a shared Redis cache when we run more than one API
- * replica (tracked for the infra MR).
+ * Process-wide nonce cache. Redis-backed when `REDIS_URL` is set
+ * (atomic across all replicas); in-memory otherwise. Nonces are keyed
+ * by `kid:nonce` inside the verifier, so the cache is shared safely
+ * across all projects without collisions in practice.
  */
-const nonceCache: NonceCache = createInMemoryNonceCache();
+// `ioredis`'s `.set` has a heavily overloaded signature that doesn't
+// structurally unify with our narrow `RedisSetNxClient` interface.
+// The runtime behaviour matches precisely (`SET ... NX EX ttl`), so
+// we bridge with a typed cast at the module seam.
+const nonceCache: NonceCache = createNonceCacheFromEnv(
+  getRedisFromEnv() as unknown as RedisSetNxClient | null,
+);
 
 /** Max age accepted for a v2 token. Matches the 10-minute window the
  * meeting settled on — short enough to constrain replay, long enough to
@@ -106,7 +113,7 @@ export const attachVerifier: MiddlewareHandler<{
   const verify: VerifyReporterFn = async (reporterId) => {
     if (suppliedToken !== null) {
       const secrets = await getSecrets();
-      const result = verifyIdentityToken(suppliedToken, secrets, {
+      const result = await verifyIdentityToken(suppliedToken, secrets, {
         maxAgeSeconds: V2_MAX_AGE_SECONDS,
         expectedProjectId: project.id,
         expectedReporterId: reporterId,
