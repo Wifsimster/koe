@@ -43,6 +43,13 @@
       "when": 1776448752545,
       "tag": "0005_known_squirrel_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776458922748,
+      "tag": "0006_admin_password_hash",
+      "breakpoints": true
     }
   ]
 }

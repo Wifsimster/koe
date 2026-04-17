@@ -15,6 +15,8 @@ import { INBOX_DEFAULT_SEARCH } from '../router';
 export function LoginPage() {
   const { mode, login, state } = useAuth();
   const [token, setToken] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
@@ -35,6 +37,88 @@ export function LoginPage() {
         <p className="mt-6 text-xs text-gray-500">
           You will be redirected to the identity provider configured for this deployment.
         </p>
+      </CardLayout>
+    );
+  }
+
+  if (mode === 'password') {
+    const onPasswordSubmit = async (e: FormEvent) => {
+      e.preventDefault();
+      setError(null);
+      if (!email.trim() || !password) {
+        setError('Email and password are required.');
+        return;
+      }
+      setSubmitting(true);
+      try {
+        await login(undefined, { email: email.trim(), password });
+        await navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
+      } catch (err) {
+        // Server returns a uniform `unauthorized` for both unknown
+        // email and wrong password on purpose — echo a matching
+        // uniform message here.
+        setError(
+          err instanceof Error && err.message
+            ? err.message
+            : 'Sign-in failed. Check your credentials and try again.',
+        );
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    return (
+      <CardLayout title="Koe admin" subtitle="Sign in with your email and password.">
+        <form onSubmit={onPasswordSubmit}>
+          <label className="block mb-4">
+            <span className="block text-xs font-medium text-gray-600 mb-1">Email</span>
+            <input
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full text-base px-3 py-2 rounded-md border border-gray-300 bg-white focus:outline-none focus:border-indigo-500"
+              placeholder="you@example.com"
+              disabled={submitting}
+              required
+            />
+          </label>
+
+          <label className="block mb-4">
+            <span className="block text-xs font-medium text-gray-600 mb-1">Password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full text-base px-3 py-2 rounded-md border border-gray-300 bg-white focus:outline-none focus:border-indigo-500"
+              placeholder="••••••••••••"
+              disabled={submitting}
+              required
+            />
+          </label>
+
+          {error && (
+            <div className="mb-4 text-xs text-red-600" role="alert">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={submitting || state.status === 'loading'}
+            className="w-full min-h-[44px] px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+          >
+            {submitting || state.status === 'loading' ? 'Signing in…' : 'Sign in'}
+          </button>
+
+          <p className="mt-6 text-xs text-gray-500">
+            Accounts are seeded by an operator with:{' '}
+            <code className="px-1 bg-gray-100 rounded whitespace-nowrap">
+              docker compose run --rm api dist/admin-user.js --email you@example.com
+            </code>
+          </p>
+        </form>
       </CardLayout>
     );
   }

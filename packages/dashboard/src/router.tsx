@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import {
   createRootRouteWithContext,
   createRoute,
   Outlet,
   redirect,
+  useNavigate,
   useRouterState,
 } from '@tanstack/react-router';
 import type { TicketKind, TicketStatus } from '@koe/shared';
@@ -140,13 +141,21 @@ function RootGate() {
 
 function AuthenticatedLayout() {
   const { state } = useAuth();
-  if (state.status === 'loading') {
-    return <LoadingScreen />;
-  }
-  // beforeLoad redirects unauthenticated; reaching here without
-  // being authenticated would be a guard bug — render loud.
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // beforeLoad only runs on navigation, so a mid-session transition
+  // from `loading` → `unauthenticated` (e.g. /me returns 401 after
+  // the route already matched) would otherwise strand the user on a
+  // guarded route. Mirror the beforeLoad redirect here.
+  useEffect(() => {
+    if (state.status === 'unauthenticated') {
+      void navigate({ to: '/login', search: { redirectTo: pathname } });
+    }
+  }, [state.status, navigate, pathname]);
+
   if (state.status !== 'authenticated') {
-    return <div className="p-8 text-red-600">Auth guard bypassed.</div>;
+    return <LoadingScreen />;
   }
   return (
     <AppShell header={<RouteHeader />}>

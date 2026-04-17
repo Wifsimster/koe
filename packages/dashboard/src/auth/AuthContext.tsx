@@ -13,7 +13,7 @@ import { AdminApiClient, AdminApiError, type Me, type Membership } from '../api/
 const TOKEN_KEY = 'koe.adminToken';
 const ACTIVE_PROJECT_KEY = 'koe.activeProjectKey';
 
-export type AuthMode = 'oidc' | 'dev-session';
+export type AuthMode = 'oidc' | 'dev-session' | 'password';
 
 type AuthState =
   | { status: 'loading' }
@@ -25,11 +25,18 @@ export interface AuthContextValue {
   state: AuthState;
   api: AdminApiClient;
   /**
-   * In `dev-session` mode, accepts the raw token pasted from the CLI.
-   * In `oidc` mode, triggers a full-page redirect to the provider
-   * login URL — the `token` arg is ignored.
+   * Transport-dependent:
+   *   - `oidc`        → triggers a full-page redirect to the provider.
+   *                     Args are ignored.
+   *   - `dev-session` → caller passes the raw CLI-minted token as `token`.
+   *   - `password`    → caller passes `{ email, password }` via the
+   *                     second arg. On success the server sets a
+   *                     session cookie same-origin.
    */
-  login: (token?: string) => Promise<void>;
+  login: (
+    token?: string,
+    credentials?: { email: string; password: string },
+  ) => Promise<void>;
   logout: () => Promise<void>;
   setActiveProject: (key: string) => void;
 }
@@ -68,12 +75,14 @@ export function AuthProvider({ baseUrl, mode = 'oidc', loginUrl, logoutUrl, chil
     mode === 'dev-session' ? readStoredToken() : null,
   );
 
-  // In OIDC mode we always start in `loading` — the browser might
-  // carry a valid cookie from a previous session and we need to call
-  // /me to find out. In dev-session mode we only go to `loading` if
-  // we already have a token on disk.
+  // Cookie-based modes (oidc, password) always start in `loading` —
+  // the browser might carry a valid cookie from a previous session and
+  // we need to call /me to find out. In dev-session mode we only go
+  // to `loading` if we already have a token on disk.
   const initialState: AuthState =
-    mode === 'oidc' || tokenRef.current ? { status: 'loading' } : { status: 'unauthenticated' };
+    mode === 'oidc' || mode === 'password' || tokenRef.current
+      ? { status: 'loading' }
+      : { status: 'unauthenticated' };
   const [state, setState] = useState<AuthState>(initialState);
 
   const api = useMemo(
@@ -127,11 +136,20 @@ export function AuthProvider({ baseUrl, mode = 'oidc', loginUrl, logoutUrl, chil
   }, [state.status]);
 
   const login = useCallback<AuthContextValue['login']>(
-    async (token) => {
+    async (token, credentials) => {
       if (mode === 'oidc') {
         // Full-page redirect to the provider. Carries where we'd like
         // to land after the callback.
         api.redirectToLogin(window.location.pathname);
+        return;
+      }
+      if (mode === 'password') {
+        if (!credentials) throw new Error('password login requires credentials');
+        // Server sets the session cookie on success — we don't see
+        // the raw token. Then flip to `loading` so the effect refetches
+        // /me and lands us in `authenticated`.
+        await api.loginWithPassword(credentials.email, credentials.password);
+        setState({ status: 'loading' });
         return;
       }
       // dev-session mode — caller passed the raw token.
@@ -148,7 +166,7 @@ export function AuthProvider({ baseUrl, mode = 'oidc', loginUrl, logoutUrl, chil
   );
 
   const logout = useCallback<AuthContextValue['logout']>(async () => {
-    if (mode === 'oidc') {
+    if (mode === 'oidc' || mode === 'password') {
       await api.logout();
     }
     clearAuth();

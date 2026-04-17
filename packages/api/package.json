@@ -10,6 +10,7 @@
     "start": "node dist/serve.js",
     "migrate": "node dist/migrate.js",
     "bootstrap": "node dist/bootstrap.js",
+    "admin-user": "node dist/admin-user.js",
     "test": "node --import tsx --test src/lib/*.test.ts src/middleware/*.test.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
@@ -20,6 +21,7 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@koe/shared": "workspace:*",
+    "@node-rs/argon2": "^2.0.2",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.10",
     "ioredis": "^5.10.1",
