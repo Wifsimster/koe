@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import clsx from 'clsx';
 import type { TicketKind, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type { AdminProject, AdminTicket } from '../api/client';
+import type { AdminProject, AdminTicket, AssigneeFilter } from '../api/client';
 import { HeartbeatBadge } from '../components/HeartbeatBadge';
 
 /**
@@ -33,6 +33,9 @@ export function InboxPage() {
   const [error, setError] = useState<string | null>(null);
   const [kind, setKind] = useState<TicketKind | 'all'>('all');
   const [status, setStatus] = useState<TicketStatus | 'all'>('open');
+  // `all` is client-side only (omits the query param); `me` and
+  // `unassigned` are the two shortcuts the server resolves.
+  const [assignee, setAssignee] = useState<AssigneeFilter | 'all'>('all');
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
@@ -67,6 +70,7 @@ export function InboxPage() {
       const page = await api.listTickets(activeKey, {
         kind: kind === 'all' ? undefined : kind,
         status: status === 'all' ? undefined : status,
+        assignee: assignee === 'all' ? undefined : assignee,
       });
       setTickets(page.items);
     } catch (err) {
@@ -74,7 +78,7 @@ export function InboxPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeKey, api, kind, status]);
+  }, [activeKey, api, kind, status, assignee]);
 
   useEffect(() => {
     void loadTickets();
@@ -110,6 +114,8 @@ export function InboxPage() {
         onKindChange={setKind}
         status={status}
         onStatusChange={setStatus}
+        assignee={assignee}
+        onAssigneeChange={setAssignee}
         counts={counts}
       />
 
@@ -142,12 +148,16 @@ function FilterChips({
   onKindChange,
   status,
   onStatusChange,
+  assignee,
+  onAssigneeChange,
   counts,
 }: {
   kind: TicketKind | 'all';
   onKindChange: (v: TicketKind | 'all') => void;
   status: TicketStatus | 'all';
   onStatusChange: (v: TicketStatus | 'all') => void;
+  assignee: AssigneeFilter | 'all';
+  onAssigneeChange: (v: AssigneeFilter | 'all') => void;
   counts: { all: number; bug: number; feature: number };
 }) {
   return (
@@ -160,6 +170,21 @@ function FilterChips({
       </Chip>
       <Chip active={kind === 'feature'} onClick={() => onKindChange('feature')}>
         Ideas · {counts.feature}
+      </Chip>
+      <span className="mx-1 w-px bg-gray-200 hidden sm:inline" aria-hidden="true" />
+      <Chip
+        active={assignee === 'me'}
+        onClick={() => onAssigneeChange(assignee === 'me' ? 'all' : 'me')}
+      >
+        Mine
+      </Chip>
+      <Chip
+        active={assignee === 'unassigned'}
+        onClick={() =>
+          onAssigneeChange(assignee === 'unassigned' ? 'all' : 'unassigned')
+        }
+      >
+        Unassigned
       </Chip>
       <span className="mx-1 w-px bg-gray-200 hidden sm:inline" aria-hidden="true" />
       <select
@@ -228,6 +253,7 @@ function TicketRow({ ticket }: { ticket: AdminTicket }) {
               <span>{new Date(ticket.createdAt).toLocaleString()}</span>
               {ticket.reporterEmail && <span>{ticket.reporterEmail}</span>}
               {ticket.kind === 'feature' && <span>{ticket.voteCount} votes</span>}
+              <AssigneeChip ticket={ticket} />
             </div>
           </div>
         </div>
@@ -274,6 +300,20 @@ function UnverifiedPill() {
       unverified
     </span>
   );
+}
+
+/**
+ * One-liner assignment indicator for the card. Prefers displayName
+ * over email so a quick scan of the inbox reads like "assigned to
+ * Alice" rather than a mailing list. `null` assignee renders as a
+ * muted "unassigned" tag so tickets-in-need-of-an-owner stand out.
+ */
+function AssigneeChip({ ticket }: { ticket: AdminTicket }) {
+  if (ticket.assignedToUserId === null) {
+    return <span className="text-amber-700">unassigned</span>;
+  }
+  const label = ticket.assignedToDisplayName ?? ticket.assignedToEmail ?? 'someone';
+  return <span>assigned to {label}</span>;
 }
 
 function EmptyTickets({ project }: { project: AdminProject | null }) {
