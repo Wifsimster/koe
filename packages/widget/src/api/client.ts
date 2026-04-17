@@ -1,10 +1,14 @@
-import type {
-  ApiResponse,
-  BugReport,
-  CreateBugReportInput,
-  CreateFeatureRequestInput,
-  FeatureRequest,
+import {
+  KoeHttpClient,
+  KoeApiError,
+  type BugReport,
+  type CreateBugReportInput,
+  type CreateFeatureRequestInput,
+  type FeatureRequest,
 } from '@koe/shared';
+
+// Re-export so existing widget code keeps its public surface unchanged.
+export { KoeApiError };
 
 export interface KoeApiClientOptions {
   apiUrl: string;
@@ -31,66 +35,25 @@ export interface KoeApiClientOptions {
 }
 
 /**
- * Thin wrapper around fetch for the widget → Koe API. Keeps transport
- * concerns (auth header, base URL, envelope unwrapping) out of components.
+ * Widget → Koe API. Thin typed wrapper on top of the shared
+ * `KoeHttpClient` transport. Owns only widget-specific concerns: the
+ * project key header, the optional identity header selection, and the
+ * four widget endpoints.
  */
-export class KoeApiClient {
-  private readonly apiUrl: string;
+export class KoeApiClient extends KoeHttpClient {
   private readonly projectKey: string;
   private readonly userHash: string | undefined;
   private readonly identityToken: string | undefined;
 
   constructor(opts: KoeApiClientOptions) {
-    this.apiUrl = opts.apiUrl.replace(/\/$/, '');
+    super(opts.apiUrl);
     this.projectKey = opts.projectKey;
     this.userHash = opts.userHash;
     this.identityToken = opts.identityToken;
   }
 
-  async submitBugReport(input: CreateBugReportInput): Promise<BugReport> {
-    return this.post<BugReport>('/v1/widget/bugs', input);
-  }
-
-  async submitFeatureRequest(input: CreateFeatureRequestInput): Promise<FeatureRequest> {
-    return this.post<FeatureRequest>('/v1/widget/features', input);
-  }
-
-  async listFeatureRequests(userId?: string): Promise<FeatureRequest[]> {
-    const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
-    return this.get<FeatureRequest[]>(`/v1/widget/features${qs}`);
-  }
-
-  async voteFeature(id: string, userId: string): Promise<FeatureRequest> {
-    return this.post<FeatureRequest>(`/v1/widget/features/${id}/vote`, { userId });
-  }
-
-  private async get<T>(path: string): Promise<T> {
-    const res = await fetch(this.apiUrl + path, {
-      method: 'GET',
-      headers: this.headers(),
-      // Identity travels in explicit headers only. `omit` prevents host
-      // cookies from leaking to the Koe API and, more importantly, keeps
-      // host fetch wrappers (Sentry, Datadog RUM) that inspect
-      // credentialed requests from recording the identity header in
-      // breadcrumbs.
-      credentials: 'omit',
-    });
-    return this.unwrap<T>(res);
-  }
-
-  private async post<T>(path: string, body: unknown): Promise<T> {
-    const res = await fetch(this.apiUrl + path, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify(body),
-      credentials: 'omit',
-    });
-    return this.unwrap<T>(res);
-  }
-
-  private headers(): HeadersInit {
+  protected defaultHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       'X-Koe-Project-Key': this.projectKey,
     };
     // v2 identity token takes precedence. Sending both is redundant and
@@ -103,26 +66,31 @@ export class KoeApiClient {
     return headers;
   }
 
-  private async unwrap<T>(res: Response): Promise<T> {
-    let payload: ApiResponse<T>;
-    try {
-      payload = (await res.json()) as ApiResponse<T>;
-    } catch {
-      throw new Error(`Koe API returned non-JSON response (status ${res.status})`);
-    }
-    if (!payload.ok) {
-      throw new KoeApiError(payload.error.code, payload.error.message);
-    }
-    return payload.data;
+  async submitBugReport(input: CreateBugReportInput): Promise<BugReport> {
+    return this.request<BugReport>({ method: 'POST', path: '/v1/widget/bugs', body: input });
   }
-}
 
-export class KoeApiError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'KoeApiError';
+  async submitFeatureRequest(input: CreateFeatureRequestInput): Promise<FeatureRequest> {
+    return this.request<FeatureRequest>({
+      method: 'POST',
+      path: '/v1/widget/features',
+      body: input,
+    });
+  }
+
+  async listFeatureRequests(userId?: string): Promise<FeatureRequest[]> {
+    return this.request<FeatureRequest[]>({
+      method: 'GET',
+      path: '/v1/widget/features',
+      query: { userId },
+    });
+  }
+
+  async voteFeature(id: string, userId: string): Promise<FeatureRequest> {
+    return this.request<FeatureRequest>({
+      method: 'POST',
+      path: `/v1/widget/features/${id}/vote`,
+      body: { userId },
+    });
   }
 }
