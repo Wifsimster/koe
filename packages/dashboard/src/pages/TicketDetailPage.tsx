@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type { AdminTicket, TicketEvent } from '../api/client';
+import type { AdminTicket, ProjectMember, TicketEvent } from '../api/client';
 
 /**
  * Ticket detail view with inline status + priority edits.
@@ -25,6 +25,7 @@ export function TicketDetailPage() {
   const { state, api } = useAuth();
   const [ticket, setTicket] = useState<AdminTicket | null>(null);
   const [events, setEvents] = useState<TicketEvent[] | null>(null);
+  const [members, setMembers] = useState<ProjectMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
@@ -81,7 +82,31 @@ export function TicketDetailPage() {
     void loadEvents();
   }, [loadEvents]);
 
-  const applyPatch = async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
+  // Members only need loading when the user can actually assign —
+  // viewers never see the picker, so spare them the round-trip.
+  useEffect(() => {
+    if (!activeKey || !canWrite) return;
+    let alive = true;
+    api
+      .listProjectMembers(activeKey)
+      .then((rows) => {
+        if (alive) setMembers(rows);
+      })
+      .catch((err) => {
+        // Non-fatal: the assignment picker falls back to a plain
+        // "(unknown)" when we don't know who the current assignee is.
+        console.warn('[koe/dashboard] listProjectMembers failed', err);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeKey, api, canWrite]);
+
+  const applyPatch = async (patch: {
+    status?: TicketStatus;
+    priority?: TicketPriority;
+    assignedToUserId?: string | null;
+  }) => {
     if (!activeKey || !ticket) return;
     const prev = ticket;
     setMutError(null);
@@ -159,6 +184,22 @@ export function TicketDetailPage() {
               ) : (
                 <ReadonlyChip label={`priority: ${ticket.priority}`} />
               )}
+              {canWrite ? (
+                <AssigneeSelect
+                  value={ticket.assignedToUserId}
+                  members={members}
+                  disabled={mutating}
+                  onChange={(assignedToUserId) => void applyPatch({ assignedToUserId })}
+                />
+              ) : (
+                <ReadonlyChip
+                  label={
+                    ticket.assignedToUserId === null
+                      ? 'unassigned'
+                      : `assigned: ${ticket.assignedToUserId}`
+                  }
+                />
+              )}
             </div>
             {mutError && (
               <p role="alert" className="mt-2 text-xs text-red-700">
@@ -234,20 +275,26 @@ export function TicketDetailPage() {
       )}
 
       <Section title="Activity">
-        <ActivityList events={events} />
+        <ActivityList events={events} members={members} />
       </Section>
     </div>
   );
 }
 
-function ActivityList({ events }: { events: TicketEvent[] | null }) {
+function ActivityList({
+  events,
+  members,
+}: {
+  events: TicketEvent[] | null;
+  members: ProjectMember[] | null;
+}) {
   if (events === null) {
     return <p className="text-sm text-gray-500">Loading…</p>;
   }
   if (events.length === 0) {
     return (
       <p className="text-sm text-gray-500">
-        No changes yet. Future status and priority edits will show up here.
+        No changes yet. Future status, priority, and assignment edits will show up here.
       </p>
     );
   }
@@ -257,7 +304,7 @@ function ActivityList({ events }: { events: TicketEvent[] | null }) {
         <li key={ev.id} className="text-sm text-gray-700 border-l-2 border-gray-200 pl-3">
           <div>
             <span className="font-medium">{ev.actorEmail ?? 'deleted user'}</span>{' '}
-            {describeEvent(ev)}
+            {describeEvent(ev, members)}
           </div>
           <div className="text-xs text-gray-500">
             {new Date(ev.createdAt).toLocaleString()}
@@ -271,9 +318,11 @@ function ActivityList({ events }: { events: TicketEvent[] | null }) {
 /**
  * Turn an event row into a readable sentence. The payload shape is
  * per-kind; we narrow each one here and fall back to a generic line
- * when we hit a kind we don't render yet (assignment, comments).
+ * when we hit a kind we don't render yet (comments). `members` is
+ * used to resolve user ids to emails — `null` members (viewer path)
+ * gets a terser rendering that still works.
  */
-function describeEvent(ev: TicketEvent): string {
+function describeEvent(ev: TicketEvent, members: ProjectMember[] | null): string {
   if (ev.kind === 'status_changed') {
     const from = readString(ev.payload.from);
     const to = readString(ev.payload.to);
@@ -285,7 +334,10 @@ function describeEvent(ev: TicketEvent): string {
     return `changed priority from ${from} to ${to}`;
   }
   if (ev.kind === 'assigned') {
-    return 'updated the assignment';
+    const toUserId = readNullableString(ev.payload.toUserId);
+    if (toUserId === null) return 'unassigned the ticket';
+    const target = members?.find((m) => m.userId === toUserId);
+    return `assigned the ticket to ${target?.email ?? 'someone'}`;
   }
   if (ev.kind === 'commented') {
     return 'left a comment';
@@ -295,6 +347,11 @@ function describeEvent(ev: TicketEvent): string {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.replace(/_/g, ' ') : '?';
+}
+
+function readNullableString(value: unknown): string | null {
+  if (value === null) return null;
+  return typeof value === 'string' ? value : null;
 }
 
 const STATUS_OPTIONS: Array<{ value: TicketStatus; label: string }> = [
@@ -362,6 +419,40 @@ function PrioritySelect({
         {PRIORITY_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function AssigneeSelect({
+  value,
+  members,
+  disabled,
+  onChange,
+}: {
+  value: string | null;
+  members: ProjectMember[] | null;
+  disabled: boolean;
+  onChange: (v: string | null) => void;
+}) {
+  // Empty-string is the sentinel for "unassigned" inside the <select>
+  // because native select can't carry a null value. The translation
+  // layer lives right here.
+  return (
+    <label className="inline-flex items-center gap-2">
+      <span className="text-xs text-gray-500 uppercase tracking-wide">assignee</span>
+      <select
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+        disabled={disabled || members === null}
+        className="text-sm px-2 py-1 rounded-md border border-gray-300 bg-white min-h-[36px] disabled:opacity-60 max-w-[200px]"
+      >
+        <option value="">Unassigned</option>
+        {(members ?? []).map((m) => (
+          <option key={m.userId} value={m.userId}>
+            {m.displayName ?? m.email}
           </option>
         ))}
       </select>

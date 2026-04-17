@@ -111,6 +111,15 @@ export const tickets = pgTable('tickets', {
   reporterName: text('reporter_name'),
   reporterEmail: text('reporter_email'),
   /**
+   * Admin user who currently owns this ticket, or null for
+   * unassigned. Nullable with `ON DELETE SET NULL` so an admin user
+   * leaving doesn't drop the ticket — just detaches it, and the
+   * inbox puts it back into the unassigned queue.
+   */
+  assignedToUserId: uuid('assigned_to_user_id').references(() => adminUsers.id, {
+    onDelete: 'set null',
+  }),
+  /**
    * True when the reporter was validated via HMAC at submission time.
    * Lets the admin UI distinguish verified vs. self-asserted identities.
    */
