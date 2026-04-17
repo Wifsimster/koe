@@ -29,8 +29,8 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 - `packages/shared` : types metier partages et helper `captureBrowserMetadata`.
 - `packages/api/Dockerfile` : build multi-stage publie sur `ghcr.io/wifsimster/koe-api`.
 - `docker-compose.yml` + `.env.docker.example` : self-host en une commande (API + PostgreSQL).
-- `.github/workflows/release.yml` : widget via semantic-release, tags `v*`.
-- `.github/workflows/docker.yml` : image API, tags roulants `:edge` + `:sha-*` sur push main, tags stables sur push de `api-v*`.
+- `.github/workflows/widget-release.yml` : widget via semantic-release, tags `v*`.
+- `.github/workflows/api-image.yml` : image API, tags roulants `:edge` + `:sha-*` sur push main, tags stables sur push de `api-v*`.
 - `.releaserc.json` : orchestration des tags et GitHub Releases automatiques via `semantic-release`.
 - `tsconfig.base.json` : options TypeScript strictes partagees.
 

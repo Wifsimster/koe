@@ -55,7 +55,7 @@ Koe est un monorepo pour un widget support embarquable destine aux produits SaaS
 
 - Ne pas documenter le chat temps reel comme une fonctionnalite active.
 - Ne pas supposer que `better-auth` est cable. Aucune dependance active n'apparait dans ce snapshot.
-- Ne pas modifier `.github/workflows/release.yml` ou `.releaserc.json` sans besoin explicite de publication.
+- Ne pas modifier `.github/workflows/widget-release.yml` ou `.releaserc.json` sans besoin explicite de publication.
 - Ne pas casser la double build du widget definie dans `packages/widget/vite.config.ts`.
 
 ## Fichiers sensibles
@@ -64,5 +64,5 @@ Koe est un monorepo pour un widget support embarquable destine aux produits SaaS
 - `packages/api/src/routes/widget.ts`
 - `packages/widget/vite.config.ts`
 - `.github/workflows/ci.yml`
-- `.github/workflows/release.yml`
+- `.github/workflows/widget-release.yml`
 - `.releaserc.json`
