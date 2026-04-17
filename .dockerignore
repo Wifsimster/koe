@@ -24,7 +24,7 @@
 **/.next
 **/.vite
 
-# Widget is never shipped inside the API image. The dashboard IS shipped
+# Widget is never shipped inside the server image. The dashboard IS shipped
 # (served at /admin/* when ENABLE_DASHBOARD=true), so only exclude its
 # prebuilt dist — the Dockerfile runs `vite build` fresh.
 packages/dashboard/dist

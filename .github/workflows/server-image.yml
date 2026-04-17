@@ -1,27 +1,29 @@
-name: API image
+name: Server image
 
-# Publishes `ghcr.io/wifsimster/koe-api`.
+# Publishes `ghcr.io/wifsimster/koe-server`. This image bundles the
+# Hono API and the built admin dashboard SPA (served at `/admin/*`) —
+# the complete self-hostable Koe runtime.
 #
 # Triggers:
-#   - Push to `main`            → `:edge` + `:sha-<short>` (rolling)
-#   - Push of `api-v*.*.*` tag  → `:x.y.z` + `:x.y` + `:latest` (stable)
-#   - Manual dispatch            → custom tag via input
+#   - Push to `main`               → `:edge` + `:sha-<short>` (rolling)
+#   - Push of `server-v*.*.*` tag  → `:x.y.z` + `:x.y` + `:latest` (stable)
+#   - Manual dispatch              → custom tag via input
 #
-# Release tags are API-scoped (`api-v*`) so widget releases don't churn
-# the API image. Cut one locally with:
+# Release tags are server-scoped (`server-v*`) so widget releases don't
+# churn the server image. Cut one locally with:
 #
-#     git tag api-v0.1.0 && git push origin api-v0.1.0
+#     git tag server-v0.1.0 && git push origin server-v0.1.0
 
 on:
   push:
     branches: [main]
-    tags: ['api-v*.*.*']
+    tags: ['server-v*.*.*']
     paths:
       - 'packages/api/**'
       - 'packages/shared/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
-      - '.github/workflows/api-image.yml'
+      - '.github/workflows/server-image.yml'
   workflow_dispatch:
     inputs:
       tag:
@@ -29,14 +31,14 @@ on:
         required: false
 
 concurrency:
-  group: docker-${{ github.ref }}
+  group: server-image-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   # Hardcoded lowercase: GHCR rejects mixed-case refs and the GitHub
   # owner is `Wifsimster`.
-  IMAGE_NAME: wifsimster/koe-api
+  IMAGE_NAME: wifsimster/koe-server
 
 jobs:
   build-and-push:
@@ -76,15 +78,15 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # `api-v1.2.3` → 1.2.3 + 1.2 + 1 + latest
-          # `main`       → edge + latest (so Watchtower-tracked deployments auto-update)
-          # commit       → sha-<short>
-          # manual       → user-supplied tag
+          # `server-v1.2.3` → 1.2.3 + 1.2 + 1 + latest
+          # `main`          → edge + latest (so Watchtower-tracked deployments auto-update)
+          # commit          → sha-<short>
+          # manual          → user-supplied tag
           tags: |
-            type=match,pattern=api-v(\d+\.\d+\.\d+),group=1
-            type=match,pattern=api-v(\d+\.\d+)\.\d+,group=1
-            type=match,pattern=api-v(\d+)\.\d+\.\d+,group=1
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/api-v') }}
+            type=match,pattern=server-v(\d+\.\d+\.\d+),group=1
+            type=match,pattern=server-v(\d+\.\d+)\.\d+,group=1
+            type=match,pattern=server-v(\d+)\.\d+\.\d+,group=1
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/server-v') }}
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
@@ -99,8 +101,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=koe-api
-          cache-to: type=gha,mode=max,scope=koe-api
+          cache-from: type=gha,scope=koe-server
+          cache-to: type=gha,mode=max,scope=koe-server
           provenance: mode=max
           sbom: true
 
@@ -144,8 +146,8 @@ jobs:
         uses: aquasecurity/trivy-action@0.35.0
         with:
           # Scan the digest, not a tag. Tags are mutable and can race with
-          # concurrent builds (or a re-cut `api-v*`), which would leave the
-          # signed/attested digest and the scanned digest out of sync.
+          # concurrent builds (or a re-cut `server-v*`), which would leave
+          # the signed/attested digest and the scanned digest out of sync.
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}
           format: sarif
           output: trivy.sarif
@@ -158,4 +160,4 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy.sarif
-          category: trivy-koe-api
+          category: trivy-koe-server

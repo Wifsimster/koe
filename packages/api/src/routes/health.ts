@@ -7,7 +7,7 @@ export const healthRoutes = new Hono();
 
 // Liveness: the process is up. Used by container orchestrators to decide
 // whether to restart the pod. Must never touch the DB.
-healthRoutes.get('/', (c) => ok(c, { status: 'ok', service: 'koe-api' }));
+healthRoutes.get('/', (c) => ok(c, { status: 'ok', service: 'koe-server' }));
 
 // Readiness: the process can serve traffic. Used by compose / k8s / LB
 // healthchecks to gate traffic until the DB is reachable and migrations

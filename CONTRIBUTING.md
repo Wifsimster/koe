@@ -96,19 +96,19 @@ No `CHANGELOG.md` is committed back to the repo — release notes live on the Gi
 
 The widget is not published to npm. Consumers pin to a git tag (e.g. `npm install github:Wifsimster/koe#v0.1.0`) or load the IIFE bundle from a GitHub-backed CDN such as jsDelivr.
 
-**API image (`Docker` workflow)** — triggered by push to `main` touching `packages/api/**`, `packages/shared/**` or the lockfile:
+**Server image (`Server image` workflow)** — triggered by push to `main` touching `packages/api/**`, `packages/shared/**` or the lockfile:
 
-1. Builds `packages/api/Dockerfile` as multi-arch (amd64 + arm64).
-2. Pushes to `ghcr.io/wifsimster/koe-api` with rolling tags `:edge` and `:sha-<short>`.
-3. Signs the image (cosign keyless, OIDC), attaches SLSA provenance + SBOM, scans with Trivy (fails on fixable HIGH/CRITICAL CVEs).
+1. Builds `packages/api/Dockerfile` as multi-arch (amd64 + arm64). The image bundles the API and the built admin dashboard SPA.
+2. Pushes to `ghcr.io/wifsimster/koe-server` with rolling tags `:edge` and `:sha-<short>`.
+3. Signs the image (cosign keyless, OIDC), attaches SLSA provenance + SBOM, scans with Trivy (soft-fail — findings land in the Security tab without blocking the run).
 
-For a **stable** image tag (`:latest`, `:X.Y.Z`, `:X.Y`, `:X`), cut an API-scoped git tag:
+For a **stable** image tag (`:latest`, `:X.Y.Z`, `:X.Y`, `:X`), cut a server-scoped git tag:
 
 ```bash
-git tag api-v0.1.0 && git push origin api-v0.1.0
+git tag server-v0.1.0 && git push origin server-v0.1.0
 ```
 
-Widget releases and API releases are independent — a `v1.2.3` tag does not rebuild the image, and an `api-v1.2.3` tag does not cut a widget release.
+Widget releases and server releases are independent — a `v1.2.3` tag does not rebuild the image, and a `server-v1.2.3` tag does not cut a widget release.
 
 ## Required secrets (maintainers)
 
