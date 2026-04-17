@@ -1,5 +1,10 @@
 import type { BrowserMetadata, TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
 
+export interface TicketPatch {
+  status?: TicketStatus;
+  priority?: TicketPriority;
+}
+
 /**
  * Admin dashboard → `/v1/admin/*` HTTP client. Thin on purpose: the
  * surface is read-only today, mutations join when the triage UI needs
@@ -128,6 +133,24 @@ export class AdminApiClient {
   }
 
   /**
+   * Partial update of a ticket's status / priority. Returns the full
+   * updated row so callers can swap in the new state without a
+   * refetch. Viewers get a 404 (same as non-members) — the dashboard
+   * hides the controls for them, so this is defense-in-depth.
+   */
+  updateTicket(
+    projectKey: string,
+    id: string,
+    patch: TicketPatch,
+  ): Promise<AdminTicket> {
+    return this.send<AdminTicket>(
+      'PATCH',
+      `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}`,
+      patch,
+    );
+  }
+
+  /**
    * Full-page redirect to the OIDC login URL if configured, else
    * no-op. Called after a 401 on any call.
    */
@@ -149,9 +172,14 @@ export class AdminApiClient {
     });
   }
 
-  private async get<T>(path: string): Promise<T> {
+  private get<T>(path: string): Promise<T> {
+    return this.send<T>('GET', path);
+  }
+
+  private async send<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = this.opts.getToken?.() ?? null;
     const res = await fetch(this.opts.baseUrl + path, {
+      method,
       // `include` sends cross-origin cookies when the API and
       // dashboard are on different origins. For same-origin deploys
       // it's a no-op but harmless.
@@ -160,6 +188,7 @@ export class AdminApiClient {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     let payload: Envelope<T>;
     try {

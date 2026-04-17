@@ -137,15 +137,27 @@ export const requireAdminSession: MiddlewareHandler<{ Variables: AdminContext }>
   await next();
 };
 
+export type ProjectRole = 'owner' | 'member' | 'viewer';
+
+export interface ProjectMembership {
+  id: string;
+  key: string;
+  role: ProjectRole;
+}
+
 /**
  * Authorization: asserts the authenticated admin user is a member of
  * the project resolved by `c.req.param('key')`. Runs after
  * `requireAdminSession` so `user` is set. Returns 404 (not 403) on
  * non-membership — we don't confirm whether the project exists to
  * users who can't see it.
+ *
+ * Attaches `project` (id + key + role) to the context. Downstream
+ * handlers that need to gate writes check `project.role` — see
+ * `requireProjectWriter` below.
  */
 export const requireProjectMember: MiddlewareHandler<{
-  Variables: AdminContext & { project: { id: string; key: string } };
+  Variables: AdminContext & { project: ProjectMembership };
 }> = async (c, next) => {
   const key = c.req.param('key');
   if (!key) {
@@ -157,6 +169,7 @@ export const requireProjectMember: MiddlewareHandler<{
     .select({
       projectId: schema.projects.id,
       projectKey: schema.projects.key,
+      role: schema.projectMembers.role,
     })
     .from(schema.projectMembers)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.projectMembers.projectId))
@@ -173,6 +186,30 @@ export const requireProjectMember: MiddlewareHandler<{
     return fail(c, 'not_found', 'Project not found', 404);
   }
 
-  c.set('project', { id: row.projectId, key: row.projectKey });
+  c.set('project', {
+    id: row.projectId,
+    key: row.projectKey,
+    role: row.role,
+  });
+  await next();
+};
+
+/**
+ * Write-gate: requires the member's role to be `owner` or `member`.
+ * `viewer` callers get the same 404 as a non-member — same reason,
+ * we don't signal "you're here but can't act" when "you're not here"
+ * is the safe response.
+ *
+ * Mount after `requireProjectMember` in the middleware chain. Kept as
+ * a sibling (not a replacement) so read-only routes don't pay for
+ * the extra branch.
+ */
+export const requireProjectWriter: MiddlewareHandler<{
+  Variables: AdminContext & { project: ProjectMembership };
+}> = async (c, next) => {
+  const project = c.get('project');
+  if (project.role === 'viewer') {
+    return fail(c, 'not_found', 'Project not found', 404);
+  }
   await next();
 };
