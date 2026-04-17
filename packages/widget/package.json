@@ -4,6 +4,15 @@
   "description": "Embeddable support widget for SaaS apps — bug reports, feature requests & live chat.",
   "license": "MIT",
   "author": "wifsimster",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Wifsimster/koe.git",
+    "directory": "packages/widget"
+  },
+  "homepage": "https://github.com/Wifsimster/koe/tree/main/packages/widget#readme",
+  "bugs": {
+    "url": "https://github.com/Wifsimster/koe/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
