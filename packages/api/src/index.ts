@@ -5,6 +5,7 @@ import { healthRoutes } from './routes/health';
 import { createAdminRoutes } from './routes/admin';
 import { createAdminApiRoutes } from './routes/adminApi';
 import { createOidcAuthRoutes } from './routes/oidcAuth';
+import { createPasswordAuthRoutes } from './routes/passwordAuth';
 import { createOidcService } from './lib/oidc';
 import { fail } from './lib/response';
 
@@ -22,6 +23,9 @@ app.route('/v1/widget', widgetRoutes);
 //   - `dev-session` → bearer-token session auth. Operators mint tokens
 //     with the `admin-session` CLI. Acceptable for local and staging;
 //     refused in production to prevent accidental exposure.
+//   - `password`    → email + password login against argon2id hashes in
+//     `admin_users.password_hash`. Users are seeded by the `admin-user`
+//     CLI. Uses the same session cookie + `admin_sessions` row as OIDC.
 //   - `oidc`        → provider-agnostic OIDC login via `openid-client`.
 //     Sets a same-origin session cookie on callback; the existing
 //     `admin_sessions` table stores only the SHA-256 hash.
@@ -94,6 +98,24 @@ if (adminAuthMode === 'dev-session') {
       secureCookies: (ADMIN_COOKIES_SECURE ?? 'true').toLowerCase() !== 'false',
     }),
   );
+  adminRoot.route(
+    '/',
+    createAdminApiRoutes({ dashboardOrigin: process.env.ADMIN_DASHBOARD_ORIGIN }),
+  );
+
+  app.route('/v1/admin', adminRoot);
+} else if (adminAuthMode === 'password') {
+  const passwordAuth = createPasswordAuthRoutes({
+    cookieName: process.env.ADMIN_SESSION_COOKIE ?? 'koe_admin',
+    sessionTtlDays: Number(process.env.ADMIN_SESSION_TTL_DAYS ?? '30'),
+    secureCookies:
+      (process.env.ADMIN_COOKIES_SECURE ?? 'true').toLowerCase() !== 'false',
+  });
+
+  const adminRoot = new Hono();
+  // `/auth/*` mounts first so `/auth/password` and `/auth/logout`
+  // aren't swallowed by the session-gated API routes.
+  adminRoot.route('/auth', passwordAuth);
   adminRoot.route(
     '/',
     createAdminApiRoutes({ dashboardOrigin: process.env.ADMIN_DASHBOARD_ORIGIN }),

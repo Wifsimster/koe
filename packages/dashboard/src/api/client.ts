@@ -405,6 +405,16 @@ export class AdminApiClient {
     window.location.assign(target.toString());
   }
 
+  /**
+   * Email + password login. Used when the API runs in
+   * `ADMIN_AUTH_MODE=password`. On success the server sets the same
+   * `koe_admin` session cookie the OIDC callback sets, so subsequent
+   * calls carry the session implicitly via `credentials: 'include'`.
+   */
+  loginWithPassword(email: string, password: string): Promise<{ user: Me['user'] }> {
+    return this.send<{ user: Me['user'] }>('POST', '/auth/password', { email, password });
+  }
+
   async logout(): Promise<void> {
     if (!this.opts.logoutUrl) return;
     await fetch(new URL(this.opts.logoutUrl, this.opts.baseUrl).toString(), {

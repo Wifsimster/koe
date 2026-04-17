@@ -284,6 +284,12 @@ export const adminUsers = pgTable('admin_users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: text('email').notNull().unique(),
   displayName: text('display_name'),
+  /**
+   * argon2id hash of the user's password, set only for users created
+   * via the `admin-user` CLI and used when `ADMIN_AUTH_MODE=password`.
+   * Stays NULL for OIDC-provisioned users — OIDC never sees a password.
+   */
+  passwordHash: text('password_hash'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 

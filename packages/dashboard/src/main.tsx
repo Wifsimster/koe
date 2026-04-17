@@ -20,10 +20,13 @@ const adminApiBaseUrl = (import.meta.env.VITE_ADMIN_API_URL as string | undefine
 // OIDC provider set `VITE_ADMIN_AUTH_MODE=dev-session` and fall back
 // to pasting a token from the CLI.
 const adminAuthMode =
-  (import.meta.env.VITE_ADMIN_AUTH_MODE as 'oidc' | 'dev-session' | undefined) ?? 'oidc';
+  (import.meta.env.VITE_ADMIN_AUTH_MODE as 'oidc' | 'dev-session' | 'password' | undefined) ??
+  'oidc';
 
-// OIDC endpoints live alongside the JSON API. Kept relative so the
-// `credentials: 'include'` cookie travels same-origin.
+// Auth endpoints live alongside the JSON API. Kept relative so the
+// `credentials: 'include'` cookie travels same-origin. `loginUrl` is
+// OIDC-only (used for the full-page redirect); `logoutUrl` is shared
+// between OIDC and password modes — both clear the same session cookie.
 const adminLoginUrl = `${adminApiBaseUrl}/auth/login`;
 const adminLogoutUrl = `${adminApiBaseUrl}/auth/logout`;
 
