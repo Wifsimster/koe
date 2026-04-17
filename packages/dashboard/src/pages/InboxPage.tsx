@@ -64,11 +64,11 @@ export function InboxPage() {
     setLoading(true);
     setError(null);
     try {
-      const rows = await api.listTickets(activeKey, {
+      const page = await api.listTickets(activeKey, {
         kind: kind === 'all' ? undefined : kind,
         status: status === 'all' ? undefined : status,
       });
-      setTickets(rows);
+      setTickets(page.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tickets');
     } finally {

@@ -47,9 +47,9 @@ export function TicketDetailPage() {
     let alive = true;
     api
       .listTickets(activeKey, { limit: 200 })
-      .then((rows) => {
+      .then((page) => {
         if (!alive) return;
-        const found = rows.find((t) => t.id === id);
+        const found = page.items.find((t) => t.id === id);
         if (!found) {
           setError('Ticket not found in this project.');
           return;
