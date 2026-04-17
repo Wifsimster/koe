@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { and, count, desc, eq, gte, lt, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
 import { ok, fail } from '../lib/response';
@@ -110,6 +110,16 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     priority: ticketPrioritySchema.optional(),
     verified: z.enum(['true', 'false']).optional(),
     search: z.string().trim().min(1).max(200).optional(),
+    /**
+     * Assignee filter. `me` resolves to the calling user's id,
+     * `unassigned` matches tickets with no assignee, and a bare uuid
+     * matches a specific project member. Kept as a string union rather
+     * than a uuid-only field so the `me` / `unassigned` shortcuts stay
+     * shareable in URLs.
+     */
+    assignee: z
+      .union([z.literal('me'), z.literal('unassigned'), z.string().uuid()])
+      .optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
     cursor: z.string().max(200).optional(),
   });
@@ -151,12 +161,14 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
    */
   api.get('/projects/:key/tickets', requireProjectMember, async (c) => {
     const project = c.get('project');
+    const user = c.get('user');
     const queryResult = ticketQuerySchema.safeParse({
       kind: c.req.query('kind'),
       status: c.req.query('status'),
       priority: c.req.query('priority'),
       verified: c.req.query('verified'),
       search: c.req.query('search'),
+      assignee: c.req.query('assignee'),
       limit: c.req.query('limit'),
       cursor: c.req.query('cursor'),
     });
@@ -165,13 +177,25 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         issues: queryResult.error.issues,
       });
     }
-    const { kind, status, priority, verified, search, limit, cursor } = queryResult.data;
+    const { kind, status, priority, verified, search, assignee, limit, cursor } =
+      queryResult.data;
 
     const conditions = [eq(schema.tickets.projectId, project.id)];
     if (kind) conditions.push(eq(schema.tickets.kind, kind));
     if (status) conditions.push(eq(schema.tickets.status, status));
     if (priority) conditions.push(eq(schema.tickets.priority, priority));
     if (verified) conditions.push(eq(schema.tickets.reporterVerified, verified === 'true'));
+    if (assignee === 'unassigned') {
+      conditions.push(isNull(schema.tickets.assignedToUserId));
+    } else if (assignee === 'me') {
+      conditions.push(eq(schema.tickets.assignedToUserId, user.id));
+    } else if (assignee) {
+      // Bare uuid — specific user. No project-membership check here:
+      // the filter is a read hint, and the result set is already
+      // scoped to this project via `projectId`. An outsider's uuid
+      // just returns zero rows.
+      conditions.push(eq(schema.tickets.assignedToUserId, assignee));
+    }
     if (search) {
       // Escape the ILIKE wildcards so a search for `50%` matches
       // literally. We pick `\\` as the escape char because Postgres
@@ -205,16 +229,24 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
 
     // Over-fetch by one so we can tell there's a next page without a
-    // second count query.
+    // second count query. Left-join `admin_users` via the nullable
+    // `assigned_to_user_id` so the inbox card can render the
+    // assignee's email without a second round-trip per ticket.
     const rows = await db
       .select({
         ticket: schema.tickets,
         voteCount: voteCountExpr,
+        assignedToEmail: schema.adminUsers.email,
+        assignedToDisplayName: schema.adminUsers.displayName,
       })
       .from(schema.tickets)
       .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
+      .leftJoin(
+        schema.adminUsers,
+        eq(schema.adminUsers.id, schema.tickets.assignedToUserId),
+      )
       .where(and(...conditions))
-      .groupBy(schema.tickets.id)
+      .groupBy(schema.tickets.id, schema.adminUsers.id)
       .orderBy(desc(schema.tickets.createdAt), desc(schema.tickets.id))
       .limit(limit + 1);
 
@@ -225,7 +257,12 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       hasMore && last ? encodeCursor(last.ticket.createdAt, last.ticket.id) : null;
 
     return ok(c, {
-      items: page.map((r) => ({ ...r.ticket, voteCount: r.voteCount })),
+      items: page.map((r) => ({
+        ...r.ticket,
+        voteCount: r.voteCount,
+        assignedToEmail: r.assignedToEmail,
+        assignedToDisplayName: r.assignedToDisplayName,
+      })),
       pageInfo: { nextCursor, hasMore, limit },
     });
   });
@@ -501,21 +538,33 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         );
       }
 
-      // Re-read with the aggregate vote count so the dashboard gets
-      // the same shape it receives from the list endpoint.
+      // Re-read with the aggregate vote count + the assignee's
+      // email so the dashboard gets the same shape it receives
+      // from the list endpoint.
       const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
       const [withVotes] = await db
         .select({
           ticket: schema.tickets,
           voteCount: voteCountExpr,
+          assignedToEmail: schema.adminUsers.email,
+          assignedToDisplayName: schema.adminUsers.displayName,
         })
         .from(schema.tickets)
         .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
+        .leftJoin(
+          schema.adminUsers,
+          eq(schema.adminUsers.id, schema.tickets.assignedToUserId),
+        )
         .where(eq(schema.tickets.id, id))
-        .groupBy(schema.tickets.id);
+        .groupBy(schema.tickets.id, schema.adminUsers.id);
 
       const row = firstOrThrow(withVotes ? [withVotes] : []);
-      return ok(c, { ...row.ticket, voteCount: row.voteCount });
+      return ok(c, {
+        ...row.ticket,
+        voteCount: row.voteCount,
+        assignedToEmail: row.assignedToEmail,
+        assignedToDisplayName: row.assignedToDisplayName,
+      });
     },
   );
 

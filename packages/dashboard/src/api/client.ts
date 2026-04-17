@@ -97,6 +97,13 @@ export interface AdminTicket {
   reporterEmail: string | null;
   reporterVerified: boolean;
   assignedToUserId: string | null;
+  /**
+   * Pre-joined from `admin_users` by the list/patch endpoints so the
+   * inbox card can show who's on the ticket without a second
+   * round-trip. `null` when unassigned.
+   */
+  assignedToEmail: string | null;
+  assignedToDisplayName: string | null;
   stepsToReproduce: string | null;
   expectedBehavior: string | null;
   actualBehavior: string | null;
@@ -107,12 +114,20 @@ export interface AdminTicket {
   voteCount: number;
 }
 
+export type AssigneeFilter = 'me' | 'unassigned' | string;
+
 export interface TicketListQuery {
   kind?: TicketKind;
   status?: TicketStatus;
   priority?: TicketPriority;
   verified?: boolean;
   search?: string;
+  /**
+   * Assignee filter. `me` / `unassigned` are server-side shortcuts;
+   * any other string is treated as a user uuid. Maps 1:1 to the API
+   * `?assignee=` query param so URLs stay shareable.
+   */
+  assignee?: AssigneeFilter;
   limit?: number;
   cursor?: string;
 }
@@ -206,6 +221,7 @@ export class AdminApiClient {
     if (query.priority) params.set('priority', query.priority);
     if (query.verified !== undefined) params.set('verified', String(query.verified));
     if (query.search) params.set('search', query.search);
+    if (query.assignee) params.set('assignee', query.assignee);
     if (query.limit) params.set('limit', String(query.limit));
     if (query.cursor) params.set('cursor', query.cursor);
     const qs = params.toString();
