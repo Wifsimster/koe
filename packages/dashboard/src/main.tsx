@@ -14,6 +14,19 @@ const basepath = import.meta.env.BASE_URL.replace(/\/$/, '') || undefined;
 // Override with `VITE_ADMIN_API_URL` for a split deploy.
 const adminApiBaseUrl = (import.meta.env.VITE_ADMIN_API_URL as string | undefined) ?? '/v1/admin';
 
+// Auth transport. `oidc` is the default — the deployment boots the
+// API with `ADMIN_AUTH_MODE=oidc` and the dashboard trusts the
+// same-origin session cookie. Local contributors who can't run an
+// OIDC provider set `VITE_ADMIN_AUTH_MODE=dev-session` and fall back
+// to pasting a token from the CLI.
+const adminAuthMode =
+  (import.meta.env.VITE_ADMIN_AUTH_MODE as 'oidc' | 'dev-session' | undefined) ?? 'oidc';
+
+// OIDC endpoints live alongside the JSON API. Kept relative so the
+// `credentials: 'include'` cookie travels same-origin.
+const adminLoginUrl = `${adminApiBaseUrl}/auth/login`;
+const adminLogoutUrl = `${adminApiBaseUrl}/auth/logout`;
+
 const router = createRouter({
   routeTree,
   basepath,
@@ -38,7 +51,12 @@ if (!container) throw new Error('#root element missing');
 
 createRoot(container).render(
   <StrictMode>
-    <AuthProvider baseUrl={adminApiBaseUrl}>
+    <AuthProvider
+      baseUrl={adminApiBaseUrl}
+      mode={adminAuthMode}
+      loginUrl={adminLoginUrl}
+      logoutUrl={adminLogoutUrl}
+    >
       <App />
     </AuthProvider>
   </StrictMode>,
