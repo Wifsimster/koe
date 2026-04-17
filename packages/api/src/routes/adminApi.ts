@@ -202,10 +202,21 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       // literally. We pick `\\` as the escape char because Postgres
       // accepts the default backslash without an explicit ESCAPE clause.
       const needle = `%${search.replace(/[%_\\]/g, (ch) => `\\${ch}`)}%`;
+      // Includes the assignee's email via a correlated subquery —
+      // the list query already left-joins `admin_users` for
+      // display, but referencing the join alias inside `or()` here
+      // would make drizzle duplicate the join. A one-line scalar
+      // subquery is cheap enough at this volume.
       conditions.push(
         or(
           sql`${schema.tickets.title} ilike ${needle}`,
           sql`${schema.tickets.description} ilike ${needle}`,
+          sql`${schema.tickets.reporterEmail} ilike ${needle}`,
+          sql`exists (
+            select 1 from ${schema.adminUsers} au
+            where au.id = ${schema.tickets.assignedToUserId}
+              and au.email ilike ${needle}
+          )`,
         )!,
       );
     }

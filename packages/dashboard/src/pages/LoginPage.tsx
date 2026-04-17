@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
+import { INBOX_DEFAULT_SEARCH } from '../router';
 
 /**
  * Login page, two modes:
@@ -52,10 +53,7 @@ export function LoginPage() {
       // Land on the inbox with its default filters. `validateSearch`
       // materializes defaults at the route boundary anyway, but TS
       // requires the full shape here.
-      await navigate({
-        to: '/',
-        search: { kind: 'all', status: 'open', assignee: 'all' },
-      });
+      await navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
     } finally {
       setSubmitting(false);
     }
