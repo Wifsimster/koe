@@ -6,7 +6,7 @@
 # cut. The `@sha256:...` suffix is deliberately omitted here so the repo
 # stays buildable without a registry auth; CI rebuilds it against a
 # digest-pinned base (see .github/workflows/docker.yml).
-ARG NODE_IMAGE=node:20.18.1-alpine3.20
+ARG NODE_IMAGE=node:22.22.2-alpine3.22
 
 # --- Builder -------------------------------------------------------------
 FROM ${NODE_IMAGE} AS builder
