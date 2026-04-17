@@ -1,4 +1,4 @@
-name: Docker — koe-api
+name: API image
 
 # Publishes `ghcr.io/wifsimster/koe-api`.
 #
@@ -21,7 +21,7 @@ on:
       - 'packages/shared/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
-      - '.github/workflows/docker.yml'
+      - '.github/workflows/api-image.yml'
   workflow_dispatch:
     inputs:
       tag:

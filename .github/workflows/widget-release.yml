@@ -1,4 +1,4 @@
-name: Release
+name: Widget release
 
 # Automated release driven by Conventional Commits + semantic-release.
 #
@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   release:
-    name: Release
+    name: Widget release
     runs-on: ubuntu-latest
     if: github.repository == 'wifsimster/koe'
     permissions:
