@@ -591,7 +591,15 @@ function ReadonlyChip({ label }: { label: string }) {
 
 function BackLink() {
   return (
-    <Link to="/" className="text-sm text-indigo-700 hover:underline">
+    <Link
+      to="/"
+      // TS requires the full inbox search shape here; the route's
+      // `validateSearch` overwrites these with the same defaults
+      // anyway, so the explicit values are the cheapest way to
+      // satisfy the type.
+      search={{ kind: 'all', status: 'open', assignee: 'all' }}
+      className="text-sm text-indigo-700 hover:underline"
+    >
       ← Back to inbox
     </Link>
   );

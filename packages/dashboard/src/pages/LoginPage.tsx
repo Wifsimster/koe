@@ -49,7 +49,13 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(trimmed);
-      await navigate({ to: '/' });
+      // Land on the inbox with its default filters. `validateSearch`
+      // materializes defaults at the route boundary anyway, but TS
+      // requires the full shape here.
+      await navigate({
+        to: '/',
+        search: { kind: 'all', status: 'open', assignee: 'all' },
+      });
     } finally {
       setSubmitting(false);
     }

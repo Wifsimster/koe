@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 import { createRootRouteWithContext, createRoute, Outlet, redirect } from '@tanstack/react-router';
+import type { TicketKind, TicketStatus } from '@koe/shared';
 import { LoginPage } from './pages/LoginPage';
 import { InboxPage } from './pages/InboxPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
 import { AppShell } from './components/AppShell';
 import { useAuth, type AuthContextValue } from './auth/AuthContext';
+import type { AssigneeFilter } from './api/client';
 
 /**
  * Router context: the auth state plugged into `createRouter` in
@@ -43,10 +45,59 @@ const authenticatedLayoutRoute = createRoute({
   component: AuthenticatedLayout,
 });
 
+/**
+ * Search-param contract for the inbox. Survives refresh, is
+ * shareable, and lets the back/forward buttons work on filter
+ * changes. All fields default to the "show everything interesting"
+ * starting view so a clean URL (`/`) is never empty.
+ *
+ * Unknown values coerce to defaults rather than throwing — a
+ * clipboard'd URL from an older version still opens.
+ */
+export interface InboxSearch {
+  kind: TicketKind | 'all';
+  status: TicketStatus | 'all';
+  assignee: AssigneeFilter | 'all';
+}
+
+const VALID_KINDS: ReadonlySet<string> = new Set(['all', 'bug', 'feature']);
+const VALID_STATUSES: ReadonlySet<string> = new Set([
+  'all',
+  'open',
+  'in_progress',
+  'planned',
+  'resolved',
+  'closed',
+  'wont_fix',
+]);
+const ASSIGNEE_SHORTCUTS: ReadonlySet<string> = new Set(['all', 'me', 'unassigned']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseKind(raw: unknown): InboxSearch['kind'] {
+  return typeof raw === 'string' && VALID_KINDS.has(raw)
+    ? (raw as InboxSearch['kind'])
+    : 'all';
+}
+function parseStatus(raw: unknown): InboxSearch['status'] {
+  return typeof raw === 'string' && VALID_STATUSES.has(raw)
+    ? (raw as InboxSearch['status'])
+    : 'open';
+}
+function parseAssignee(raw: unknown): InboxSearch['assignee'] {
+  if (typeof raw !== 'string') return 'all';
+  if (ASSIGNEE_SHORTCUTS.has(raw)) return raw as InboxSearch['assignee'];
+  return UUID_RE.test(raw) ? raw : 'all';
+}
+
 const inboxRoute = createRoute({
   getParentRoute: () => authenticatedLayoutRoute,
   path: '/',
   component: InboxPage,
+  validateSearch: (raw: Record<string, unknown>): InboxSearch => ({
+    kind: parseKind(raw.kind),
+    status: parseStatus(raw.status),
+    assignee: parseAssignee(raw.assignee),
+  }),
 });
 
 const ticketDetailRoute = createRoute({

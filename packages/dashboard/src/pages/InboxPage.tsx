@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import type { InboxSearch } from '../router';
 import clsx from 'clsx';
 import type { TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
@@ -36,11 +37,44 @@ export function InboxPage() {
   const [tickets, setTickets] = useState<AdminTicket[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [kind, setKind] = useState<TicketKind | 'all'>('all');
-  const [status, setStatus] = useState<TicketStatus | 'all'>('open');
-  // `all` is client-side only (omits the query param); `me` and
-  // `unassigned` are the two shortcuts the server resolves.
-  const [assignee, setAssignee] = useState<AssigneeFilter | 'all'>('all');
+
+  // Filters live in the URL, not component state — so refresh
+  // preserves the view, links are shareable, and the back button
+  // actually undoes a filter change. Values come back already
+  // narrowed by the route's `validateSearch`, so no further parsing.
+  //
+  // The `as InboxSearch` casts are unfortunate: TanStack Router's
+  // deep generic inference gives up when a sibling route has its
+  // own search shape (the `/login` route uses `redirectTo`). The
+  // runtime shape is guaranteed by `validateSearch` itself.
+  const { kind, status, assignee } = useSearch({
+    from: '/_authenticated/',
+  }) as unknown as InboxSearch;
+  const navigate = useNavigate();
+  const setKind = useCallback(
+    (v: TicketKind | 'all') =>
+      void navigate({
+        to: '/',
+        search: (prev) => ({ ...(prev as unknown as InboxSearch), kind: v }),
+      }),
+    [navigate],
+  );
+  const setStatus = useCallback(
+    (v: TicketStatus | 'all') =>
+      void navigate({
+        to: '/',
+        search: (prev) => ({ ...(prev as unknown as InboxSearch), status: v }),
+      }),
+    [navigate],
+  );
+  const setAssignee = useCallback(
+    (v: AssigneeFilter | 'all') =>
+      void navigate({
+        to: '/',
+        search: (prev) => ({ ...(prev as unknown as InboxSearch), assignee: v }),
+      }),
+    [navigate],
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [members, setMembers] = useState<ProjectMember[] | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
