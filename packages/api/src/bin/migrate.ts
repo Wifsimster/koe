@@ -1,6 +1,6 @@
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 
@@ -34,7 +34,13 @@ export async function runMigrations(): Promise<void> {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare the running entrypoint's basename, not `import.meta.url`. When
+// bundlers inline this module into another entrypoint (e.g. `serve.js`),
+// `import.meta.url` is rewritten to point at the containing file — which
+// would silently fire this CLI block and exit before the real server
+// starts. `process.argv[1]` still points at the actual entrypoint on disk.
+const entry = process.argv[1];
+if (entry && basename(entry).replace(/\.[cm]?js$/, '') === 'migrate') {
   try {
     await runMigrations();
     process.exit(0);
