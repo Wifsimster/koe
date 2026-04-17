@@ -1,32 +1,24 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
+import { ArrowLeft, Bug, Lightbulb, ShieldAlert } from 'lucide-react';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type {
-  AdminTicket,
-  ProjectMember,
-  TicketComment,
-  TicketEvent,
-} from '../api/client';
+import type { AdminTicket, ProjectMember, TicketComment, TicketEvent } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { INBOX_DEFAULT_SEARCH } from '../router';
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
+import { Separator } from '../components/ui/separator';
+import { Textarea } from '../components/ui/textarea';
+import { cn } from '../lib/utils';
 
-/**
- * Ticket detail view with inline status + priority edits.
- *
- * Role-gated: owners and members see editable dropdowns, viewers see
- * read-only chips. The backend enforces the same rule — the UI
- * hiding the controls is convenience, not security.
- *
- * Optimistic update shape: flip the local value immediately, call the
- * API, revert + surface an error if the call fails. A plain `<select>`
- * is the widget here — it's keyboard-accessible by default, works
- * thumb-first on mobile, and doesn't need a custom dropdown library.
- *
- * Notes / comments and assignment are deliberately out of scope; they
- * earn their way in one at a time as the flow demands them (see the
- * meeting analysis).
- */
 export function TicketDetailPage() {
   const { id } = useParams({ from: '/_authenticated/tickets/$id' });
   const { state, api } = useAuth();
@@ -37,27 +29,16 @@ export function TicketDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
-  // Holds the `batchId` of a pending batch-revert. `null` = no
-  // confirmation in flight; a string = the ConfirmDialog is mounted
-  // and waiting for the operator's answer.
-  const [pendingBatchRevert, setPendingBatchRevert] = useState<string | null>(
-    null,
-  );
+  const [pendingBatchRevert, setPendingBatchRevert] = useState<string | null>(null);
   const [batchReverting, setBatchReverting] = useState(false);
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
-
-  // Membership role for the active project — decides whether the
-  // edit controls render at all.
   const role =
     state.status === 'authenticated'
       ? state.me.memberships.find((m) => m.projectKey === activeKey)?.role ?? 'viewer'
       : 'viewer';
   const canWrite = role === 'owner' || role === 'member';
 
-  // There's no dedicated "get ticket" endpoint — we find it in the
-  // project's list. Acceptable while the lists are small; when they
-  // grow, add `/v1/admin/tickets/:id` and keep this page identical.
   useEffect(() => {
     if (!activeKey) return;
     let alive = true;
@@ -87,8 +68,6 @@ export function TicketDetailPage() {
       const rows = await api.listTicketEvents(activeKey, id);
       setEvents(rows);
     } catch (err) {
-      // Audit trail is a nice-to-have on this page. A failure here
-      // should not fail the page — the ticket itself is still useful.
       console.warn('[koe/dashboard] listTicketEvents failed', err);
     }
   }, [activeKey, api, id]);
@@ -111,14 +90,10 @@ export function TicketDetailPage() {
   const postComment = async (body: string) => {
     if (!activeKey) return;
     const created = await api.createTicketComment(activeKey, id, body);
-    // Prepend the new comment (list is newest-first) and refresh the
-    // audit trail so the `commented` event shows up in Activity.
     setComments((prev) => (prev ? [created, ...prev] : [created]));
     void loadEvents();
   };
 
-  // Members only need loading when the user can actually assign —
-  // viewers never see the picker, so spare them the round-trip.
   useEffect(() => {
     if (!activeKey || !canWrite) return;
     let alive = true;
@@ -128,8 +103,6 @@ export function TicketDetailPage() {
         if (alive) setMembers(rows);
       })
       .catch((err) => {
-        // Non-fatal: the assignment picker falls back to a plain
-        // "(unknown)" when we don't know who the current assignee is.
         console.warn('[koe/dashboard] listProjectMembers failed', err);
       });
     return () => {
@@ -144,20 +117,10 @@ export function TicketDetailPage() {
       setTicket(next);
       void loadEvents();
     } catch (err) {
-      // Surface the error in the same slot as patch failures so ops
-      // see why a revert didn't land (most commonly: the original
-      // assignee left the project).
       setMutError(err instanceof Error ? err.message : 'Revert failed');
     }
   };
 
-  /**
-   * Stage a batch revert. The actual work happens after the
-   * operator confirms via `performBatchRevert`. Batch revert can
-   * touch many tickets beyond the one on screen, so the dialog is
-   * the guardrail — same pattern as the bulk destructive status
-   * change on the inbox.
-   */
   const revertBatch = async (batchId: string): Promise<void> => {
     if (!activeKey) return;
     setPendingBatchRevert(batchId);
@@ -169,8 +132,6 @@ export function TicketDetailPage() {
     try {
       const res = await api.revertEventBatch(activeKey, batchId);
       setPendingBatchRevert(null);
-      // Refetch this ticket's view — its state may or may not have
-      // changed depending on whether it was part of the batch.
       void loadEvents();
       if (res.skipped.length > 0) {
         setMutError(
@@ -194,18 +155,12 @@ export function TicketDetailPage() {
     const prev = ticket;
     setMutError(null);
     setMutating(true);
-    // Optimistic swap.
     setTicket({ ...ticket, ...patch });
     try {
       const next = await api.updateTicket(activeKey, ticket.id, patch);
       setTicket(next);
-      // Pull the new event(s) so the Activity section reflects what
-      // just happened. The server only emits events for values that
-      // actually changed, so the re-read is harmless when the patch
-      // was a no-op.
       void loadEvents();
     } catch (err) {
-      // Roll back and surface the reason.
       setTicket(prev);
       setMutError(err instanceof Error ? err.message : 'Update failed');
     } finally {
@@ -215,165 +170,173 @@ export function TicketDetailPage() {
 
   if (error) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-6">
         <BackLink />
-        <div role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3">
+        <p role="alert" className="border-l-2 border-destructive/70 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
-        </div>
+        </p>
       </div>
     );
   }
 
   if (!ticket) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-6">
         <BackLink />
-        <div className="text-sm text-gray-500">Loading…</div>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
   }
 
+  const Icon = ticket.kind === 'bug' ? Bug : Lightbulb;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-10">
       <BackLink />
 
-      <header className="bg-white border border-gray-200 rounded-lg p-4 md:p-6">
-        <div className="flex items-start gap-3">
-          <span aria-hidden="true" className="text-2xl leading-7">
-            {ticket.kind === 'bug' ? '🐞' : '💡'}
+      <header className="space-y-4">
+        <div className="flex items-center gap-3 text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
+          <Icon className="size-3.5" />
+          <span>{ticket.kind === 'bug' ? 'Bug report' : 'Idea'}</span>
+          <span className="font-mono normal-case tracking-normal text-muted-foreground/60">
+            {ticket.id.slice(0, 8)}
           </span>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-xl font-semibold text-gray-900 break-words">{ticket.title}</h2>
-            <div className="mt-1 text-xs text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>{new Date(ticket.createdAt).toLocaleString()}</span>
-              {ticket.kind === 'feature' && <span>{ticket.voteCount} votes</span>}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              {canWrite ? (
-                <StatusSelect
-                  value={ticket.status}
-                  disabled={mutating}
-                  onChange={(status) => void applyPatch({ status })}
-                />
-              ) : (
-                <ReadonlyChip label={`status: ${ticket.status.replace('_', ' ')}`} />
-              )}
-              {canWrite ? (
-                <PrioritySelect
-                  value={ticket.priority}
-                  disabled={mutating}
-                  onChange={(priority) => void applyPatch({ priority })}
-                />
-              ) : (
-                <ReadonlyChip label={`priority: ${ticket.priority}`} />
-              )}
-              {canWrite ? (
-                <AssigneeSelect
-                  value={ticket.assignedToUserId}
-                  members={members}
-                  disabled={mutating}
-                  onChange={(assignedToUserId) => void applyPatch({ assignedToUserId })}
-                />
-              ) : (
-                <ReadonlyChip
-                  label={
-                    ticket.assignedToUserId === null
-                      ? 'unassigned'
-                      : `assigned: ${ticket.assignedToUserId}`
-                  }
-                />
-              )}
-            </div>
-            {mutError && (
-              <p role="alert" className="mt-2 text-xs text-red-700">
-                {mutError}
-              </p>
-            )}
-          </div>
+        </div>
+        <h1 className="font-heading text-[clamp(2rem,4.5vw,3.75rem)] leading-[1.05] tracking-tighter">
+          {ticket.title}
+        </h1>
+        <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted-foreground">
+          <time dateTime={ticket.createdAt}>
+            {new Date(ticket.createdAt).toLocaleString()}
+          </time>
+          {ticket.kind === 'feature' && <span>· {ticket.voteCount} votes</span>}
+          {!ticket.reporterVerified && (
+            <Badge variant="ghost" className="gap-1 text-muted-foreground">
+              <ShieldAlert className="size-3" /> unverified
+            </Badge>
+          )}
         </div>
       </header>
 
-      <Section title="Description">
-        <p className="whitespace-pre-wrap text-sm text-gray-800">{ticket.description}</p>
-      </Section>
+      <Separator />
 
-      {ticket.kind === 'bug' && (ticket.stepsToReproduce || ticket.expectedBehavior || ticket.actualBehavior) && (
-        <Section title="Reproduction">
-          {ticket.stepsToReproduce && (
-            <Field label="Steps">{ticket.stepsToReproduce}</Field>
+      <div className="grid grid-cols-1 gap-10 md:grid-cols-[1fr_16rem]">
+        <div className="min-w-0 space-y-10">
+          <Section title="Description">
+            <p className="whitespace-pre-wrap text-base leading-relaxed">{ticket.description}</p>
+          </Section>
+
+          {ticket.kind === 'bug' &&
+            (ticket.stepsToReproduce || ticket.expectedBehavior || ticket.actualBehavior) && (
+              <Section title="Reproduction">
+                {ticket.stepsToReproduce && (
+                  <Field label="Steps">{ticket.stepsToReproduce}</Field>
+                )}
+                {ticket.expectedBehavior && (
+                  <Field label="Expected">{ticket.expectedBehavior}</Field>
+                )}
+                {ticket.actualBehavior && (
+                  <Field label="Actual">{ticket.actualBehavior}</Field>
+                )}
+              </Section>
+            )}
+
+          {ticket.metadata && (
+            <Section title="Browser context">
+              <pre className="overflow-x-auto border border-border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+                {JSON.stringify(ticket.metadata, null, 2)}
+              </pre>
+            </Section>
           )}
-          {ticket.expectedBehavior && (
-            <Field label="Expected">{ticket.expectedBehavior}</Field>
+
+          {ticket.screenshotUrl && (
+            <Section title="Screenshot">
+              <a
+                href={ticket.screenshotUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-sm underline underline-offset-4 hover:text-primary"
+              >
+                Open screenshot ↗
+              </a>
+            </Section>
           )}
-          {ticket.actualBehavior && <Field label="Actual">{ticket.actualBehavior}</Field>}
-        </Section>
-      )}
 
-      <Section title="Reporter">
-        <dl className="text-sm text-gray-700 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
-          <dt className="text-gray-500">id</dt>
-          <dd className="font-mono text-xs break-all">{ticket.reporterId}</dd>
-          {ticket.reporterName && (
-            <>
-              <dt className="text-gray-500">name</dt>
-              <dd>{ticket.reporterName}</dd>
-            </>
-          )}
-          {ticket.reporterEmail && (
-            <>
-              <dt className="text-gray-500">email</dt>
-              <dd>{ticket.reporterEmail}</dd>
-            </>
-          )}
-          <dt className="text-gray-500">verified</dt>
-          <dd>{ticket.reporterVerified ? 'yes (HMAC)' : 'no'}</dd>
-        </dl>
-        {!ticket.reporterVerified && (
-          <p className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2">
-            This reporter was not verified. If you reply via the email they provided, that address
-            is self-asserted — not confirmed by the host app.
-          </p>
-        )}
-      </Section>
+          <Section title="Comments">
+            <CommentsPanel comments={comments} canWrite={canWrite} onSubmit={postComment} />
+          </Section>
 
-      {ticket.metadata && (
-        <Section title="Browser context">
-          <pre className="text-xs bg-gray-50 border border-gray-200 rounded p-3 overflow-x-auto">
-{JSON.stringify(ticket.metadata, null, 2)}
-          </pre>
-        </Section>
-      )}
+          <Section title="Activity">
+            <ActivityList
+              events={events}
+              members={members}
+              canRevert={canWrite}
+              onRevert={revertEvent}
+              onRevertBatch={revertBatch}
+            />
+          </Section>
+        </div>
 
-      {ticket.screenshotUrl && (
-        <Section title="Screenshot">
-          <a
-            href={ticket.screenshotUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-sm text-indigo-700 hover:underline"
-          >
-            Open screenshot
-          </a>
-        </Section>
-      )}
+        <aside className="space-y-6 md:sticky md:top-24 md:self-start">
+          <MetaCard title="State">
+            {canWrite ? (
+              <StatusSelect
+                value={ticket.status}
+                disabled={mutating}
+                onChange={(status) => void applyPatch({ status })}
+              />
+            ) : (
+              <ReadonlyRow label="status" value={ticket.status.replace('_', ' ')} />
+            )}
+            {canWrite ? (
+              <PrioritySelect
+                value={ticket.priority}
+                disabled={mutating}
+                onChange={(priority) => void applyPatch({ priority })}
+              />
+            ) : (
+              <ReadonlyRow label="priority" value={ticket.priority} />
+            )}
+            {canWrite ? (
+              <AssigneeSelect
+                value={ticket.assignedToUserId}
+                members={members}
+                disabled={mutating}
+                onChange={(assignedToUserId) => void applyPatch({ assignedToUserId })}
+              />
+            ) : (
+              <ReadonlyRow
+                label="assignee"
+                value={
+                  ticket.assignedToUserId === null
+                    ? 'unassigned'
+                    : (ticket.assignedToDisplayName ?? ticket.assignedToEmail ?? 'someone')
+                }
+              />
+            )}
+            {mutError && (
+              <p role="alert" className="text-xs text-destructive">
+                {mutError}
+              </p>
+            )}
+          </MetaCard>
 
-      <Section title="Comments">
-        <CommentsPanel
-          comments={comments}
-          canWrite={canWrite}
-          onSubmit={postComment}
-        />
-      </Section>
-
-      <Section title="Activity">
-        <ActivityList
-          events={events}
-          members={members}
-          canRevert={canWrite}
-          onRevert={revertEvent}
-          onRevertBatch={revertBatch}
-        />
-      </Section>
+          <MetaCard title="Reporter">
+            <ReadonlyRow label="id" value={ticket.reporterId} mono />
+            {ticket.reporterName && <ReadonlyRow label="name" value={ticket.reporterName} />}
+            {ticket.reporterEmail && <ReadonlyRow label="email" value={ticket.reporterEmail} />}
+            <ReadonlyRow
+              label="verified"
+              value={ticket.reporterVerified ? 'yes (HMAC)' : 'no'}
+            />
+            {!ticket.reporterVerified && (
+              <p className="border-l-2 border-destructive/70 pl-3 text-[11px] leading-relaxed text-muted-foreground">
+                Reporter was not verified. Any reply via the email they provided is self-asserted.
+              </p>
+            )}
+          </MetaCard>
+        </aside>
+      </div>
 
       {pendingBatchRevert && (
         <ConfirmDialog
@@ -419,54 +382,54 @@ function CommentsPanel({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {canWrite && (
-        <form onSubmit={handleSubmit} className="space-y-2">
-          <textarea
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Leave a note for your teammates…"
             rows={3}
             maxLength={10_000}
-            className="w-full text-sm px-3 py-2 rounded-md border border-gray-300 bg-white focus:outline-none focus:border-indigo-500"
             disabled={submitting}
           />
-          <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
             {error && (
-              <p role="alert" className="text-xs text-red-700 flex-1">
+              <p role="alert" className="flex-1 text-xs text-destructive">
                 {error}
               </p>
             )}
             <div className="ml-auto">
-              <button
+              <Button
                 type="submit"
+                size="sm"
                 disabled={submitting || draft.trim().length === 0}
-                className="min-h-[36px] px-3 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
               >
                 {submitting ? 'Posting…' : 'Post comment'}
-              </button>
+              </Button>
             </div>
           </div>
         </form>
       )}
 
       {comments === null ? (
-        <p className="text-sm text-gray-500">Loading…</p>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       ) : comments.length === 0 ? (
-        <p className="text-sm text-gray-500">
-          No comments yet.{canWrite ? ' Be the first — internal notes stay off the reporter.' : ''}
+        <p className="text-sm text-muted-foreground">
+          No comments yet.{canWrite ? ' Internal notes stay off the reporter.' : ''}
         </p>
       ) : (
-        <ol className="space-y-3">
+        <ol className="space-y-4">
           {comments.map((c) => (
-            <li key={c.id} className="text-sm text-gray-800 border border-gray-200 rounded-md p-3">
-              <div className="text-xs text-gray-500 mb-1 flex flex-wrap gap-x-2">
-                <span className="font-medium">
+            <li key={c.id} className="border-l-2 border-border pl-4">
+              <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">
                   {c.authorDisplayName ?? c.authorEmail ?? 'deleted user'}
                 </span>
-                <span>{new Date(c.createdAt).toLocaleString()}</span>
+                <span>·</span>
+                <time dateTime={c.createdAt}>{new Date(c.createdAt).toLocaleString()}</time>
               </div>
-              <p className="whitespace-pre-wrap">{c.body}</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{c.body}</p>
             </li>
           ))}
         </ol>
@@ -490,13 +453,11 @@ function ActivityList({
 }) {
   const [reverting, setReverting] = useState<string | null>(null);
 
-  if (events === null) {
-    return <p className="text-sm text-gray-500">Loading…</p>;
-  }
+  if (events === null) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (events.length === 0) {
     return (
-      <p className="text-sm text-gray-500">
-        No changes yet. Future status, priority, and assignment edits will show up here.
+      <p className="text-sm text-muted-foreground">
+        No changes yet. Status, priority, and assignment edits will show up here.
       </p>
     );
   }
@@ -511,39 +472,41 @@ function ActivityList({
   };
 
   return (
-    <ol className="space-y-2">
+    <ol className="space-y-5 border-l border-border pl-5">
       {events.map((ev) => {
         const revertable =
           ev.kind === 'status_changed' ||
           ev.kind === 'priority_changed' ||
           ev.kind === 'assigned';
-        const wasRevert =
-          typeof (ev.payload as Record<string, unknown>).revertOf === 'string';
+        const wasRevert = typeof (ev.payload as Record<string, unknown>).revertOf === 'string';
         return (
           <li
             key={ev.id}
-            className="text-sm text-gray-700 border-l-2 border-gray-200 pl-3 flex items-start gap-2"
+            className={cn(
+              'relative flex items-start gap-4',
+              'before:absolute before:-left-[26px] before:top-2 before:size-2 before:rounded-full before:bg-border',
+              wasRevert && 'before:bg-destructive/60',
+            )}
           >
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 text-sm">
               <div>
                 <span className="font-medium">{ev.actorEmail ?? 'deleted user'}</span>{' '}
-                {describeEvent(ev, members)}
-                {wasRevert && (
-                  <span className="ml-1 text-xs text-gray-500">(revert)</span>
-                )}
+                <span className="text-muted-foreground">
+                  {describeEvent(ev, members)}
+                  {wasRevert && <span className="ml-1">(revert)</span>}
+                </span>
               </div>
-              <div className="text-xs text-gray-500">
+              <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
                 {new Date(ev.createdAt).toLocaleString()}
               </div>
             </div>
             {canRevert && revertable && (
-              <div className="flex flex-col items-end shrink-0 gap-1">
+              <div className="flex shrink-0 flex-col items-end gap-1 text-[11px]">
                 <button
                   type="button"
                   onClick={() => void handleRevert(ev.id)}
                   disabled={reverting !== null}
-                  title="Revert this change"
-                  className="text-xs text-indigo-700 hover:text-indigo-900 underline underline-offset-2 disabled:opacity-60"
+                  className="underline underline-offset-4 hover:text-primary disabled:opacity-60"
                 >
                   {reverting === ev.id ? 'Reverting…' : 'Undo'}
                 </button>
@@ -552,8 +515,7 @@ function ActivityList({
                     type="button"
                     onClick={() => void onRevertBatch(ev.batchId!)}
                     disabled={reverting !== null}
-                    title="Undo the whole bulk action this event came from"
-                    className="text-xs text-gray-600 hover:text-gray-800 underline underline-offset-2 disabled:opacity-60"
+                    className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-60"
                   >
                     Undo batch
                   </button>
@@ -567,13 +529,6 @@ function ActivityList({
   );
 }
 
-/**
- * Turn an event row into a readable sentence. The payload shape is
- * per-kind; we narrow each one here and fall back to a generic line
- * when we hit a kind we don't render yet (comments). `members` is
- * used to resolve user ids to emails — `null` members (viewer path)
- * gets a terser rendering that still works.
- */
 function describeEvent(ev: TicketEvent, members: ProjectMember[] | null): string {
   if (ev.kind === 'status_changed') {
     const from = readString(ev.payload.from);
@@ -623,6 +578,24 @@ const PRIORITY_OPTIONS: Array<{ value: TicketPriority; label: string }> = [
   { value: 'critical', label: 'Critical' },
 ];
 
+function MetaCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="space-y-3 border border-border bg-card p-4">
+      <div className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground">{title}</div>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+}
+
+function EditRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <div className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">{label}</div>
+      {children}
+    </div>
+  );
+}
+
 function StatusSelect({
   value,
   disabled,
@@ -633,21 +606,24 @@ function StatusSelect({
   onChange: (v: TicketStatus) => void;
 }) {
   return (
-    <label className="inline-flex items-center gap-2">
-      <span className="text-xs text-gray-500 uppercase tracking-wide">status</span>
-      <select
+    <EditRow label="Status">
+      <Select
         value={value}
-        onChange={(e) => onChange(e.target.value as TicketStatus)}
+        onValueChange={(v) => onChange(v as TicketStatus)}
         disabled={disabled}
-        className="text-sm px-2 py-1 rounded-md border border-gray-300 bg-white min-h-[36px] disabled:opacity-60"
       >
-        {STATUS_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        <SelectTrigger size="sm" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {STATUS_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </EditRow>
   );
 }
 
@@ -661,21 +637,24 @@ function PrioritySelect({
   onChange: (v: TicketPriority) => void;
 }) {
   return (
-    <label className="inline-flex items-center gap-2">
-      <span className="text-xs text-gray-500 uppercase tracking-wide">priority</span>
-      <select
+    <EditRow label="Priority">
+      <Select
         value={value}
-        onChange={(e) => onChange(e.target.value as TicketPriority)}
+        onValueChange={(v) => onChange(v as TicketPriority)}
         disabled={disabled}
-        className="text-sm px-2 py-1 rounded-md border border-gray-300 bg-white min-h-[36px] disabled:opacity-60"
       >
-        {PRIORITY_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        <SelectTrigger size="sm" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PRIORITY_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </EditRow>
   );
 }
 
@@ -690,34 +669,44 @@ function AssigneeSelect({
   disabled: boolean;
   onChange: (v: string | null) => void;
 }) {
-  // Empty-string is the sentinel for "unassigned" inside the <select>
-  // because native select can't carry a null value. The translation
-  // layer lives right here.
+  const UNASSIGNED = '__unassigned__';
   return (
-    <label className="inline-flex items-center gap-2">
-      <span className="text-xs text-gray-500 uppercase tracking-wide">assignee</span>
-      <select
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+    <EditRow label="Assignee">
+      <Select
+        value={value ?? UNASSIGNED}
+        onValueChange={(v) => onChange(v === UNASSIGNED ? null : v)}
         disabled={disabled || members === null}
-        className="text-sm px-2 py-1 rounded-md border border-gray-300 bg-white min-h-[36px] disabled:opacity-60 max-w-[200px]"
       >
-        <option value="">Unassigned</option>
-        {(members ?? []).map((m) => (
-          <option key={m.userId} value={m.userId}>
-            {m.displayName ?? m.email}
-          </option>
-        ))}
-      </select>
-    </label>
+        <SelectTrigger size="sm" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
+          {(members ?? []).map((m) => (
+            <SelectItem key={m.userId} value={m.userId}>
+              {m.displayName ?? m.email}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </EditRow>
   );
 }
 
-function ReadonlyChip({ label }: { label: string }) {
+function ReadonlyRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
-    <span className="text-xs text-gray-600 bg-gray-100 border border-gray-200 rounded px-2 py-1">
-      {label}
-    </span>
+    <div className="space-y-0.5">
+      <div className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">{label}</div>
+      <div className={cn('text-sm', mono && 'break-all font-mono text-[11px]')}>{value}</div>
+    </div>
   );
 }
 
@@ -725,32 +714,32 @@ function BackLink() {
   return (
     <Link
       to="/"
-      // TS requires the full inbox search shape here; the route's
-      // `validateSearch` overwrites these with the same defaults
-      // anyway, so the explicit values are the cheapest way to
-      // satisfy the type.
       search={INBOX_DEFAULT_SEARCH}
-      className="text-sm text-indigo-700 hover:underline"
+      className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground"
     >
-      ← Back to inbox
+      <ArrowLeft className="size-3" /> Inbox
     </Link>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="bg-white border border-gray-200 rounded-lg p-4 md:p-6">
-      <h3 className="text-sm font-semibold text-gray-900 mb-3">{title}</h3>
+    <section>
+      <h2 className="mb-4 text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
+        {title}
+      </h2>
       {children}
     </section>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="mb-2 last:mb-0">
-      <div className="text-xs text-gray-500 mb-1">{label}</div>
-      <div className="whitespace-pre-wrap text-sm text-gray-800">{children}</div>
+    <div className="mb-4 last:mb-0">
+      <div className="mb-1 text-[10px] tracking-[0.18em] uppercase text-muted-foreground">
+        {label}
+      </div>
+      <div className="whitespace-pre-wrap text-sm leading-relaxed">{children}</div>
     </div>
   );
 }

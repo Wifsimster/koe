@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { and, count, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
@@ -5,9 +6,12 @@ import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
 import { ok, fail } from '../lib/response';
+import { hashPassword } from '../lib/password';
+import { getSecretStoreFromEnv } from '../lib/secretStore';
 import {
   requireAdminSession,
   requireProjectMember,
+  requireProjectOwner,
   requireProjectWriter,
   type AdminContext,
   type ProjectMembership,
@@ -93,6 +97,100 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       .orderBy(desc(schema.projects.createdAt));
 
     return ok(c, rows);
+  });
+
+  /**
+   * Create a new project + grant the calling user `owner` membership in
+   * one transaction. Replaces the `bootstrap` CLI for operators who'd
+   * rather click a button than shell into a container.
+   *
+   * Returns the plaintext `identitySecret` once — the caller must copy
+   * it now; the stored value is encrypted and we never decrypt it back
+   * to a response body. Same contract the CLI honours, same security
+   * posture (the secret never lives in a logged request).
+   */
+  const createProjectSchema = z.object({
+    name: z.string().trim().min(1).max(120),
+    key: z
+      .string()
+      .trim()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z0-9-]+$/, 'key must match /^[a-z0-9-]+$/'),
+    allowedOrigins: z.array(z.string().trim().min(1).max(512)).max(20).optional(),
+    requireIdentityVerification: z.boolean().optional(),
+  });
+
+  api.post('/projects', async (c) => {
+    const user = c.get('user');
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = createProjectSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(c, 'validation_failed', 'Invalid project payload', 422, {
+        issues: parsed.error.issues,
+      });
+    }
+    const { name, key, allowedOrigins, requireIdentityVerification } = parsed.data;
+
+    // Uniqueness is enforced by a DB constraint too, but checking first
+    // lets us return a clean 409 instead of surfacing a driver error.
+    const [existing] = await db
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(eq(schema.projects.key, key))
+      .limit(1);
+    if (existing) {
+      return fail(c, 'conflict', `A project with key "${key}" already exists`, 409);
+    }
+
+    const identitySecret = randomBytes(32).toString('hex');
+    const storedSecret = getSecretStoreFromEnv().encrypt(identitySecret);
+
+    // Project + owner membership in one tx. If either fails neither
+    // lands — a dangling project with no owner would be an orphaned
+    // row that no one in the dashboard can see.
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(schema.projects)
+        .values({
+          name,
+          key,
+          allowedOrigins: allowedOrigins ?? [],
+          identitySecret: storedSecret,
+          requireIdentityVerification: requireIdentityVerification ?? false,
+        })
+        .returning();
+      const project = firstOrThrow(row ? [row] : [], 'project after insert');
+
+      await tx.insert(schema.projectMembers).values({
+        projectId: project.id,
+        userId: user.id,
+        role: 'owner',
+      });
+
+      return project;
+    });
+
+    return ok(
+      c,
+      {
+        project: {
+          id: created.id,
+          key: created.key,
+          name: created.name,
+          accentColor: created.accentColor,
+          allowedOrigins: created.allowedOrigins,
+          requireIdentityVerification: created.requireIdentityVerification,
+          lastPingAt: created.lastPingAt,
+          lastPingOrigin: created.lastPingOrigin,
+          createdAt: created.createdAt,
+          role: 'owner' as const,
+        },
+        identitySecret,
+      },
+      201,
+    );
   });
 
   const ticketStatusSchema = z.enum([
@@ -663,6 +761,324 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         .orderBy(schema.adminUsers.email);
 
       return ok(c, rows);
+    },
+  );
+
+  /**
+   * Invite an admin to a project. Owner-only.
+   *
+   * Two flows collapsed into one endpoint:
+   *   1. User already exists in `admin_users` (OIDC-provisioned or
+   *      CLI-seeded) → just create the `project_members` row.
+   *   2. User doesn't exist → create `admin_users` with a provided
+   *      initial password (argon2id-hashed). Mirrors the `admin-user`
+   *      CLI behaviour so a dashboard-invited user can log in in
+   *      `ADMIN_AUTH_MODE=password` without a CLI roundtrip.
+   *
+   * In OIDC mode, `initialPassword` is irrelevant (the hash is never
+   * consulted); the endpoint accepts it but callers generally omit it.
+   */
+  const inviteMemberSchema = z.object({
+    email: z.string().trim().toLowerCase().email().max(254),
+    role: z.enum(['owner', 'member', 'viewer']),
+    displayName: z.string().trim().min(1).max(120).optional(),
+    initialPassword: z.string().min(12).max(200).optional(),
+  });
+
+  api.post(
+    '/projects/:key/members',
+    requireProjectMember,
+    requireProjectOwner,
+    async (c) => {
+      const project = c.get('project');
+
+      const body = await c.req.json().catch(() => null);
+      const parsed = inviteMemberSchema.safeParse(body);
+      if (!parsed.success) {
+        return fail(c, 'validation_failed', 'Invalid invite payload', 422, {
+          issues: parsed.error.issues,
+        });
+      }
+      const { email, role, displayName, initialPassword } = parsed.data;
+
+      // Provision the user lazily if missing. Hash outside the tx —
+      // argon2id is CPU-bound (~100ms) and holding a db connection
+      // across it would starve the pool under any real load.
+      const [existingUser] = await db
+        .select({
+          id: schema.adminUsers.id,
+          email: schema.adminUsers.email,
+          displayName: schema.adminUsers.displayName,
+        })
+        .from(schema.adminUsers)
+        .where(eq(schema.adminUsers.email, email))
+        .limit(1);
+
+      let passwordHash: string | null = null;
+      if (!existingUser) {
+        if (!initialPassword) {
+          return fail(
+            c,
+            'validation_failed',
+            'No admin user with that email. Pass initialPassword (≥12 chars) to provision them.',
+            422,
+          );
+        }
+        passwordHash = await hashPassword(initialPassword);
+      }
+
+      const outcome = await db.transaction(async (tx) => {
+        let userId: string;
+        let userDisplayName: string | null;
+        if (existingUser) {
+          userId = existingUser.id;
+          userDisplayName = existingUser.displayName;
+        } else {
+          const [created] = await tx
+            .insert(schema.adminUsers)
+            .values({
+              email,
+              displayName: displayName ?? null,
+              passwordHash,
+            })
+            .returning({ id: schema.adminUsers.id, displayName: schema.adminUsers.displayName });
+          if (!created) throw new Error('failed to insert admin user');
+          userId = created.id;
+          userDisplayName = created.displayName;
+        }
+
+        // Reject duplicate membership with a clean 409 instead of
+        // letting the composite-PK violation bubble.
+        const [already] = await tx
+          .select({ userId: schema.projectMembers.userId })
+          .from(schema.projectMembers)
+          .where(
+            and(
+              eq(schema.projectMembers.projectId, project.id),
+              eq(schema.projectMembers.userId, userId),
+            ),
+          )
+          .limit(1);
+        if (already) {
+          return { kind: 'conflict' } as const;
+        }
+
+        await tx.insert(schema.projectMembers).values({
+          projectId: project.id,
+          userId,
+          role,
+        });
+
+        return {
+          kind: 'created',
+          userId,
+          email,
+          displayName: userDisplayName,
+          role,
+        } as const;
+      });
+
+      if (outcome.kind === 'conflict') {
+        return fail(c, 'conflict', 'User is already a member of this project', 409);
+      }
+
+      return ok(
+        c,
+        {
+          userId: outcome.userId,
+          email: outcome.email,
+          displayName: outcome.displayName,
+          role: outcome.role,
+        },
+        201,
+      );
+    },
+  );
+
+  /**
+   * Change a member's role. Owner-only.
+   *
+   * Guard: refuses to demote the last owner of the project. A project
+   * with zero owners is unrecoverable via dashboard — only CLI access
+   * gets you back in. Returning a clean 409 here prevents operators
+   * painting themselves into that corner.
+   */
+  const patchMemberSchema = z.object({
+    role: z.enum(['owner', 'member', 'viewer']),
+  });
+
+  api.patch(
+    '/projects/:key/members/:userId',
+    requireProjectMember,
+    requireProjectOwner,
+    async (c) => {
+      const project = c.get('project');
+      const targetUserId = c.req.param('userId');
+
+      const body = await c.req.json().catch(() => null);
+      const parsed = patchMemberSchema.safeParse(body);
+      if (!parsed.success) {
+        return fail(c, 'validation_failed', 'Invalid patch payload', 422, {
+          issues: parsed.error.issues,
+        });
+      }
+      const { role } = parsed.data;
+
+      const outcome = await db.transaction(async (tx) => {
+        const [current] = await tx
+          .select({
+            userId: schema.projectMembers.userId,
+            role: schema.projectMembers.role,
+          })
+          .from(schema.projectMembers)
+          .where(
+            and(
+              eq(schema.projectMembers.projectId, project.id),
+              eq(schema.projectMembers.userId, targetUserId),
+            ),
+          )
+          .limit(1);
+        if (!current) return { kind: 'not_found' } as const;
+
+        // No-op — nothing to do, nothing to audit.
+        if (current.role === role) return { kind: 'noop' } as const;
+
+        if (current.role === 'owner' && role !== 'owner') {
+          const ownerCountRows = await tx
+            .select({ c: count() })
+            .from(schema.projectMembers)
+            .where(
+              and(
+                eq(schema.projectMembers.projectId, project.id),
+                eq(schema.projectMembers.role, 'owner'),
+              ),
+            );
+          const ownerCount = ownerCountRows[0]?.c ?? 0;
+          if (ownerCount <= 1) {
+            return { kind: 'last_owner' } as const;
+          }
+        }
+
+        await tx
+          .update(schema.projectMembers)
+          .set({ role })
+          .where(
+            and(
+              eq(schema.projectMembers.projectId, project.id),
+              eq(schema.projectMembers.userId, targetUserId),
+            ),
+          );
+
+        return { kind: 'updated' } as const;
+      });
+
+      if (outcome.kind === 'not_found') {
+        return fail(c, 'not_found', 'Member not found', 404);
+      }
+      if (outcome.kind === 'last_owner') {
+        return fail(
+          c,
+          'conflict',
+          'Cannot demote the last owner. Promote another member first.',
+          409,
+        );
+      }
+
+      // Re-read with the joined admin_users row for the response shape
+      // parity with the list endpoint.
+      const [row] = await db
+        .select({
+          userId: schema.adminUsers.id,
+          email: schema.adminUsers.email,
+          displayName: schema.adminUsers.displayName,
+          role: schema.projectMembers.role,
+        })
+        .from(schema.projectMembers)
+        .innerJoin(
+          schema.adminUsers,
+          eq(schema.adminUsers.id, schema.projectMembers.userId),
+        )
+        .where(
+          and(
+            eq(schema.projectMembers.projectId, project.id),
+            eq(schema.projectMembers.userId, targetUserId),
+          ),
+        )
+        .limit(1);
+      return ok(c, firstOrThrow(row ? [row] : []));
+    },
+  );
+
+  /**
+   * Remove a member. Owner-only. Mirrors the last-owner guard from
+   * PATCH — can't delete the last owner either.
+   *
+   * Note: deleting your own row is allowed as long as you aren't the
+   * last owner. The session keeps working (a session isn't scoped to a
+   * project), but the next /me call loses this membership from the
+   * dashboard view — intentional and matches "I removed myself".
+   */
+  api.delete(
+    '/projects/:key/members/:userId',
+    requireProjectMember,
+    requireProjectOwner,
+    async (c) => {
+      const project = c.get('project');
+      const targetUserId = c.req.param('userId');
+
+      const outcome = await db.transaction(async (tx) => {
+        const [current] = await tx
+          .select({ role: schema.projectMembers.role })
+          .from(schema.projectMembers)
+          .where(
+            and(
+              eq(schema.projectMembers.projectId, project.id),
+              eq(schema.projectMembers.userId, targetUserId),
+            ),
+          )
+          .limit(1);
+        if (!current) return { kind: 'not_found' } as const;
+
+        if (current.role === 'owner') {
+          const ownerCountRows = await tx
+            .select({ c: count() })
+            .from(schema.projectMembers)
+            .where(
+              and(
+                eq(schema.projectMembers.projectId, project.id),
+                eq(schema.projectMembers.role, 'owner'),
+              ),
+            );
+          const ownerCount = ownerCountRows[0]?.c ?? 0;
+          if (ownerCount <= 1) {
+            return { kind: 'last_owner' } as const;
+          }
+        }
+
+        await tx
+          .delete(schema.projectMembers)
+          .where(
+            and(
+              eq(schema.projectMembers.projectId, project.id),
+              eq(schema.projectMembers.userId, targetUserId),
+            ),
+          );
+
+        return { kind: 'deleted' } as const;
+      });
+
+      if (outcome.kind === 'not_found') {
+        return fail(c, 'not_found', 'Member not found', 404);
+      }
+      if (outcome.kind === 'last_owner') {
+        return fail(
+          c,
+          'conflict',
+          'Cannot remove the last owner. Promote another member first.',
+          409,
+        );
+      }
+      return ok(c, { ok: true });
     },
   );
 

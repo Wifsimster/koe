@@ -1,10 +1,7 @@
-/**
- * Renders the widget heartbeat — "Last ping from yoursite.com, 3 min
- * ago" — which is the single signal that tells an operator whether
- * their `<script>` tag is actually loading on their site. Shown on the
- * inbox empty state and as a subtle live indicator in the project
- * header once tickets start flowing.
- */
+import { cn } from '../lib/utils';
+
+type Tone = 'fresh' | 'stale' | 'muted';
+
 export function HeartbeatBadge({
   lastPingAt,
   lastPingOrigin,
@@ -17,8 +14,14 @@ export function HeartbeatBadge({
   if (!lastPingAt) {
     return (
       <Shell variant={variant} tone="muted">
-        <Dot tone="muted" /> Waiting for the first widget ping — is the{' '}
-        <code className="px-1 bg-gray-100 rounded">&lt;script&gt;</code> tag deployed?
+        <Dot tone="muted" />
+        <span>
+          Waiting for the first widget ping — is the{' '}
+          <code className="rounded-none border border-border bg-muted px-1">
+            &lt;script&gt;
+          </code>{' '}
+          tag deployed?
+        </span>
       </Shell>
     );
   }
@@ -26,11 +29,15 @@ export function HeartbeatBadge({
   const ago = relativeTime(new Date(lastPingAt));
   const origin = lastPingOrigin ?? 'unknown origin';
   const fresh = Date.now() - new Date(lastPingAt).getTime() < 5 * 60 * 1000;
+  const tone: Tone = fresh ? 'fresh' : 'stale';
 
   return (
-    <Shell variant={variant} tone={fresh ? 'fresh' : 'stale'}>
-      <Dot tone={fresh ? 'fresh' : 'stale'} />
-      Last ping from <strong className="font-medium">{origin}</strong>, {ago}
+    <Shell variant={variant} tone={tone}>
+      <Dot tone={tone} />
+      <span>
+        Last ping from <span className="font-medium text-foreground">{origin}</span>,{' '}
+        <span className="font-mono text-[11px]">{ago}</span>
+      </span>
     </Shell>
   );
 }
@@ -41,36 +48,44 @@ function Shell({
   children,
 }: {
   variant: 'inline' | 'block';
-  tone: 'fresh' | 'stale' | 'muted';
+  tone: Tone;
   children: React.ReactNode;
 }) {
-  const base =
-    variant === 'block'
-      ? 'flex items-center gap-2 px-4 py-3 rounded-lg border text-sm'
-      : 'inline-flex items-center gap-2 text-xs';
-  const bg =
-    variant === 'block'
-      ? tone === 'fresh'
-        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-        : tone === 'stale'
-          ? 'bg-amber-50 border-amber-200 text-amber-900'
-          : 'bg-gray-50 border-gray-200 text-gray-600'
-      : 'text-gray-600';
-  return <div className={`${base} ${bg}`}>{children}</div>;
+  if (variant === 'inline') {
+    return (
+      <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-3 border-l-2 bg-card px-4 py-3 text-sm text-muted-foreground',
+        tone === 'fresh' && 'border-l-primary',
+        tone === 'stale' && 'border-l-destructive/70',
+        tone === 'muted' && 'border-l-border',
+      )}
+    >
+      {children}
+    </div>
+  );
 }
 
-function Dot({ tone }: { tone: 'fresh' | 'stale' | 'muted' }) {
-  const color =
-    tone === 'fresh' ? 'bg-emerald-500' : tone === 'stale' ? 'bg-amber-500' : 'bg-gray-400';
-  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} aria-hidden="true" />;
+function Dot({ tone }: { tone: Tone }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'inline-block size-1.5 rounded-full',
+        tone === 'fresh' && 'animate-pulse bg-primary',
+        tone === 'stale' && 'bg-destructive/70',
+        tone === 'muted' && 'bg-muted-foreground/40',
+      )}
+    />
+  );
 }
 
-/**
- * Human-friendly relative time. Intentionally simple — we have no
- * i18n surface yet, and the numbers we care about ("3 min ago",
- * "2 h ago") are the ones that change an operator's behavior. For
- * everything older than a day, show the absolute date.
- */
 function relativeTime(past: Date): string {
   const diffMs = Date.now() - past.getTime();
   if (diffMs < 0) return 'just now';

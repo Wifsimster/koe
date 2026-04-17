@@ -39,6 +39,14 @@ export interface AuthContextValue {
   ) => Promise<void>;
   logout: () => Promise<void>;
   setActiveProject: (key: string) => void;
+  /**
+   * Re-fetch `/me` and update `state.memberships` in place. Used after
+   * actions that change membership (creating a project, inviting or
+   * removing a member) so the switcher / onboarding gate reflect the
+   * new state without a full page reload. On 401 the user is kicked to
+   * the login screen — same behaviour as the initial load.
+   */
+  refreshMe: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -185,8 +193,8 @@ export function AuthProvider({ baseUrl, mode = 'oidc', loginUrl, logoutUrl, chil
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ mode, state, api, login, logout, setActiveProject }),
-    [mode, state, api, login, logout, setActiveProject],
+    () => ({ mode, state, api, login, logout, setActiveProject, refreshMe: fetchMe }),
+    [mode, state, api, login, logout, setActiveProject, fetchMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

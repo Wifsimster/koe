@@ -104,7 +104,7 @@ function Bootstrap() {
 
 function BootLoading(): ReactNode {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 text-sm text-gray-500">
+    <div className="min-h-screen flex items-center justify-center bg-background text-sm text-muted-foreground">
       Loading…
     </div>
   );
@@ -112,10 +112,10 @@ function BootLoading(): ReactNode {
 
 function BootError({ message }: { message: string }): ReactNode {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="max-w-md text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-4">
-        <div className="font-medium mb-1">Admin API unavailable</div>
-        <div>{message}</div>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="max-w-md border-l-2 border-destructive/70 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div className="font-medium">Admin API unavailable</div>
+        <div className="mt-1">{message}</div>
       </div>
     </div>
   );

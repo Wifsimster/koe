@@ -18,5 +18,7 @@ export type ApiErrorCode =
   | 'validation_failed'
   | 'not_found'
   | 'unauthorized'
+  | 'forbidden'
+  | 'conflict'
   | 'rate_limited'
   | 'internal_error';

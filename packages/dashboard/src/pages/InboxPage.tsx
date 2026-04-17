@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { Bug, Lightbulb, Search as SearchIcon, ShieldAlert } from 'lucide-react';
 import type { InboxSearch } from '../router';
-import clsx from 'clsx';
 import type { TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
 import type {
@@ -12,26 +12,20 @@ import type {
 } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { HeartbeatBadge } from '../components/HeartbeatBadge';
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Checkbox } from '../components/ui/checkbox';
+import { Input } from '../components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
+import { Separator } from '../components/ui/separator';
+import { cn } from '../lib/utils';
 
-/**
- * The triage inbox. Job-to-be-done: scan incoming bug reports and
- * feature requests, tap one to read, maybe route elsewhere. This is
- * the dashboard's *home* (not a stats overview) because that's what
- * project owners actually open the app to do.
- *
- * Mobile-first shape:
- *   - All viewports get the same list. Cards, not rows — works on a
- *     phone and scales up without a redesign.
- *   - Kind + status filters live at the top as chip buttons so a
- *     thumb can switch focus ("just the bugs") without a dropdown.
- *   - Empty state prioritizes the *heartbeat* before suggesting the
- *     user wait — "is the script even deployed?" is the question the
- *     operator is really asking when the list is empty.
- *
- * Data loading is kept deliberately simple — no cache, no optimistic
- * mutations, no infinite scroll. 50 rows is plenty for today and
- * complexity earns its way in when a real customer hits the wall.
- */
 export function InboxPage() {
   const { state, api } = useAuth();
   const [project, setProject] = useState<AdminProject | null>(null);
@@ -39,15 +33,6 @@ export function InboxPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters live in the URL, not component state — so refresh
-  // preserves the view, links are shareable, and the back button
-  // actually undoes a filter change. Values come back already
-  // narrowed by the route's `validateSearch`, so no further parsing.
-  //
-  // The `as InboxSearch` casts are unfortunate: TanStack Router's
-  // deep generic inference gives up when a sibling route has its
-  // own search shape (the `/login` route uses `redirectTo`). The
-  // runtime shape is guaranteed by `validateSearch` itself.
   const { kind, status, assignee, q } = useSearch({
     from: '/_authenticated/',
   }) as unknown as InboxSearch;
@@ -81,8 +66,6 @@ export function InboxPage() {
       void navigate({
         to: '/',
         search: (prev) => ({ ...(prev as unknown as InboxSearch), q: v }),
-        // Replace instead of push so typing doesn't spam the back
-        // button with a dozen history entries.
         replace: true,
       }),
     [navigate],
@@ -91,28 +74,18 @@ export function InboxPage() {
   const [members, setMembers] = useState<ProjectMember[] | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
-  /**
-   * Pending bulk action awaiting confirmation. We only gate
-   * destructive statuses (`closed`, `wont_fix`) behind a dialog —
-   * other changes are trivially reversible from the detail page.
-   */
-  const [pendingBulk, setPendingBulk] = useState<
-    { status: TicketStatus; count: number } | null
-  >(null);
+  const [pendingBulk, setPendingBulk] = useState<{ status: TicketStatus; count: number } | null>(
+    null,
+  );
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
-  // Role gate for the bulk actions toolbar — viewers see checkboxes
-  // too but the apply button is blocked at render time (and the
-  // server would refuse anyway via `requireProjectWriter`).
   const role =
     state.status === 'authenticated'
       ? state.me.memberships.find((m) => m.projectKey === activeKey)?.role ?? 'viewer'
       : 'viewer';
   const canWrite = role === 'owner' || role === 'member';
 
-  // Resolve the active project object — needed for the heartbeat
-  // display, and `/projects` returns it already so we pay one call.
   useEffect(() => {
     if (!activeKey) {
       setProject(null);
@@ -157,8 +130,6 @@ export function InboxPage() {
     void loadTickets();
   }, [loadTickets]);
 
-  // Members load lazily when a writer is on the page — viewers never
-  // see the bulk assign picker, so spare them the round-trip.
   useEffect(() => {
     if (!activeKey || !canWrite) return;
     let alive = true;
@@ -175,9 +146,6 @@ export function InboxPage() {
     };
   }, [activeKey, api, canWrite]);
 
-  // Clear the selection whenever the filter set changes or the
-  // ticket list reloads — otherwise an operator can select a row,
-  // switch filters, and silently lose track of what's about to apply.
   useEffect(() => {
     setSelected(new Set());
     setBulkError(null);
@@ -194,10 +162,6 @@ export function InboxPage() {
       setBulkSubmitting(true);
       try {
         await api.bulkUpdateTickets(activeKey, Array.from(selected), patch);
-        // Re-fetch rather than optimistic: the status filter may
-        // cause rows to leave the current page (e.g. "Open →
-        // Resolved" hides them), which is simpler to handle via a
-        // fresh server query than to replay client-side.
         setSelected(new Set());
         await loadTickets();
       } catch (err) {
@@ -209,17 +173,6 @@ export function InboxPage() {
     [activeKey, api, selected, loadTickets],
   );
 
-  /**
-   * Intercept bulk status changes that are hard to undo mentally:
-   * `closed` and `wont_fix` both say "stop working on this". A
-   * fat-fingered bulk close of 20 tickets is a real untangle; the
-   * dialog is the guardrail.
-   *
-   * Any other status goes through immediately — the audit trail
-   * already makes a status flip reversible from the detail page,
-   * and adding a dialog on every change would train ops to dismiss
-   * it without reading.
-   */
   const requestBulkStatus = useCallback(
     (next: TicketStatus) => {
       if (next === 'closed' || next === 'wont_fix') {
@@ -251,43 +204,61 @@ export function InboxPage() {
 
   if (!activeKey) {
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-6 text-sm text-gray-600">
+      <div className="border border-dashed border-border bg-muted/30 p-8 text-sm text-muted-foreground">
         You don't have access to any project yet. An owner has to invite you before you can triage
         tickets.
       </div>
     );
   }
 
+  const hero = tickets?.length ?? 0;
+  const heroLabel = hero === 1 ? 'voice' : 'voices';
+
   return (
-    <div className="space-y-4">
-      {project && (
-        <HeartbeatBadge
-          lastPingAt={project.lastPingAt}
-          lastPingOrigin={project.lastPingOrigin}
-          variant="block"
-        />
-      )}
-
-      <SearchBox value={q} onChange={setQ} />
-
-      <FilterChips
-        kind={kind}
-        onKindChange={setKind}
-        status={status}
-        onStatusChange={setStatus}
-        assignee={assignee}
-        onAssigneeChange={setAssignee}
-        counts={counts}
-      />
-
-      {error && (
-        <div
-          role="alert"
-          className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3"
-        >
-          {error}
+    <div className="space-y-10">
+      <section className="space-y-6">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-[auto_1fr] md:items-end">
+          <div>
+            <div className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
+              {tickets === null ? 'Loading' : 'Currently matching'}
+            </div>
+            <div className="mt-1 flex items-baseline gap-4">
+              <span className="font-heading text-[clamp(4rem,9vw,7rem)] leading-none tracking-tighter tabular-nums">
+                {tickets === null ? '—' : hero}
+              </span>
+              <span className="font-heading text-2xl text-muted-foreground tracking-tight">
+                {heroLabel}
+              </span>
+            </div>
+          </div>
+          {project && (
+            <div className="md:pb-3">
+              <HeartbeatBadge
+                lastPingAt={project.lastPingAt}
+                lastPingOrigin={project.lastPingOrigin}
+                variant="block"
+              />
+            </div>
+          )}
         </div>
-      )}
+
+        <Separator />
+
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <SearchBox value={q} onChange={setQ} />
+          <StatusSelect value={status} onChange={setStatus} />
+        </div>
+
+        <FilterChips
+          kind={kind}
+          onKindChange={setKind}
+          assignee={assignee}
+          onAssigneeChange={setAssignee}
+          counts={counts}
+        />
+      </section>
+
+      {error && <ErrorLine>{error}</ErrorLine>}
 
       {canWrite && selected.size > 0 && (
         <BulkToolbar
@@ -309,40 +280,35 @@ export function InboxPage() {
           confirmLabel={confirmLabelFor(pendingBulk.status)}
           submitting={bulkSubmitting}
           onConfirm={async () => {
-            const status = pendingBulk.status;
+            const s = pendingBulk.status;
             setPendingBulk(null);
-            await applyBulk({ status });
+            await applyBulk({ status: s });
           }}
           onCancel={() => setPendingBulk(null)}
         />
       )}
 
       {loading && tickets === null ? (
-        <div className="text-sm text-gray-500">Loading…</div>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       ) : tickets && tickets.length === 0 ? (
         <EmptyTickets project={project} />
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <section>
           {canWrite && tickets && tickets.length > 0 && (
-            <div className="px-4 py-2 border-b border-gray-200 text-xs text-gray-500 flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={selected.size === tickets.length && tickets.length > 0}
-                // `indeterminate` is a runtime DOM property, not a
-                // React prop — set it via a ref callback so the
-                // "some rows selected" tri-state shows up correctly.
-                ref={(el) => {
-                  if (el) {
-                    el.indeterminate =
-                      selected.size > 0 && selected.size < tickets.length;
-                  }
-                }}
-                onChange={(e) => {
-                  if (e.target.checked) selectAll(tickets.map((t) => t.id));
+            <div className="flex items-center gap-3 border-y py-3 text-[11px] tracking-[0.15em] uppercase text-muted-foreground">
+              <Checkbox
+                checked={
+                  selected.size === tickets.length && tickets.length > 0
+                    ? true
+                    : selected.size > 0
+                      ? 'indeterminate'
+                      : false
+                }
+                onCheckedChange={(checked) => {
+                  if (checked === true) selectAll(tickets.map((t) => t.id));
                   else clearSelection();
                 }}
                 aria-label="Select all tickets on this page"
-                className="h-4 w-4"
               />
               <span>
                 {selected.size > 0
@@ -351,7 +317,7 @@ export function InboxPage() {
               </span>
             </div>
           )}
-          <ul className="divide-y divide-gray-200">
+          <ul className="divide-y">
             {(tickets ?? []).map((t) => (
               <TicketRow
                 key={t.id}
@@ -362,7 +328,7 @@ export function InboxPage() {
               />
             ))}
           </ul>
-        </div>
+        </section>
       )}
     </div>
   );
@@ -371,32 +337,30 @@ export function InboxPage() {
 function FilterChips({
   kind,
   onKindChange,
-  status,
-  onStatusChange,
   assignee,
   onAssigneeChange,
   counts,
 }: {
   kind: TicketKind | 'all';
   onKindChange: (v: TicketKind | 'all') => void;
-  status: TicketStatus | 'all';
-  onStatusChange: (v: TicketStatus | 'all') => void;
   assignee: AssigneeFilter | 'all';
   onAssigneeChange: (v: AssigneeFilter | 'all') => void;
   counts: { all: number; bug: number; feature: number };
 }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Chip active={kind === 'all'} onClick={() => onKindChange('all')}>
-        All · {counts.all}
+        All <Count>{counts.all}</Count>
       </Chip>
       <Chip active={kind === 'bug'} onClick={() => onKindChange('bug')}>
-        Bugs · {counts.bug}
+        <Bug className="size-3" />
+        Bugs <Count>{counts.bug}</Count>
       </Chip>
       <Chip active={kind === 'feature'} onClick={() => onKindChange('feature')}>
-        Ideas · {counts.feature}
+        <Lightbulb className="size-3" />
+        Ideas <Count>{counts.feature}</Count>
       </Chip>
-      <span className="mx-1 w-px bg-gray-200 hidden sm:inline" aria-hidden="true" />
+      <span className="mx-1 hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
       <Chip
         active={assignee === 'me'}
         onClick={() => onAssigneeChange(assignee === 'me' ? 'all' : 'me')}
@@ -405,72 +369,16 @@ function FilterChips({
       </Chip>
       <Chip
         active={assignee === 'unassigned'}
-        onClick={() =>
-          onAssigneeChange(assignee === 'unassigned' ? 'all' : 'unassigned')
-        }
+        onClick={() => onAssigneeChange(assignee === 'unassigned' ? 'all' : 'unassigned')}
       >
         Unassigned
       </Chip>
-      <span className="mx-1 w-px bg-gray-200 hidden sm:inline" aria-hidden="true" />
-      <select
-        value={status}
-        onChange={(e) => onStatusChange(e.target.value as typeof status)}
-        className="text-sm px-2 py-1 rounded-full border border-gray-300 bg-white min-h-[36px]"
-      >
-        <option value="all">Any status</option>
-        <option value="open">Open</option>
-        <option value="in_progress">In progress</option>
-        <option value="planned">Planned</option>
-        <option value="resolved">Resolved</option>
-        <option value="closed">Closed</option>
-        <option value="wont_fix">Won't fix</option>
-      </select>
     </div>
   );
 }
 
-/**
- * Free-text search input. Debounces keystrokes to avoid a server
- * round-trip on every character. Server matches title, description,
- * reporter email, and assignee email.
- *
- * Local state tracks the typed value so the input stays responsive;
- * a 250ms timer commits the value to the URL, which is what
- * triggers the server call via the list effect.
- */
-function SearchBox({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const [draft, setDraft] = useState(value);
-  // Re-sync if the URL value changes from elsewhere (filter reset,
-  // back button, shared link). Compare against `draft` to avoid a
-  // render loop while the user is still typing.
-  useEffect(() => {
-    if (value !== draft) setDraft(value);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-  useEffect(() => {
-    if (draft === value) return;
-    const t = setTimeout(() => onChange(draft), 250);
-    return () => clearTimeout(t);
-  }, [draft, value, onChange]);
-  return (
-    <label className="block">
-      <span className="sr-only">Search tickets</span>
-      <input
-        type="search"
-        placeholder="Search title, description, email…"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        maxLength={200}
-        className="w-full text-sm px-3 py-2 rounded-md border border-gray-300 bg-white focus:outline-none focus:border-indigo-500 min-h-[36px]"
-      />
-    </label>
-  );
+function Count({ children }: { children: React.ReactNode }) {
+  return <span className="ml-1 font-mono text-[10px] text-muted-foreground">{children}</span>;
 }
 
 function Chip({
@@ -483,19 +391,70 @@ function Chip({
   children: React.ReactNode;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? 'default' : 'outline'}
+      size="sm"
       onClick={onClick}
       aria-pressed={active}
-      className={clsx(
-        'text-sm px-3 rounded-full border min-h-[36px] transition-colors',
-        active
-          ? 'bg-indigo-600 text-white border-indigo-600'
-          : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400',
-      )}
     >
       {children}
-    </button>
+    </Button>
+  );
+}
+
+function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    if (value !== draft) setDraft(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  useEffect(() => {
+    if (draft === value) return;
+    const t = setTimeout(() => onChange(draft), 250);
+    return () => clearTimeout(t);
+  }, [draft, value, onChange]);
+  return (
+    <label className="relative block w-full md:max-w-sm">
+      <span className="sr-only">Search tickets</span>
+      <SearchIcon
+        className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <Input
+        type="search"
+        placeholder="Search title, description, email…"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        maxLength={200}
+        className="pl-8"
+      />
+    </label>
+  );
+}
+
+function StatusSelect({
+  value,
+  onChange,
+}: {
+  value: TicketStatus | 'all';
+  onChange: (v: TicketStatus | 'all') => void;
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as TicketStatus | 'all')}>
+      <SelectTrigger className="w-[180px]">
+        <SelectValue placeholder="Any status" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">Any status</SelectItem>
+        <SelectItem value="open">Open</SelectItem>
+        <SelectItem value="in_progress">In progress</SelectItem>
+        <SelectItem value="planned">Planned</SelectItem>
+        <SelectItem value="resolved">Resolved</SelectItem>
+        <SelectItem value="closed">Closed</SelectItem>
+        <SelectItem value="wont_fix">Won't fix</SelectItem>
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -510,42 +469,59 @@ function TicketRow({
   selected: boolean;
   onToggleSelect: () => void;
 }) {
+  const isOpen = ticket.status === 'open';
   return (
-    <li className="flex items-start">
+    <li
+      className={cn(
+        'group relative flex items-start gap-3 py-4 transition-colors',
+        selected && 'bg-muted/50',
+      )}
+    >
+      {isOpen && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-4 bottom-4 w-[2px] bg-primary"
+        />
+      )}
       {selectable && (
         <label
-          className="flex items-center px-4 pt-4 min-h-[44px] cursor-pointer"
-          // Keep the checkbox tap separate from the card navigation
-          // so a thumb-tap on the row still opens the detail.
+          className="flex items-center pt-0.5 pl-3 pr-1"
           onClick={(e) => e.stopPropagation()}
         >
-          <input
-            type="checkbox"
+          <Checkbox
             checked={selected}
-            onChange={onToggleSelect}
+            onCheckedChange={onToggleSelect}
             aria-label={`Select ticket "${ticket.title}"`}
-            className="h-4 w-4"
           />
         </label>
       )}
       <Link
         to="/tickets/$id"
         params={{ id: ticket.id }}
-        className="flex-1 block p-4 hover:bg-gray-50 transition-colors focus:outline-none focus-visible:bg-gray-50"
+        className={cn(
+          'flex-1 min-w-0 block py-0.5 pl-1 pr-3 outline-none group-hover:bg-muted/30 focus-visible:bg-muted/40',
+          !selectable && 'pl-4',
+        )}
       >
         <div className="flex items-start gap-3">
-          <span aria-hidden="true" className="text-lg leading-6">
-            {ticket.kind === 'bug' ? '🐞' : '💡'}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-medium text-gray-900 truncate">{ticket.title}</h3>
-              <StatusPill status={ticket.status} />
-              {!ticket.reporterVerified && <UnverifiedPill />}
+          <KindGlyph kind={ticket.kind} />
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-heading text-base leading-snug tracking-tight text-foreground">
+                {ticket.title}
+              </h3>
+              <StatusTag status={ticket.status} />
+              {!ticket.reporterVerified && (
+                <Badge variant="ghost" className="gap-1 text-muted-foreground">
+                  <ShieldAlert className="size-3" /> unverified
+                </Badge>
+              )}
             </div>
-            <p className="mt-1 text-sm text-gray-600 line-clamp-2">{ticket.description}</p>
-            <div className="mt-2 text-xs text-gray-500 flex flex-wrap gap-x-3">
-              <span>{new Date(ticket.createdAt).toLocaleString()}</span>
+            <p className="line-clamp-2 text-sm text-muted-foreground">{ticket.description}</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-muted-foreground">
+              <time dateTime={ticket.createdAt}>
+                {new Date(ticket.createdAt).toLocaleString()}
+              </time>
               {ticket.reporterEmail && <span>{ticket.reporterEmail}</span>}
               {ticket.kind === 'feature' && <span>{ticket.voteCount} votes</span>}
               <AssigneeChip ticket={ticket} />
@@ -557,17 +533,18 @@ function TicketRow({
   );
 }
 
-/**
- * Bulk actions toolbar. Appears above the list when ≥1 ticket is
- * selected. Three dropdowns — status, priority, assignee — each
- * submits the patch on change. No "apply" button: the choice IS the
- * commit. Keeps the UX scannable (one decision per dropdown) and
- * matches the inline edit pattern on the ticket detail page.
- *
- * The assignee dropdown uses an empty-string sentinel for "Unassign"
- * because native select can't carry null. The translation to `null`
- * lives at the onChange.
- */
+function KindGlyph({ kind }: { kind: TicketKind }) {
+  const Icon = kind === 'bug' ? Bug : Lightbulb;
+  return (
+    <span
+      aria-hidden="true"
+      className="mt-1 inline-flex size-6 shrink-0 items-center justify-center border border-border bg-card text-muted-foreground"
+    >
+      <Icon className="size-3.5" />
+    </span>
+  );
+}
+
 function BulkToolbar({
   count,
   members,
@@ -588,59 +565,59 @@ function BulkToolbar({
   onClear: () => void;
 }) {
   return (
-    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex flex-wrap items-center gap-3 text-sm">
-      <span className="font-medium text-indigo-900">
-        {count} selected
-      </span>
-      <BulkSelect
-        disabled={submitting}
-        placeholder="Mark as…"
-        onChange={(v) => onStatus(v as TicketStatus)}
-        options={[
-          { value: 'open', label: 'Open' },
-          { value: 'in_progress', label: 'In progress' },
-          { value: 'planned', label: 'Planned' },
-          { value: 'resolved', label: 'Resolved' },
-          { value: 'closed', label: 'Closed' },
-          { value: 'wont_fix', label: "Won't fix" },
-        ]}
-      />
-      <BulkSelect
-        disabled={submitting}
-        placeholder="Priority…"
-        onChange={(v) => onPriority(v as TicketPriority)}
-        options={[
-          { value: 'low', label: 'Low' },
-          { value: 'medium', label: 'Medium' },
-          { value: 'high', label: 'High' },
-          { value: 'critical', label: 'Critical' },
-        ]}
-      />
-      <BulkSelect
-        disabled={submitting || members === null}
-        placeholder="Assign to…"
-        onChange={(v) => onAssignee(v === '__unassign__' ? null : v)}
-        options={[
-          { value: '__unassign__', label: 'Unassign' },
-          ...(members ?? []).map((m) => ({
-            value: m.userId,
-            label: m.displayName ?? m.email,
-          })),
-        ]}
-      />
-      <button
-        type="button"
-        onClick={onClear}
-        disabled={submitting}
-        className="text-xs text-indigo-700 hover:text-indigo-900 underline underline-offset-2"
-      >
-        Clear
-      </button>
-      {error && (
-        <p role="alert" className="text-xs text-red-700 w-full">
-          {error}
-        </p>
-      )}
+    <div className="sticky top-[57px] z-10 -mx-4 border-y bg-secondary text-secondary-foreground md:-mx-12">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3 px-4 py-3 text-sm md:px-12">
+        <span className="font-heading text-base tracking-tight">
+          <span className="font-mono tabular-nums">{count}</span> selected
+        </span>
+        <Separator orientation="vertical" className="h-5" />
+        <BulkSelect
+          disabled={submitting}
+          placeholder="Mark as…"
+          onChange={(v) => onStatus(v as TicketStatus)}
+          options={[
+            { value: 'open', label: 'Open' },
+            { value: 'in_progress', label: 'In progress' },
+            { value: 'planned', label: 'Planned' },
+            { value: 'resolved', label: 'Resolved' },
+            { value: 'closed', label: 'Closed' },
+            { value: 'wont_fix', label: "Won't fix" },
+          ]}
+        />
+        <BulkSelect
+          disabled={submitting}
+          placeholder="Priority…"
+          onChange={(v) => onPriority(v as TicketPriority)}
+          options={[
+            { value: 'low', label: 'Low' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+            { value: 'critical', label: 'Critical' },
+          ]}
+        />
+        <BulkSelect
+          disabled={submitting || members === null}
+          placeholder="Assign to…"
+          onChange={(v) => onAssignee(v === '__unassign__' ? null : v)}
+          options={[
+            { value: '__unassign__', label: 'Unassign' },
+            ...(members ?? []).map((m) => ({
+              value: m.userId,
+              label: m.displayName ?? m.email,
+            })),
+          ]}
+        />
+        <div className="ml-auto">
+          <Button variant="ghost" size="sm" onClick={onClear} disabled={submitting}>
+            Clear
+          </Button>
+        </div>
+        {error && (
+          <p role="alert" className="w-full text-xs text-destructive">
+            {error}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -656,97 +633,84 @@ function BulkSelect({
   onChange: (v: string) => void;
   options: Array<{ value: string; label: string }>;
 }) {
+  const [resetKey, setResetKey] = useState(0);
   return (
-    <select
+    <Select
+      key={resetKey}
       disabled={disabled}
-      value=""
-      onChange={(e) => {
-        const v = e.target.value;
-        if (v === '') return;
+      onValueChange={(v) => {
         onChange(v);
-        // Reset so the placeholder shows again — the dropdown is a
-        // fire-and-forget control, not a persistent filter.
-        e.target.value = '';
+        setResetKey((k) => k + 1);
       }}
-      className="text-sm px-2 rounded-md border border-gray-300 bg-white min-h-[36px] disabled:opacity-60 max-w-[180px]"
     >
-      <option value="" disabled>
-        {placeholder}
-      </option>
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger size="sm" className="w-[150px] bg-background">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
-function StatusPill({ status }: { status: TicketStatus }) {
-  const tone = statusTone(status);
+function StatusTag({ status }: { status: TicketStatus }) {
+  const variant = statusVariant(status);
   return (
-    <span
-      className={clsx(
-        'text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border',
-        tone,
-      )}
-    >
+    <Badge variant={variant} className="tracking-[0.12em] uppercase">
       {status.replace('_', ' ')}
-    </span>
+    </Badge>
   );
 }
 
-function statusTone(s: TicketStatus): string {
+function statusVariant(s: TicketStatus): 'default' | 'secondary' | 'outline' | 'ghost' {
   switch (s) {
     case 'open':
-      return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+      return 'default';
     case 'in_progress':
     case 'planned':
-      return 'bg-amber-50 text-amber-800 border-amber-200';
+      return 'secondary';
     case 'resolved':
-      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      return 'outline';
     case 'closed':
     case 'wont_fix':
-      return 'bg-gray-100 text-gray-600 border-gray-200';
+      return 'ghost';
   }
 }
 
-function UnverifiedPill() {
-  return (
-    <span
-      title="Reporter was not verified via HMAC when this ticket was submitted"
-      className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200"
-    >
-      unverified
-    </span>
-  );
-}
-
-/**
- * One-liner assignment indicator for the card. Prefers displayName
- * over email so a quick scan of the inbox reads like "assigned to
- * Alice" rather than a mailing list. `null` assignee renders as a
- * muted "unassigned" tag so tickets-in-need-of-an-owner stand out.
- */
 function AssigneeChip({ ticket }: { ticket: AdminTicket }) {
   if (ticket.assignedToUserId === null) {
-    return <span className="text-amber-700">unassigned</span>;
+    return <span className="text-destructive/80">unassigned</span>;
   }
   const label = ticket.assignedToDisplayName ?? ticket.assignedToEmail ?? 'someone';
-  return <span>assigned to {label}</span>;
+  return <span>→ {label}</span>;
 }
 
 function EmptyTickets({ project }: { project: AdminProject | null }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6 text-sm text-gray-600 text-center">
-      <p className="mb-2">No tickets match these filters.</p>
+    <div className="border border-dashed border-border bg-muted/30 p-10 text-center">
+      <p className="font-heading text-xl tracking-tight">Silence.</p>
+      <p className="mt-2 text-sm text-muted-foreground">No tickets match these filters.</p>
       {project && !project.lastPingAt && (
-        <p className="text-xs text-gray-500">
+        <p className="mt-4 text-xs text-muted-foreground">
           The widget hasn't pinged this project yet. Drop the{' '}
-          <code className="px-1 bg-gray-100 rounded">&lt;script&gt;</code> tag into your app and
-          reload — you'll see a heartbeat here within a minute.
+          <code className="border border-border bg-muted px-1 font-mono text-[11px]">
+            &lt;script&gt;
+          </code>{' '}
+          tag into your app and reload — you'll see a heartbeat within a minute.
         </p>
       )}
+    </div>
+  );
+}
+
+function ErrorLine({ children }: { children: React.ReactNode }) {
+  return (
+    <div role="alert" className="border-l-2 border-destructive/70 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+      {children}
     </div>
   );
 }
@@ -768,4 +732,3 @@ function confirmLabelFor(status: TicketStatus): string {
   if (status === 'closed') return 'Close tickets';
   return "Mark won't fix";
 }
-

@@ -2,20 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import type { BatchSummary } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Button } from '../components/ui/button';
+import { Separator } from '../components/ui/separator';
 
-/**
- * Recent bulk actions panel.
- *
- * Before this page, a bulk mutation was only reachable per-ticket
- * via Activity. Ops who wanted to reverse a batch had to find a
- * ticket that was in it, which is hunting-around behaviour. This
- * page lists recent batches project-wide and offers the same
- * `Undo batch` action directly.
- *
- * Read is open to all members (including viewers) — knowing what
- * the team has been doing is informational. The action button only
- * renders for writers, same rule the server enforces.
- */
 export function BatchesPage() {
   const { state, api } = useAuth();
   const [batches, setBatches] = useState<BatchSummary[] | null>(null);
@@ -69,63 +58,83 @@ export function BatchesPage() {
 
   if (!activeKey) {
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-6 text-sm text-gray-600">
+      <div className="border border-dashed border-border bg-muted/30 p-8 text-sm text-muted-foreground">
         Pick a project from the sidebar to see its recent bulk actions.
       </div>
     );
   }
 
+  const count = batches?.length ?? 0;
+
   return (
-    <div className="space-y-4">
-      {notice && (
-        <div
-          role="status"
-          className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md p-3"
-        >
-          {notice}
+    <div className="space-y-10">
+      <section>
+        <div className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
+          Recent bulk actions
         </div>
+        <div className="mt-1 flex items-baseline gap-4">
+          <span className="font-heading text-[clamp(4rem,9vw,7rem)] leading-none tracking-tighter tabular-nums">
+            {batches === null ? '—' : count}
+          </span>
+          <span className="font-heading text-2xl text-muted-foreground tracking-tight">
+            {count === 1 ? 'batch' : 'batches'}
+          </span>
+        </div>
+        <Separator className="mt-6" />
+      </section>
+
+      {notice && (
+        <p role="status" className="border-l-2 border-primary/70 bg-primary/5 px-4 py-3 text-sm">
+          {notice}
+        </p>
       )}
 
       {error && (
-        <div
-          role="alert"
-          className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3"
-        >
+        <p role="alert" className="border-l-2 border-destructive/70 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
-        </div>
+        </p>
       )}
 
       {batches === null ? (
-        <div className="text-sm text-gray-500">Loading…</div>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       ) : batches.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-6 text-sm text-gray-600 text-center">
-          No bulk actions yet. Once your team selects multiple tickets from the inbox and applies a
-          change, the batch shows up here.
+        <div className="border border-dashed border-border bg-muted/30 p-10 text-center">
+          <p className="font-heading text-xl tracking-tight">Nothing to undo.</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Once your team selects multiple tickets from the inbox and applies a change, the batch
+            shows up here.
+          </p>
         </div>
       ) : (
-        <ul className="divide-y divide-gray-200 bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <ul className="divide-y">
           {batches.map((b) => (
-            <li key={b.batchId} className="p-4 flex items-start gap-3">
+            <li key={b.batchId} className="flex items-start gap-4 py-5">
+              <BatchDate createdAt={b.createdAt} />
               <div className="min-w-0 flex-1">
-                <div className="text-sm text-gray-900 font-medium">
+                <div className="font-heading text-base tracking-tight">
                   {b.ticketCount} ticket{b.ticketCount === 1 ? '' : 's'} ·{' '}
-                  {b.kinds.map(prettyKind).join(' + ')}
+                  <span className="text-muted-foreground">
+                    {b.kinds.map(prettyKind).join(' + ')}
+                  </span>
                 </div>
-                <div className="mt-1 text-xs text-gray-500 flex flex-wrap gap-x-3">
-                  <span>{new Date(b.createdAt).toLocaleString()}</span>
-                  <span>by {b.actorDisplayName ?? b.actorEmail ?? 'deleted user'}</span>
-                  <span>{b.eventCount} event{b.eventCount === 1 ? '' : 's'}</span>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] text-muted-foreground">
+                  <span>
+                    by {b.actorDisplayName ?? b.actorEmail ?? 'deleted user'}
+                  </span>
+                  <span>
+                    {b.eventCount} event{b.eventCount === 1 ? '' : 's'}
+                  </span>
                 </div>
               </div>
               {canWrite && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setPendingRevert(b)}
                   disabled={reverting}
-                  className="text-xs text-indigo-700 hover:text-indigo-900 underline underline-offset-2 disabled:opacity-60 shrink-0 min-h-[36px]"
                 >
                   Undo batch
-                </button>
+                </Button>
               )}
             </li>
           ))}
@@ -134,7 +143,7 @@ export function BatchesPage() {
 
       {pendingRevert && (
         <ConfirmDialog
-          title={`Undo this batch?`}
+          title="Undo this batch?"
           body={`${pendingRevert.ticketCount} ticket${
             pendingRevert.ticketCount === 1 ? '' : 's'
           } will be reverted where possible. Tickets that already moved past this batch (or whose original assignee left) will be skipped and reported.`}
@@ -145,6 +154,24 @@ export function BatchesPage() {
         />
       )}
     </div>
+  );
+}
+
+function BatchDate({ createdAt }: { createdAt: string }) {
+  const d = new Date(createdAt);
+  return (
+    <time
+      dateTime={createdAt}
+      className="hidden w-24 shrink-0 text-right md:block"
+      title={d.toLocaleString()}
+    >
+      <div className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
+        {d.toLocaleDateString(undefined, { month: 'short', day: '2-digit' })}
+      </div>
+      <div className="font-mono text-[11px] text-muted-foreground/70">
+        {d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+      </div>
+    </time>
   );
 }
 
