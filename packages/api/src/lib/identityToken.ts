@@ -47,8 +47,12 @@ export interface NonceCache {
    * Records the key on miss. Must be idempotent for concurrent callers
    * of the same key — either both see `true` or the first wins; never
    * both see `false`.
+   *
+   * Async so a Redis-backed adapter can slot in without changing the
+   * contract. The in-memory adapter resolves synchronously (wrapped in
+   * a promise) so there's no perf tax on the dev path.
    */
-  hasSeen(key: string): boolean;
+  hasSeen(key: string): Promise<boolean>;
 }
 
 export type VerifyError =
@@ -127,11 +131,13 @@ export function signIdentityToken(payload: IdentityTokenPayload, secret: string)
  * payload on success or a typed error on failure. Never throws on
  * attacker-controlled input.
  */
-export function verifyIdentityToken(
+export async function verifyIdentityToken(
   token: string,
   secretsByKid: Map<string, IdentitySecret>,
   opts: VerifyOptions,
-): { ok: true; payload: IdentityTokenPayload } | { ok: false; reason: VerifyError } {
+): Promise<
+  { ok: true; payload: IdentityTokenPayload } | { ok: false; reason: VerifyError }
+> {
   const dot = token.indexOf('.');
   if (dot <= 0 || dot === token.length - 1) {
     return { ok: false, reason: 'malformed' };
@@ -187,7 +193,7 @@ export function verifyIdentityToken(
   // Bind the nonce to the kid so collisions across rotated keys can't
   // mask a real replay.
   const nonceKey = `${payload.kid}:${payload.nonce}`;
-  if (opts.nonces.hasSeen(nonceKey)) {
+  if (await opts.nonces.hasSeen(nonceKey)) {
     return { ok: false, reason: 'replayed_nonce' };
   }
 
@@ -204,7 +210,7 @@ export function createInMemoryNonceCache(capacity = 10_000): NonceCache {
   const order: string[] = [];
 
   return {
-    hasSeen(key) {
+    async hasSeen(key) {
       if (seen.has(key)) return true;
       seen.add(key);
       order.push(key);
@@ -215,4 +221,79 @@ export function createInMemoryNonceCache(capacity = 10_000): NonceCache {
       return false;
     },
   };
+}
+
+/**
+ * Shape of a Redis client we rely on. Declared locally so this module
+ * stays importable in environments without `ioredis` installed — the
+ * Redis adapter factory is where the real client gets wired.
+ */
+export interface RedisSetNxClient {
+  /**
+   * `SET key value NX EX seconds`. Returns a non-null value (typically
+   * `'OK'`) on first-write, `null` when the key already existed.
+   * Widened from `'OK'` to any non-null so both `ioredis` and
+   * `ioredis-mock` typings slot in without casts at the call site.
+   */
+  set(
+    key: string,
+    value: string,
+    ...args: Array<string | number>
+  ): Promise<unknown>;
+}
+
+export interface RedisNonceCacheOptions {
+  /** Key prefix so we can safely share the Redis DB with other data. */
+  prefix?: string;
+  /**
+   * TTL per stored key. Must be >= the token's `maxAgeSeconds` window,
+   * otherwise a valid-but-recently-used token could replay after the
+   * dedup entry expired. 900s (15 min) covers the default 10-minute
+   * window with comfortable slack.
+   */
+  ttlSeconds?: number;
+}
+
+/**
+ * Redis-backed nonce cache. Uses `SET NX EX` for atomic first-write
+ * semantics — exactly one caller across all replicas sees the key as
+ * unseen. Keys expire on their own so there's nothing to clean up.
+ *
+ * The cache is intentionally generous with TTL: a valid token's
+ * nonce is remembered long enough that the token itself will have
+ * expired by then, which is the only condition under which it would
+ * be safe to reuse the same nonce anyway.
+ */
+export function createRedisNonceCache(
+  client: RedisSetNxClient,
+  opts: RedisNonceCacheOptions = {},
+): NonceCache {
+  const prefix = opts.prefix ?? 'koe:nonce:';
+  const ttl = opts.ttlSeconds ?? 900;
+
+  return {
+    async hasSeen(key) {
+      // ioredis accepts NX/EX as positional flags. `SET k v NX EX ttl`
+      // returns 'OK' if we stored it, null if the key already existed.
+      const result = await client.set(`${prefix}${key}`, '1', 'NX', 'EX', ttl);
+      return result === null;
+    },
+  };
+}
+
+/**
+ * Picks the Redis nonce cache when `REDIS_URL` is set, falls back to
+ * in-memory otherwise. Call once at module load; the returned cache
+ * is safe to share across the whole process.
+ *
+ * Kept separate from the adapter factories so unit tests can still
+ * instantiate the in-memory cache directly without pulling in
+ * ioredis.
+ */
+export function createNonceCacheFromEnv(
+  redis: RedisSetNxClient | null,
+  opts: { capacity?: number; redisOpts?: RedisNonceCacheOptions } = {},
+): NonceCache {
+  if (redis) return createRedisNonceCache(redis, opts.redisOpts);
+  return createInMemoryNonceCache(opts.capacity);
 }

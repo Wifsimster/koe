@@ -7,7 +7,7 @@ import { ok, fail } from '../lib/response';
 import { requireProject, type ProjectContext } from '../middleware/project';
 import { attachVerifier, type VerifyReporterFn } from '../middleware/identity';
 import { widgetCors } from '../middleware/cors';
-import { clientIp, rateLimit } from '../middleware/rateLimit';
+import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rateLimit';
 
 /** 256 KB hard cap on any widget payload. Screenshots go through a
  *  presigned upload flow, never inline base64 (see `screenshotUrl`). */
@@ -73,15 +73,26 @@ export const widgetRoutes = new Hono<{ Variables: WidgetVariables }>();
 widgetRoutes.use('*', widgetCors);
 widgetRoutes.use('*', bodyLimit({ maxSize: MAX_BODY_BYTES }));
 
-// Rate limit before DB work — cheap rejection for floods. 10 req/s with
-// a 30-request burst, keyed on (project key, client IP). The project key
-// is used before `requireProject` runs, so unknown keys still get
-// rate-limited by header value (preventing brute-force enumeration).
+// Rate limit before DB work — cheap rejection for floods. 10 req/min
+// with a 30-request burst, keyed on (project key, client IP). The
+// project key is used before `requireProject` runs, so unknown keys
+// still get rate-limited by header value (preventing brute-force
+// enumeration).
+//
+// `createRateLimiterFromEnv` picks Redis if `REDIS_URL` is set so the
+// bucket is shared across replicas — critical, because an in-memory
+// bucket per pod multiplies the effective rate by the replica count.
+const widgetRateLimiter = createRateLimiterFromEnv({
+  refillPerSecond: 10 / 60,
+  capacity: 30,
+  prefix: 'koe:rl:widget:',
+});
 widgetRoutes.use(
   '*',
   rateLimit({
-    refillPerSecond: 10 / 60, // 10/min
+    refillPerSecond: 10 / 60,
     capacity: 30,
+    limiter: widgetRateLimiter,
     key: (c) => {
       const key = c.req.header('X-Koe-Project-Key') ?? 'unknown';
       const ip = clientIp(c.req.raw);
