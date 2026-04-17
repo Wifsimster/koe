@@ -1,0 +1,54 @@
+name: Deploy — homelab
+
+# Runs on the self-hosted runner sitting next to the target docker host,
+# after `Docker — koe-api` has published a fresh `:latest` image. Pulls
+# and reconciles the koe stack in place of Watchtower.
+
+on:
+  workflow_run:
+    workflows: ["Docker — koe-api"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-homelab
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Pull & reconcile koe stack
+    runs-on: [self-hosted, homelab, koe]
+    # workflow_run fires for every conclusion (success, failure, cancelled).
+    # Only deploy when the upstream build actually succeeded; manual
+    # dispatches bypass the check.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Pull latest koe image
+        working-directory: /opt/docker/koe
+        run: docker compose pull koe
+
+      - name: Reconcile stack
+        working-directory: /opt/docker/koe
+        run: docker compose up -d
+
+      - name: Wait for healthy
+        working-directory: /opt/docker/koe
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' koe 2>/dev/null || echo "missing")
+            echo "attempt $i: $status"
+            if [ "$status" = "healthy" ]; then exit 0; fi
+            sleep 2
+          done
+          echo "koe did not become healthy in time"
+          docker logs koe --tail 80
+          exit 1
+
+      - name: Prune dangling images
+        run: docker image prune -f
