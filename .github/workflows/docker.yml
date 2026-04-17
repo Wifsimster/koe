@@ -77,14 +77,14 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # `api-v1.2.3` → 1.2.3 + 1.2 + 1 + latest
-          # `main`       → edge
+          # `main`       → edge + latest (so Watchtower-tracked deployments auto-update)
           # commit       → sha-<short>
           # manual       → user-supplied tag
           tags: |
             type=match,pattern=api-v(\d+\.\d+\.\d+),group=1
             type=match,pattern=api-v(\d+\.\d+)\.\d+,group=1
             type=match,pattern=api-v(\d+)\.\d+\.\d+,group=1
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/api-v') }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/api-v') }}
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
