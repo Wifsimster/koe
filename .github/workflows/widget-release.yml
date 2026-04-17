@@ -12,8 +12,6 @@ name: Widget release
 #     GitHub Release with auto-generated notes.
 #
 # What it does NOT do:
-#   - It does NOT publish anything to npm. Distribution happens via
-#     GitHub Releases and git tags only.
 #   - It does NOT commit CHANGELOG or version bumps back to main
 #     (no `@semantic-release/git` plugin). The CHANGELOG lives on the
 #     Releases page. This keeps us off the "GitHub Actions can't
@@ -21,7 +19,9 @@ name: Widget release
 #   - It does NOT fire on branches other than main, tags, or forks.
 #
 # Required secrets:
-#   - None beyond the default GITHUB_TOKEN provided by Actions.
+#   - GITHUB_TOKEN: provided by Actions.
+#   - NPM_TOKEN: an npm automation token with publish rights on
+#     `@wifsimster/koe`. Set under Settings → Secrets → Actions.
 
 on:
   push:
@@ -41,6 +41,7 @@ jobs:
       contents: write # create tags and GitHub Releases via the API
       issues: write # semantic-release/github may comment on issues
       pull-requests: write # semantic-release/github may comment on PRs
+      id-token: write # npm publish with provenance (OIDC)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,6 +58,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -67,4 +69,5 @@ jobs:
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: pnpm release

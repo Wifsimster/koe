@@ -39,6 +39,12 @@
       }
     ],
     [
+      "@semantic-release/npm",
+      {
+        "pkgRoot": "packages/widget"
+      }
+    ],
+    [
       "@semantic-release/github",
       {
         "successComment": false,

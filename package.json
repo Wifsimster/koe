@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@semantic-release/github": "^11.0.1",
+    "@semantic-release/npm": "^12",
     "@types/node": "^22.9.0",
     "conventional-changelog-conventionalcommits": "^8.0.0",
     "prettier": "^3.3.0",
