@@ -148,8 +148,14 @@ function AuthenticatedLayout() {
   // from `loading` → `unauthenticated` (e.g. /me returns 401 after
   // the route already matched) would otherwise strand the user on a
   // guarded route. Mirror the beforeLoad redirect here.
+  //
+  // The `pathname !== '/login'` guard matters: TanStack Router updates
+  // `useRouterState` during the navigation transition, and this
+  // component stays mounted briefly across it. Without the guard, the
+  // effect re-fires once `pathname` flips to `/login` and navigates
+  // again with `redirectTo=/login` — the loop the user lands in.
   useEffect(() => {
-    if (state.status === 'unauthenticated') {
+    if (state.status === 'unauthenticated' && pathname !== '/login') {
       void navigate({ to: '/login', search: { redirectTo: pathname } });
     }
   }, [state.status, navigate, pathname]);
