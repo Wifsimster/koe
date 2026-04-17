@@ -22,6 +22,13 @@
       "when": 1776423112735,
       "tag": "0002_warm_elektra",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1776433989473,
+      "tag": "0003_dusty_saracen",
+      "breakpoints": true
     }
   ]
 }

@@ -157,10 +157,20 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         .enum(['open', 'in_progress', 'planned', 'resolved', 'closed', 'wont_fix'])
         .optional(),
       priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+      // `null` explicitly unassigns; a uuid sets. `undefined` (absent
+      // key) means "no change" — different from null, which is the
+      // canonical clear-the-field shape.
+      assignedToUserId: z.string().uuid().nullable().optional(),
     })
     .refine(
-      (v) => v.status !== undefined || v.priority !== undefined,
-      { message: 'At least one of status or priority is required' },
+      (v) =>
+        v.status !== undefined ||
+        v.priority !== undefined ||
+        v.assignedToUserId !== undefined,
+      {
+        message:
+          'At least one of status, priority, or assignedToUserId is required',
+      },
     );
 
   api.patch(
@@ -197,11 +207,38 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
           .limit(1);
         if (!before) return { notFound: true } as const;
 
+        // Assignee must be a member of *this* project. An admin user
+        // unknown to the project can't own its tickets — both because
+        // they couldn't act on it and because leaking membership via
+        // assignment would be an info-disclosure bug. `null` bypasses
+        // the check because unassigning is always allowed.
+        if (
+          parsed.data.assignedToUserId !== undefined &&
+          parsed.data.assignedToUserId !== null
+        ) {
+          const [assignee] = await tx
+            .select({ userId: schema.projectMembers.userId })
+            .from(schema.projectMembers)
+            .where(
+              and(
+                eq(schema.projectMembers.projectId, project.id),
+                eq(schema.projectMembers.userId, parsed.data.assignedToUserId),
+              ),
+            )
+            .limit(1);
+          if (!assignee) {
+            return { notFound: false, invalidAssignee: true } as const;
+          }
+        }
+
         const updated = await tx
           .update(schema.tickets)
           .set({
             ...(parsed.data.status ? { status: parsed.data.status } : {}),
             ...(parsed.data.priority ? { priority: parsed.data.priority } : {}),
+            ...(parsed.data.assignedToUserId !== undefined
+              ? { assignedToUserId: parsed.data.assignedToUserId }
+              : {}),
             updatedAt: new Date(),
           })
           .where(
@@ -219,7 +256,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         const events: Array<{
           ticketId: string;
           actorUserId: string;
-          kind: 'status_changed' | 'priority_changed';
+          kind: 'status_changed' | 'priority_changed' | 'assigned';
           payload: Record<string, unknown>;
         }> = [];
         if (parsed.data.status && parsed.data.status !== before.status) {
@@ -238,6 +275,20 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
             payload: { from: before.priority, to: parsed.data.priority },
           });
         }
+        if (
+          parsed.data.assignedToUserId !== undefined &&
+          parsed.data.assignedToUserId !== before.assignedToUserId
+        ) {
+          events.push({
+            ticketId: id,
+            actorUserId: user.id,
+            kind: 'assigned',
+            payload: {
+              fromUserId: before.assignedToUserId,
+              toUserId: parsed.data.assignedToUserId,
+            },
+          });
+        }
         if (events.length > 0) {
           await tx.insert(schema.adminTicketEvents).values(events);
         }
@@ -247,6 +298,14 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
 
       if (result.notFound) {
         return fail(c, 'not_found', 'Ticket not found', 404);
+      }
+      if ('invalidAssignee' in result && result.invalidAssignee) {
+        return fail(
+          c,
+          'validation_failed',
+          'assignedToUserId must refer to a member of this project',
+          422,
+        );
       }
 
       // Re-read with the aggregate vote count so the dashboard gets
@@ -317,6 +376,36 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         .where(eq(schema.adminTicketEvents.ticketId, id))
         .orderBy(desc(schema.adminTicketEvents.createdAt))
         .limit(200);
+
+      return ok(c, rows);
+    },
+  );
+
+  /**
+   * Members of a project, for the assignment picker. Joined with
+   * `admin_users` so the dashboard gets email + displayName in one
+   * round-trip. Available to every member (viewer included) — knowing
+   * who's on the project is a read operation, not a privileged one.
+   */
+  api.get(
+    '/projects/:key/members',
+    requireProjectMember,
+    async (c) => {
+      const project = c.get('project');
+      const rows = await db
+        .select({
+          userId: schema.adminUsers.id,
+          email: schema.adminUsers.email,
+          displayName: schema.adminUsers.displayName,
+          role: schema.projectMembers.role,
+        })
+        .from(schema.projectMembers)
+        .innerJoin(
+          schema.adminUsers,
+          eq(schema.adminUsers.id, schema.projectMembers.userId),
+        )
+        .where(eq(schema.projectMembers.projectId, project.id))
+        .orderBy(schema.adminUsers.email);
 
       return ok(c, rows);
     },

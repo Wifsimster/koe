@@ -3,6 +3,19 @@ import type { BrowserMetadata, TicketKind, TicketPriority, TicketStatus } from '
 export interface TicketPatch {
   status?: TicketStatus;
   priority?: TicketPriority;
+  /**
+   * Ticket assignee. `string` = set, `null` = explicit unassign,
+   * `undefined` (key absent) = no change. The wire shape matches
+   * the Zod `.nullable().optional()` on the server.
+   */
+  assignedToUserId?: string | null;
+}
+
+export interface ProjectMember {
+  userId: string;
+  email: string;
+  displayName: string | null;
+  role: 'owner' | 'member' | 'viewer';
 }
 
 export type TicketEventKind =
@@ -73,6 +86,7 @@ export interface AdminTicket {
   reporterName: string | null;
   reporterEmail: string | null;
   reporterVerified: boolean;
+  assignedToUserId: string | null;
   stepsToReproduce: string | null;
   expectedBehavior: string | null;
   actualBehavior: string | null;
@@ -169,6 +183,12 @@ export class AdminApiClient {
   listTicketEvents(projectKey: string, id: string): Promise<TicketEvent[]> {
     return this.get<TicketEvent[]>(
       `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}/events`,
+    );
+  }
+
+  listProjectMembers(projectKey: string): Promise<ProjectMember[]> {
+    return this.get<ProjectMember[]>(
+      `/projects/${encodeURIComponent(projectKey)}/members`,
     );
   }
 
