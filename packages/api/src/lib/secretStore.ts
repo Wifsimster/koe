@@ -194,6 +194,20 @@ export function isEnvelope(value: string): boolean {
   return value.startsWith(`${ENVELOPE_PREFIX}.`);
 }
 
+/**
+ * Extracts the `kid` from a v1 envelope blob, or returns `null` if
+ * the value isn't an envelope. Used by the `rotate-secrets` CLI to
+ * decide whether a row needs re-encryption under the current active
+ * kid, without having to decrypt the payload first.
+ */
+export function readEnvelopeKid(value: string): string | null {
+  if (!isEnvelope(value)) return null;
+  const parts = value.split('.');
+  if (parts.length !== 5) return null;
+  const kid = parts[1];
+  return kid && kid.length > 0 ? kid : null;
+}
+
 function b64url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
