@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { TriangleAlert } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { AdminApiError, type CreateProjectResult } from '../api/client';
 import { INBOX_DEFAULT_SEARCH } from '../router';
@@ -87,109 +88,50 @@ export function OnboardingPage() {
   if (created) {
     const apiUrl =
       typeof window !== 'undefined' ? window.location.origin : 'https://your-koe-host';
-    const backendEnvSnippet = `KOE_IDENTITY_SECRET=${created.identitySecret}`;
-    const backendSignSnippet = `// Your backend, never the browser.
-import { createHmac } from 'node:crypto';
+    const envSnippet = `# Public — safe to expose to the browser
+KOE_PROJECT_KEY=${created.project.key}
+KOE_API_URL=${apiUrl}
 
-const userHash = createHmac('sha256', process.env.KOE_IDENTITY_SECRET)
-  .update(user.id)
-  .digest('hex');
-
-// Send \`userHash\` to the browser alongside the user record.
-res.json({ userHash });`;
-    const reactSnippet = `import { KoeWidget } from '@wifsimster/koe';
-import '@wifsimster/koe/style.css';
-
-<KoeWidget
-  projectKey="${created.project.key}"
-  apiUrl="${apiUrl}"
-  user={{ id: user.id, name: user.name, email: user.email }}
-  userHash={userHash}
-/>`;
-    const scriptSnippet = `<link rel="stylesheet" href="https://unpkg.com/@wifsimster/koe/dist/style.css" />
-<script src="https://unpkg.com/@wifsimster/koe/dist/koe.iife.js"></script>
-<script>
-  Koe.init({
-    projectKey: '${created.project.key}',
-    apiUrl: '${apiUrl}',
-    user: { id: 'user_123', name: 'Jane Doe', email: 'jane@example.com' },
-    userHash: 'hash-from-your-backend',
-  });
-</script>`;
+# Secret — server-side only
+KOE_IDENTITY_SECRET=${created.identitySecret}`;
 
     return (
       <Shell
         caption="Project created"
         subtitle={
           <>
-            <strong className="text-foreground">{created.project.name}</strong> is ready. Follow
-            the three steps below to wire up the widget. The identity secret is shown{' '}
-            <em>once</em> — copy it now.
+            <strong className="text-foreground">{created.project.name}</strong> is ready. Save the
+            credentials below — the{' '}
+            <a
+              href="https://github.com/Wifsimster/koe/blob/main/packages/widget/README.md"
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-4 hover:text-foreground"
+            >
+              integration guide
+            </a>{' '}
+            covers how to sign the user id and mount the widget.
           </>
         }
         wide
       >
-        <div className="space-y-8">
-          <Callout>
-            The identity secret below is encrypted at rest on the server and will never be shown
-            again. If you lose it, you'll need to rotate it from the dashboard.
-          </Callout>
+        <div className="space-y-6">
+          <Warning>
+            Copy the identity secret now. It's encrypted at rest and can't be retrieved later —
+            only rotated.
+          </Warning>
 
-          <Step
-            index={1}
-            title="Save the identity secret on your backend"
-            body={
-              <>
-                Add this environment variable to the service that authenticates your users (the
-                same place <Code>DATABASE_URL</Code> and your session secrets live). Your frontend
-                must never see it.
-              </>
-            }
-          >
-            <Field label="Project key (public, safe to ship to the browser)">
+          <div className="space-y-4">
+            <Field label="Project key" hint="Public — safe for the browser.">
               <CopyField value={created.project.key} />
             </Field>
-            <Field
-              label="Identity secret (keep secret, backend-only)"
-              hint="Shown once — we store only an encrypted envelope."
-            >
+            <Field label="Identity secret" hint="Server-side only. Never ship to the browser.">
               <CopyField value={created.identitySecret} mono />
             </Field>
-            <Field label="As an environment variable">
-              <CodeBlock value={backendEnvSnippet} />
+            <Field label="Environment variables">
+              <CodeBlock value={envSnippet} lang="bash" />
             </Field>
-          </Step>
-
-          <Step
-            index={2}
-            title="Sign the user id when you render the page"
-            body={
-              <>
-                Compute an HMAC of <Code>user.id</Code> with the secret and hand it to the widget.
-                This is what proves to Koe that the reporter is really your authenticated user.
-              </>
-            }
-          >
-            <CodeBlock value={backendSignSnippet} lang="ts" />
-          </Step>
-
-          <Step
-            index={3}
-            title="Mount the widget on your frontend"
-            body={
-              <>
-                Pick the option that fits your stack. Both send the signed <Code>userHash</Code>{' '}
-                back to Koe at <Code>{apiUrl}</Code>.
-              </>
-            }
-          >
-            <Field label="React / framework apps">
-              <CodeBlock value={reactSnippet} lang="tsx" />
-            </Field>
-            <Field label="Plain HTML (script tag)">
-              <CodeBlock value={scriptSnippet} lang="html" />
-            </Field>
-          </Step>
+          </div>
 
           <Button
             type="button"
@@ -343,37 +285,14 @@ function Shell({
   );
 }
 
-function Step({
-  index,
-  title,
-  body,
-  children,
-}: {
-  index: number;
-  title: string;
-  body: ReactNode;
-  children: ReactNode;
-}) {
+function Warning({ children }: { children: ReactNode }) {
   return (
-    <section className="space-y-4">
-      <header className="space-y-1">
-        <div className="flex items-baseline gap-3">
-          <span className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
-            Step {index}
-          </span>
-          <h3 className="font-heading text-lg leading-tight tracking-tight">{title}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">{body}</p>
-      </header>
-      <div className="space-y-4">{children}</div>
-    </section>
-  );
-}
-
-function Callout({ children }: { children: ReactNode }) {
-  return (
-    <div className="border-l-2 border-foreground/60 bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-      {children}
+    <div
+      role="alert"
+      className="flex items-start gap-3 border-l-2 border-orange-500 bg-orange-50 px-4 py-3 text-xs text-orange-900 dark:border-orange-400 dark:bg-orange-950/40 dark:text-orange-200"
+    >
+      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+      <div>{children}</div>
     </div>
   );
 }
