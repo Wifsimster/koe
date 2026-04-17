@@ -6,6 +6,7 @@ import {
   createPlaintextSecretStore,
   ENVELOPE_PREFIX,
   isEnvelope,
+  readEnvelopeKid,
 } from './secretStore';
 
 const PLAINTEXT = 'super-secret-hmac-key-0123456789';
@@ -148,5 +149,26 @@ describe('isEnvelope', () => {
     assert.equal(isEnvelope('koe2.v1.a.b.c'), false);
     assert.equal(isEnvelope('plaintext'), false);
     assert.equal(isEnvelope(''), false);
+  });
+});
+
+describe('readEnvelopeKid', () => {
+  it('extracts the kid from a well-formed envelope', () => {
+    const store = createLocalKekSecretStore({
+      keys: new Map([['v42', key()]]),
+      activeKid: 'v42',
+    });
+    const blob = store.encrypt('hello');
+    assert.equal(readEnvelopeKid(blob), 'v42');
+  });
+
+  it('returns null for plaintext', () => {
+    assert.equal(readEnvelopeKid('plaintext-value'), null);
+    assert.equal(readEnvelopeKid(''), null);
+  });
+
+  it('returns null for a malformed envelope', () => {
+    assert.equal(readEnvelopeKid(`${ENVELOPE_PREFIX}.v1.xx.yy`), null);
+    assert.equal(readEnvelopeKid(`${ENVELOPE_PREFIX}..a.b.c`), null);
   });
 });
