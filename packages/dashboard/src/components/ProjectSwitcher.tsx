@@ -1,5 +1,5 @@
-import { Check, ChevronsUpDown } from 'lucide-react';
-import { Link } from '@tanstack/react-router';
+import { Check, ChevronsUpDown, Plus } from 'lucide-react';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from './ui/sidebar';
 
 export function ProjectSwitcher({ onChange }: { onChange?: () => void }) {
   const { state, setActiveProject } = useAuth();
+  const navigate = useNavigate();
   if (state.status !== 'authenticated') return null;
   const memberships = state.me.memberships;
   const active = state.activeProjectKey;
@@ -34,16 +35,10 @@ export function ProjectSwitcher({ onChange }: { onChange?: () => void }) {
     );
   }
 
-  if (memberships.length === 1) {
-    return (
-      <div className="border border-border bg-background px-3 py-2">
-        <div className="text-[10px] tracking-[0.18em] uppercase text-muted-foreground">
-          Project
-        </div>
-        <div className="truncate text-sm">{memberships[0]!.projectName}</div>
-      </div>
-    );
-  }
+  const onCreateProject = () => {
+    onChange?.();
+    void navigate({ to: '/onboarding' });
+  };
 
   return (
     <SidebarMenu>
@@ -85,6 +80,11 @@ export function ProjectSwitcher({ onChange }: { onChange?: () => void }) {
                 </DropdownMenuItem>
               );
             })}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onCreateProject}>
+              <Plus className="size-3.5" />
+              <span className="flex-1">Create project</span>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

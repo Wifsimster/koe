@@ -204,10 +204,16 @@ import '@wifsimster/koe/style.css';
     );
   }
 
+  const hasExistingProjects = state.me.memberships.length > 0;
+
   return (
     <Shell
-      caption="Welcome"
-      subtitle="Create your first project to start collecting bugs and feature requests."
+      caption={hasExistingProjects ? 'New project' : 'Welcome'}
+      subtitle={
+        hasExistingProjects
+          ? 'Add another project to your account.'
+          : 'Create your first project to start collecting bugs and feature requests.'
+      }
     >
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="space-y-2">
