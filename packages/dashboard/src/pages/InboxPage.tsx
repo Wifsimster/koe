@@ -79,6 +79,14 @@ export function InboxPage() {
   const [members, setMembers] = useState<ProjectMember[] | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  /**
+   * Pending bulk action awaiting confirmation. We only gate
+   * destructive statuses (`closed`, `wont_fix`) behind a dialog —
+   * other changes are trivially reversible from the detail page.
+   */
+  const [pendingBulk, setPendingBulk] = useState<
+    { status: TicketStatus; count: number } | null
+  >(null);
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
@@ -162,28 +170,53 @@ export function InboxPage() {
     setBulkError(null);
   }, [activeKey, kind, status, assignee]);
 
-  const applyBulk = async (patch: {
-    status?: TicketStatus;
-    priority?: TicketPriority;
-    assignedToUserId?: string | null;
-  }) => {
-    if (!activeKey || selected.size === 0) return;
-    setBulkError(null);
-    setBulkSubmitting(true);
-    try {
-      await api.bulkUpdateTickets(activeKey, Array.from(selected), patch);
-      // Re-fetch rather than optimistic: the status filter may cause
-      // rows to leave the current page (e.g. "Open → Resolved" hides
-      // them), which is simpler to handle via a fresh server query
-      // than to replay client-side.
-      setSelected(new Set());
-      await loadTickets();
-    } catch (err) {
-      setBulkError(err instanceof Error ? err.message : 'Bulk update failed');
-    } finally {
-      setBulkSubmitting(false);
-    }
-  };
+  const applyBulk = useCallback(
+    async (patch: {
+      status?: TicketStatus;
+      priority?: TicketPriority;
+      assignedToUserId?: string | null;
+    }) => {
+      if (!activeKey || selected.size === 0) return;
+      setBulkError(null);
+      setBulkSubmitting(true);
+      try {
+        await api.bulkUpdateTickets(activeKey, Array.from(selected), patch);
+        // Re-fetch rather than optimistic: the status filter may
+        // cause rows to leave the current page (e.g. "Open →
+        // Resolved" hides them), which is simpler to handle via a
+        // fresh server query than to replay client-side.
+        setSelected(new Set());
+        await loadTickets();
+      } catch (err) {
+        setBulkError(err instanceof Error ? err.message : 'Bulk update failed');
+      } finally {
+        setBulkSubmitting(false);
+      }
+    },
+    [activeKey, api, selected, loadTickets],
+  );
+
+  /**
+   * Intercept bulk status changes that are hard to undo mentally:
+   * `closed` and `wont_fix` both say "stop working on this". A
+   * fat-fingered bulk close of 20 tickets is a real untangle; the
+   * dialog is the guardrail.
+   *
+   * Any other status goes through immediately — the audit trail
+   * already makes a status flip reversible from the detail page,
+   * and adding a dialog on every change would train ops to dismiss
+   * it without reading.
+   */
+  const requestBulkStatus = useCallback(
+    (next: TicketStatus) => {
+      if (next === 'closed' || next === 'wont_fix') {
+        setPendingBulk({ status: next, count: selected.size });
+        return;
+      }
+      void applyBulk({ status: next });
+    },
+    [applyBulk, selected.size],
+  );
 
   const toggleSelected = (id: string) => {
     setSelected((prev) => {
@@ -247,10 +280,25 @@ export function InboxPage() {
           members={members}
           submitting={bulkSubmitting}
           error={bulkError}
-          onStatus={(s) => void applyBulk({ status: s })}
+          onStatus={requestBulkStatus}
           onPriority={(p) => void applyBulk({ priority: p })}
           onAssignee={(a) => void applyBulk({ assignedToUserId: a })}
           onClear={clearSelection}
+        />
+      )}
+
+      {pendingBulk && (
+        <ConfirmDialog
+          title={confirmTitleFor(pendingBulk.status, pendingBulk.count)}
+          body={confirmBodyFor(pendingBulk.status)}
+          confirmLabel={confirmLabelFor(pendingBulk.status)}
+          submitting={bulkSubmitting}
+          onConfirm={async () => {
+            const status = pendingBulk.status;
+            setPendingBulk(null);
+            await applyBulk({ status });
+          }}
+          onCancel={() => setPendingBulk(null)}
         />
       )}
 
@@ -640,6 +688,97 @@ function EmptyTickets({ project }: { project: AdminProject | null }) {
           reload — you'll see a heartbeat here within a minute.
         </p>
       )}
+    </div>
+  );
+}
+
+function confirmTitleFor(status: TicketStatus, count: number): string {
+  const plural = count === 1 ? 'ticket' : 'tickets';
+  if (status === 'closed') return `Close ${count} ${plural}?`;
+  return `Mark ${count} ${plural} as won't fix?`;
+}
+
+function confirmBodyFor(status: TicketStatus): string {
+  if (status === 'closed') {
+    return "Closed tickets drop out of the triage inbox by default. You can still re-open them from the detail page, and the change is visible in each ticket's Activity log.";
+  }
+  return "Won't-fix tells reporters the team has decided not to take this on. The change shows up in each ticket's Activity log and can be reverted from the detail page.";
+}
+
+function confirmLabelFor(status: TicketStatus): string {
+  if (status === 'closed') return 'Close tickets';
+  return "Mark won't fix";
+}
+
+/**
+ * Minimal accessible confirm dialog. Backdrop click and Escape
+ * cancel; Enter confirms. Focus lands on the Cancel button by
+ * default — a keyboard pounder gets the safer action unless they
+ * explicitly tab to the destructive one.
+ */
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  submitting,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  submitting: boolean;
+  onConfirm: () => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      aria-describedby="confirm-body"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      onClick={(e) => {
+        // Only treat clicks on the backdrop as cancel — clicks on
+        // the card itself shouldn't dismiss.
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-5">
+        <h3 id="confirm-title" className="text-base font-semibold text-gray-900">
+          {title}
+        </h3>
+        <p id="confirm-body" className="mt-2 text-sm text-gray-600">
+          {body}
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            autoFocus
+            className="min-h-[36px] px-3 rounded-md text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void onConfirm()}
+            disabled={submitting}
+            className="min-h-[36px] px-3 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-60"
+          >
+            {submitting ? 'Applying…' : confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
