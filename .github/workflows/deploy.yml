@@ -7,7 +7,7 @@ name: Deploy — homelab
 
 on:
   workflow_run:
-    workflows: ["Docker — koe-api"]
+    workflows: ["Server image"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
