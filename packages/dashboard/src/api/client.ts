@@ -11,6 +11,11 @@ export interface TicketPatch {
   assignedToUserId?: string | null;
 }
 
+export interface BulkUpdateResult {
+  updated: number;
+  failed: Array<{ id: string; reason: 'not_found' }>;
+}
+
 export interface ProjectMember {
   userId: string;
   email: string;
@@ -254,6 +259,23 @@ export class AdminApiClient {
       'PATCH',
       `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}`,
       patch,
+    );
+  }
+
+  /**
+   * Apply one patch to up to 100 tickets at once. Returns a summary —
+   * the dashboard refetches the list to pick up the new state rather
+   * than trying to reconcile per-row.
+   */
+  bulkUpdateTickets(
+    projectKey: string,
+    ids: string[],
+    patch: TicketPatch,
+  ): Promise<BulkUpdateResult> {
+    return this.send<BulkUpdateResult>(
+      'POST',
+      `/projects/${encodeURIComponent(projectKey)}/tickets/bulk`,
+      { ids, patch },
     );
   }
 
