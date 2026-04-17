@@ -604,6 +604,139 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     },
   );
 
+  /**
+   * Ticket comments — internal triage notes shared among admin
+   * members. Separate from the widget-facing `messages` surface
+   * (which is the reporter chat, not built today). Read is open to
+   * every project member; write is writer-gated.
+   *
+   * Writing a comment also emits a `commented` event in the same
+   * transaction so the Activity feed stays the single source of
+   * truth for "what has happened to this ticket".
+   */
+  api.get(
+    '/projects/:key/tickets/:id/comments',
+    requireProjectMember,
+    async (c) => {
+      const project = c.get('project');
+      const id = c.req.param('id');
+
+      // IDOR guard — same pattern as the events endpoint.
+      const [ticket] = await db
+        .select({ id: schema.tickets.id })
+        .from(schema.tickets)
+        .where(
+          and(
+            eq(schema.tickets.id, id),
+            eq(schema.tickets.projectId, project.id),
+          ),
+        )
+        .limit(1);
+      if (!ticket) {
+        return fail(c, 'not_found', 'Ticket not found', 404);
+      }
+
+      const rows = await db
+        .select({
+          id: schema.adminTicketComments.id,
+          ticketId: schema.adminTicketComments.ticketId,
+          body: schema.adminTicketComments.body,
+          createdAt: schema.adminTicketComments.createdAt,
+          authorUserId: schema.adminTicketComments.authorUserId,
+          authorEmail: schema.adminUsers.email,
+          authorDisplayName: schema.adminUsers.displayName,
+        })
+        .from(schema.adminTicketComments)
+        .leftJoin(
+          schema.adminUsers,
+          eq(schema.adminUsers.id, schema.adminTicketComments.authorUserId),
+        )
+        .where(eq(schema.adminTicketComments.ticketId, id))
+        .orderBy(desc(schema.adminTicketComments.createdAt))
+        .limit(200);
+
+      return ok(c, rows);
+    },
+  );
+
+  const createCommentSchema = z.object({
+    body: z.string().trim().min(1).max(10_000),
+  });
+
+  api.post(
+    '/projects/:key/tickets/:id/comments',
+    requireProjectMember,
+    requireProjectWriter,
+    async (c) => {
+      const project = c.get('project');
+      const user = c.get('user');
+      const id = c.req.param('id');
+
+      const body = await c.req.json().catch(() => null);
+      const parsed = createCommentSchema.safeParse(body);
+      if (!parsed.success) {
+        return fail(c, 'validation_failed', 'Invalid comment payload', 422, {
+          issues: parsed.error.issues,
+        });
+      }
+
+      // Comment + audit event in one transaction. If the event
+      // insert fails the comment doesn't land either — the feed
+      // can't diverge from reality.
+      const created = await db.transaction(async (tx) => {
+        // Confirm the ticket belongs to this project before
+        // creating a comment under it.
+        const [ticket] = await tx
+          .select({ id: schema.tickets.id })
+          .from(schema.tickets)
+          .where(
+            and(
+              eq(schema.tickets.id, id),
+              eq(schema.tickets.projectId, project.id),
+            ),
+          )
+          .limit(1);
+        if (!ticket) return { notFound: true } as const;
+
+        const [row] = await tx
+          .insert(schema.adminTicketComments)
+          .values({
+            ticketId: id,
+            authorUserId: user.id,
+            body: parsed.data.body,
+          })
+          .returning();
+        const comment = firstOrThrow(row ? [row] : [], 'comment after insert');
+
+        // Payload carries the comment id + a short excerpt so the
+        // audit trail is readable without a second fetch. The full
+        // body lives in `admin_ticket_comments` itself.
+        const excerpt = comment.body.slice(0, 200);
+        await tx.insert(schema.adminTicketEvents).values({
+          ticketId: id,
+          actorUserId: user.id,
+          kind: 'commented',
+          payload: { commentId: comment.id, excerpt },
+        });
+
+        return { notFound: false, comment } as const;
+      });
+
+      if (created.notFound) {
+        return fail(c, 'not_found', 'Ticket not found', 404);
+      }
+      return ok(
+        c,
+        {
+          ...created.comment,
+          authorEmail: user.email,
+          authorDisplayName: user.displayName,
+        },
+        201,
+      );
+    },
+  );
+
   return api;
 }
 
