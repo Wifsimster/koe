@@ -21,7 +21,7 @@ graph LR
     S --> DB
 ```
 
-1. **Le service Koe** est un back-end que **vous hébergez une fois**. Il est distribué sous forme d'image Docker `ghcr.io/wifsimster/koe-api`. Il expose l'API publique et stocke les tickets, votes et projets dans PostgreSQL.
+1. **Le service Koe** est un back-end que **vous hébergez une fois**. Il est distribué sous forme d'image Docker `ghcr.io/wifsimster/koe-server`. Il expose l'API publique et stocke les tickets, votes et projets dans PostgreSQL.
 2. **Le widget Koe** est un composant front-end que **vous embarquez dans chacune de vos applications SaaS**. Il appelle le service via HTTPS.
 3. **Un seul service peut servir plusieurs applications.** Chaque application est rattachée à un `projectKey` distinct côté service, ce qui permet de cloisonner les données, les origines autorisées et l'identité.
 
@@ -71,27 +71,27 @@ Points clés :
 
 - Les migrations s'appliquent automatiquement au démarrage de l'API (`MIGRATE_ON_START=true`). Pour un déploiement multi-réplicas, passez à `false` et lancez `docker compose run --rm api migrate` avant de scaler.
 - Les données PostgreSQL vivent dans un volume nommé `koe-db-data` ; `docker compose down` sans `-v` les préserve.
-- Par défaut l'API est exposée sur `http://localhost:8787`. Ajustez `KOE_API_PORT` dans `.env` pour changer le port hôte.
+- Par défaut l'API est exposée sur `http://localhost:8787`. Ajustez `KOE_SERVER_PORT` dans `.env` pour changer le port hôte.
 
 ### Image Docker
 
 L'image officielle est publiée sur GitHub Container Registry :
 
 ```
-ghcr.io/wifsimster/koe-api
+ghcr.io/wifsimster/koe-server
 ```
 
 | Tag           | Disponibilité                  | Usage                                                      |
 | ------------- | ------------------------------ | ---------------------------------------------------------- |
 | `edge`        | Chaque push sur `main`         | Dernier `main`. Utile pour tester les correctifs rapides.  |
 | `sha-<short>` | Chaque push sur `main`         | Commit précis, immuable. Utile pour les rollbacks.         |
-| `latest`      | Sur push d'un tag `api-v*`     | Dernière release stable. Pas de pinning. À éviter en prod. |
-| `x.y.z`       | Sur push d'un tag `api-v*`     | Release exacte. **Recommandé en production.**              |
-| `x.y`         | Sur push d'un tag `api-v*`     | Dernière version patch de la mineure `x.y`.                |
+| `latest`      | Sur push d'un tag `server-v*`  | Dernière release stable. Pas de pinning. À éviter en prod. |
+| `x.y.z`       | Sur push d'un tag `server-v*`  | Release exacte. **Recommandé en production.**              |
+| `x.y`         | Sur push d'un tag `server-v*`  | Dernière version patch de la mineure `x.y`.                |
 
-Les tags stables n'existent qu'après le push d'un tag git `api-vX.Y.Z`. Tant qu'aucun tag `api-v*` n'a été poussé, seuls `:edge` et `:sha-<short>` sont disponibles — c'est pourquoi `KOE_API_TAG=edge` est le défaut de `.env.docker.example`.
+Les tags stables n'existent qu'après le push d'un tag git `server-vX.Y.Z`. Tant qu'aucun tag `server-v*` n'a été poussé, seuls `:edge` et `:sha-<short>` sont disponibles — c'est pourquoi `KOE_SERVER_TAG=edge` est le défaut de `.env.docker.example`.
 
-Les images sont **multi-architecture** (`linux/amd64`, `linux/arm64`), signées via Sigstore cosign (keyless, OIDC GitHub), publiées avec une attestation de provenance SLSA et un SBOM. Elles sont scannées à chaque release par Trivy (le build échoue sur tout CVE HIGH/CRITICAL disposant d'un correctif).
+Les images sont **multi-architecture** (`linux/amd64`, `linux/arm64`), signées via Sigstore cosign (keyless, OIDC GitHub), publiées avec une attestation de provenance SLSA et un SBOM. Un scan Trivy tourne à chaque release ; il remonte ses findings dans l'onglet Security sans bloquer la publication.
 
 L'image expose trois commandes :
 
@@ -106,7 +106,7 @@ Exécution manuelle (sans compose) :
 ```bash
 docker run --rm -p 8787:8787 \
   -e DATABASE_URL=postgres://user:pass@host:5432/koe \
-  ghcr.io/wifsimster/koe-api:latest
+  ghcr.io/wifsimster/koe-server:latest
 ```
 
 ### Variables d'environnement
@@ -313,7 +313,7 @@ const userHash = createHmac('sha256', process.env.KOE_IDENTITY_SECRET)
 Pour reconstruire l'image Docker en local (au lieu de tirer celle de GHCR) :
 
 ```bash
-docker build -f packages/api/Dockerfile -t koe-api:local .
+docker build -f packages/api/Dockerfile -t koe-server:local .
 ```
 
 Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour le format attendu et le lien avec la release.
@@ -323,7 +323,7 @@ Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour l
 - **Widget** : React 19, TypeScript, Vite, Tailwind CSS.
 - **Service Koe (API)** : Hono, Zod, Drizzle ORM, PostgreSQL. Bundlé avec tsup et publié en image Docker multi-arch.
 - **Monorepo** : `pnpm` workspaces et Turborepo.
-- **Release** : deux pistes indépendantes sur `main`. Widget via `semantic-release` (tags `v*` + GitHub Releases). Image API via workflow Docker (tags roulants `:edge` + `:sha-*` à chaque push, tags stables `:latest` + `:x.y.z` sur push d'un tag git `api-v*`).
+- **Release** : deux pistes indépendantes sur `main`. Widget via `semantic-release` (tags `v*` + GitHub Releases). Image serveur via workflow `Server image` (tags roulants `:edge` + `:sha-*` à chaque push, tags stables `:latest` + `:x.y.z` sur push d'un tag git `server-v*`).
 
 ## Documentation complémentaire
 

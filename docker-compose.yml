@@ -39,7 +39,7 @@ services:
   api:
     # Pull the published image by default. To build from source locally,
     # comment `image:` and uncomment the `build:` block.
-    image: ghcr.io/wifsimster/koe-api:${KOE_API_TAG:-edge}
+    image: ghcr.io/wifsimster/koe-server:${KOE_SERVER_TAG:-edge}
     # build:
     #   context: .
     #   dockerfile: packages/api/Dockerfile
@@ -57,7 +57,7 @@ services:
       # plus your own reverse-proxy / auth in front of the port.
       ENABLE_DASHBOARD: ${ENABLE_DASHBOARD:-false}
     ports:
-      - '${KOE_API_PORT:-8787}:8787'
+      - '${KOE_SERVER_PORT:-8787}:8787'
     healthcheck:
       test:
         ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:8787/health']

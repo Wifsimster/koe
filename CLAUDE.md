@@ -25,12 +25,12 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 
 - `packages/widget` : widget React embarquable, avec build librairie ES et build IIFE autonome.
 - `packages/api` : API Hono, middlewares, schema Drizzle et acces PostgreSQL. Bundle via tsup (entrypoints `bin/serve.ts`, `bin/migrate.ts`, `bin/bootstrap.ts`).
-- `packages/dashboard` : shell de back-office React avec routes et pages placeholder. Embarque dans l'image Docker de l'API, servi a `/admin/` quand `ENABLE_DASHBOARD=true` (defaut).
+- `packages/dashboard` : shell de back-office React avec routes et pages placeholder. Embarque dans l'image Docker du serveur, servi a `/admin/` quand `ENABLE_DASHBOARD=true` (defaut).
 - `packages/shared` : types metier partages et helper `captureBrowserMetadata`.
-- `packages/api/Dockerfile` : build multi-stage publie sur `ghcr.io/wifsimster/koe-api`.
-- `docker-compose.yml` + `.env.docker.example` : self-host en une commande (API + PostgreSQL).
+- `packages/api/Dockerfile` : build multi-stage publie sur `ghcr.io/wifsimster/koe-server` (bundle API + dashboard).
+- `docker-compose.yml` + `.env.docker.example` : self-host en une commande (serveur + PostgreSQL).
 - `.github/workflows/widget-release.yml` : widget via semantic-release, tags `v*`.
-- `.github/workflows/api-image.yml` : image API, tags roulants `:edge` + `:sha-*` sur push main, tags stables sur push de `api-v*`.
+- `.github/workflows/server-image.yml` : image serveur, tags roulants `:edge` + `:sha-*` sur push main, tags stables sur push de `server-v*`.
 - `.releaserc.json` : orchestration des tags et GitHub Releases automatiques via `semantic-release`.
 - `tsconfig.base.json` : options TypeScript strictes partagees.
 
@@ -88,7 +88,7 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 
 - Le dashboard est surtout un squelette UI. L'API d'administration n'est pas encore branchee.
 - Le chat temps reel n'est pas branche. Le widget affiche une conversation locale de previsualisation.
-- Aucun package n'est publie sur npm. Le widget se consomme via tags git `v*` ; l'API se consomme via l'image Docker `ghcr.io/wifsimster/koe-api`. `@koe/api`, `@koe/dashboard` et `@koe/shared` restent prives au workspace.
+- Aucun package n'est publie sur npm. Le widget se consomme via tags git `v*` ; le serveur se consomme via l'image Docker `ghcr.io/wifsimster/koe-server` (qui bundle API + dashboard). `@koe/api`, `@koe/dashboard` et `@koe/shared` restent prives au workspace.
 - `packages/api/.env.example` contient les variables indispensables. Sans `DATABASE_URL`, les routes DB renverront une erreur.
 - Toute modification de `packages/api/src/db/schema.ts` implique le workflow Drizzle.
 - L'image Docker execute les migrations au boot par defaut (`MIGRATE_ON_START=true`). Desactiver en multi-replicas et lancer `docker compose run --rm api migrate` avant le scale-up.
