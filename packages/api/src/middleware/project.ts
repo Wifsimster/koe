@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import { db, dbAvailable, schema } from '../db';
+import { getSecretStoreFromEnv } from '../lib/secretStore';
 import { fail } from '../lib/response';
 
 export interface ProjectContext {
@@ -56,12 +57,17 @@ export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = 
     }
   }
 
+  // Decrypt at the boundary. Legacy rows stored plaintext (pre-KMS
+  // rollout) go through the same call — `decrypt` detects the lack of
+  // an envelope prefix and returns them unchanged.
+  const identitySecret = getSecretStoreFromEnv().decrypt(project.identitySecret);
+
   c.set('project', {
     id: project.id,
     key: project.key,
     name: project.name,
     allowedOrigins: project.allowedOrigins,
-    identitySecret: project.identitySecret,
+    identitySecret,
     requireIdentityVerification: project.requireIdentityVerification,
   });
 

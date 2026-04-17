@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { eq } from 'drizzle-orm';
 import { db, dbAvailable, schema } from '../db/index.js';
+import { getSecretStoreFromEnv } from '../lib/secretStore.js';
 import { runMigrations } from './migrate.js';
 
 /**
@@ -98,6 +99,12 @@ async function main(): Promise<void> {
   }
 
   const identitySecret = randomBytes(32).toString('hex');
+  const secretStore = getSecretStoreFromEnv();
+
+  // Encrypt at the boundary. When `KOE_SECRET_KEYS` is unset the
+  // plaintext store passes through unchanged, so this line is safe to
+  // run in dev without any KMS setup.
+  const storedSecret = secretStore.encrypt(identitySecret);
 
   const [row] = await db
     .insert(schema.projects)
@@ -105,7 +112,7 @@ async function main(): Promise<void> {
       name: cfg.name,
       key: cfg.key,
       allowedOrigins: cfg.allowedOrigins,
-      identitySecret,
+      identitySecret: storedSecret,
       requireIdentityVerification: cfg.requireIdentityVerification,
     })
     .returning({ id: schema.projects.id, key: schema.projects.key });
