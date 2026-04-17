@@ -128,6 +128,20 @@ export function TicketDetailPage() {
     };
   }, [activeKey, api, canWrite]);
 
+  const revertEvent = async (eventId: string): Promise<void> => {
+    if (!activeKey) return;
+    try {
+      const next = await api.revertTicketEvent(activeKey, id, eventId);
+      setTicket(next);
+      void loadEvents();
+    } catch (err) {
+      // Surface the error in the same slot as patch failures so ops
+      // see why a revert didn't land (most commonly: the original
+      // assignee left the project).
+      setMutError(err instanceof Error ? err.message : 'Revert failed');
+    }
+  };
+
   const applyPatch = async (patch: {
     status?: TicketStatus;
     priority?: TicketPriority;
@@ -309,7 +323,12 @@ export function TicketDetailPage() {
       </Section>
 
       <Section title="Activity">
-        <ActivityList events={events} members={members} />
+        <ActivityList
+          events={events}
+          members={members}
+          canRevert={canWrite}
+          onRevert={revertEvent}
+        />
       </Section>
     </div>
   );
@@ -404,10 +423,16 @@ function CommentsPanel({
 function ActivityList({
   events,
   members,
+  canRevert,
+  onRevert,
 }: {
   events: TicketEvent[] | null;
   members: ProjectMember[] | null;
+  canRevert: boolean;
+  onRevert: (eventId: string) => Promise<void>;
 }) {
+  const [reverting, setReverting] = useState<string | null>(null);
+
   if (events === null) {
     return <p className="text-sm text-gray-500">Loading…</p>;
   }
@@ -418,19 +443,56 @@ function ActivityList({
       </p>
     );
   }
+
+  const handleRevert = async (eventId: string) => {
+    setReverting(eventId);
+    try {
+      await onRevert(eventId);
+    } finally {
+      setReverting(null);
+    }
+  };
+
   return (
     <ol className="space-y-2">
-      {events.map((ev) => (
-        <li key={ev.id} className="text-sm text-gray-700 border-l-2 border-gray-200 pl-3">
-          <div>
-            <span className="font-medium">{ev.actorEmail ?? 'deleted user'}</span>{' '}
-            {describeEvent(ev, members)}
-          </div>
-          <div className="text-xs text-gray-500">
-            {new Date(ev.createdAt).toLocaleString()}
-          </div>
-        </li>
-      ))}
+      {events.map((ev) => {
+        const revertable =
+          ev.kind === 'status_changed' ||
+          ev.kind === 'priority_changed' ||
+          ev.kind === 'assigned';
+        const wasRevert =
+          typeof (ev.payload as Record<string, unknown>).revertOf === 'string';
+        return (
+          <li
+            key={ev.id}
+            className="text-sm text-gray-700 border-l-2 border-gray-200 pl-3 flex items-start gap-2"
+          >
+            <div className="flex-1 min-w-0">
+              <div>
+                <span className="font-medium">{ev.actorEmail ?? 'deleted user'}</span>{' '}
+                {describeEvent(ev, members)}
+                {wasRevert && (
+                  <span className="ml-1 text-xs text-gray-500">(revert)</span>
+                )}
+              </div>
+              <div className="text-xs text-gray-500">
+                {new Date(ev.createdAt).toLocaleString()}
+              </div>
+            </div>
+            {canRevert && revertable && (
+              <button
+                type="button"
+                onClick={() => void handleRevert(ev.id)}
+                disabled={reverting !== null}
+                title="Revert this change"
+                className="text-xs text-indigo-700 hover:text-indigo-900 underline underline-offset-2 disabled:opacity-60 shrink-0"
+              >
+                {reverting === ev.id ? 'Reverting…' : 'Undo'}
+              </button>
+            )}
+          </li>
+        );
+      })}
     </ol>
   );
 }

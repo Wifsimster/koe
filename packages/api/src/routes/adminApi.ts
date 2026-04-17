@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { and, count, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
 import { ok, fail } from '../lib/response';
@@ -979,7 +980,239 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     },
   );
 
+  /**
+   * Revert a single audit event. "Take this ticket back to the
+   * `from` value stored on this event, and log the delta as a new
+   * event." Works for `status_changed`, `priority_changed`, and
+   * `assigned`; `commented` is ignored because deleting a comment is
+   * a different flow that may arrive later.
+   *
+   * Semantics:
+   *   - The revert is always against the *current* ticket state.
+   *     If the ticket moved since the event, we still rewind to the
+   *     event's `from`, but the new audit entry honestly describes
+   *     the delta that actually landed (from current → from).
+   *   - A no-op (current already equals the target) returns 200
+   *     without emitting a new event. Keeps the audit trail clean.
+   *   - Same writer gate as the mutations. Viewers can see the
+   *     button-less Activity entry; the button only renders client-
+   *     side when the role permits.
+   *   - One transaction, same pattern as PATCH.
+   */
+  api.post(
+    '/projects/:key/tickets/:id/events/:eventId/revert',
+    requireProjectMember,
+    requireProjectWriter,
+    async (c) => {
+      const project = c.get('project');
+      const user = c.get('user');
+      const ticketId = c.req.param('id');
+      const eventId = c.req.param('eventId');
+
+      const outcome = await db.transaction(async (tx) => {
+        // Fetch the ticket + event together, scoped to this project.
+        // The join against `tickets` by `(id, project_id)` is the
+        // IDOR guard — an event belonging to another project, or an
+        // event whose ticket was cross-routed, won't match.
+        const [row] = await tx
+          .select({
+            ticket: schema.tickets,
+            event: schema.adminTicketEvents,
+          })
+          .from(schema.adminTicketEvents)
+          .innerJoin(
+            schema.tickets,
+            eq(schema.tickets.id, schema.adminTicketEvents.ticketId),
+          )
+          .where(
+            and(
+              eq(schema.adminTicketEvents.id, eventId),
+              eq(schema.adminTicketEvents.ticketId, ticketId),
+              eq(schema.tickets.projectId, project.id),
+            ),
+          )
+          .limit(1);
+        if (!row) return { kind: 'not_found' } as const;
+
+        const { ticket, event } = row;
+        const payload = event.payload as Record<string, unknown>;
+
+        // Decide what to write, per kind.
+        let nextField:
+          | { column: 'status'; value: TicketStatus; currentValue: TicketStatus }
+          | { column: 'priority'; value: TicketPriority; currentValue: TicketPriority }
+          | { column: 'assignedToUserId'; value: string | null; currentValue: string | null }
+          | null = null;
+
+        if (event.kind === 'status_changed') {
+          const from = typeof payload.from === 'string' ? payload.from : null;
+          if (from && isTicketStatus(from)) {
+            nextField = {
+              column: 'status',
+              value: from,
+              currentValue: ticket.status,
+            };
+          }
+        } else if (event.kind === 'priority_changed') {
+          const from = typeof payload.from === 'string' ? payload.from : null;
+          if (from && isTicketPriority(from)) {
+            nextField = {
+              column: 'priority',
+              value: from,
+              currentValue: ticket.priority,
+            };
+          }
+        } else if (event.kind === 'assigned') {
+          // `fromUserId` can be null (assign-from-unassigned) or a uuid.
+          const from =
+            payload.fromUserId === null
+              ? null
+              : typeof payload.fromUserId === 'string'
+                ? payload.fromUserId
+                : undefined;
+          if (from !== undefined) {
+            nextField = {
+              column: 'assignedToUserId',
+              value: from,
+              currentValue: ticket.assignedToUserId,
+            };
+          }
+        }
+
+        if (!nextField) {
+          // Comment events or malformed payloads — nothing to revert.
+          return { kind: 'unrevertable' } as const;
+        }
+
+        // No-op revert = honest silence. Audit stays clean.
+        if (nextField.value === nextField.currentValue) {
+          return { kind: 'noop', ticket } as const;
+        }
+
+        // If we're restoring an assignee, verify they're still a
+        // member of this project. Someone removed since the original
+        // event can't be re-assigned; surface that as a 422 rather
+        // than silently unassigning.
+        if (
+          nextField.column === 'assignedToUserId' &&
+          nextField.value !== null
+        ) {
+          const [stillMember] = await tx
+            .select({ userId: schema.projectMembers.userId })
+            .from(schema.projectMembers)
+            .where(
+              and(
+                eq(schema.projectMembers.projectId, project.id),
+                eq(schema.projectMembers.userId, nextField.value),
+              ),
+            )
+            .limit(1);
+          if (!stillMember) {
+            return { kind: 'assignee_gone', userId: nextField.value } as const;
+          }
+        }
+
+        await tx
+          .update(schema.tickets)
+          .set({
+            ...(nextField.column === 'status' ? { status: nextField.value } : {}),
+            ...(nextField.column === 'priority' ? { priority: nextField.value } : {}),
+            ...(nextField.column === 'assignedToUserId'
+              ? { assignedToUserId: nextField.value }
+              : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.tickets.id, ticketId));
+
+        // Emit a new event describing what actually happened. Same
+        // kind as the original, payload is the true delta (current →
+        // reverted value). A reader scanning the log sees a coherent
+        // story, not an "undo" pseudo-kind.
+        await tx.insert(schema.adminTicketEvents).values({
+          ticketId,
+          actorUserId: user.id,
+          kind: event.kind,
+          payload:
+            nextField.column === 'assignedToUserId'
+              ? {
+                  fromUserId: nextField.currentValue,
+                  toUserId: nextField.value,
+                  revertOf: event.id,
+                }
+              : {
+                  from: nextField.currentValue,
+                  to: nextField.value,
+                  revertOf: event.id,
+                },
+        });
+
+        return { kind: 'reverted' } as const;
+      });
+
+      if (outcome.kind === 'not_found') {
+        return fail(c, 'not_found', 'Event not found', 404);
+      }
+      if (outcome.kind === 'unrevertable') {
+        return fail(
+          c,
+          'validation_failed',
+          'This event kind cannot be reverted',
+          422,
+        );
+      }
+      if (outcome.kind === 'assignee_gone') {
+        return fail(
+          c,
+          'validation_failed',
+          'The original assignee is no longer a member of this project',
+          422,
+        );
+      }
+
+      // Re-read the full ticket with the same shape as list/PATCH.
+      const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
+      const [withVotes] = await db
+        .select({
+          ticket: schema.tickets,
+          voteCount: voteCountExpr,
+          assignedToEmail: schema.adminUsers.email,
+          assignedToDisplayName: schema.adminUsers.displayName,
+        })
+        .from(schema.tickets)
+        .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
+        .leftJoin(
+          schema.adminUsers,
+          eq(schema.adminUsers.id, schema.tickets.assignedToUserId),
+        )
+        .where(eq(schema.tickets.id, ticketId))
+        .groupBy(schema.tickets.id, schema.adminUsers.id);
+
+      const row = firstOrThrow(withVotes ? [withVotes] : []);
+      return ok(c, {
+        ...row.ticket,
+        voteCount: row.voteCount,
+        assignedToEmail: row.assignedToEmail,
+        assignedToDisplayName: row.assignedToDisplayName,
+      });
+    },
+  );
+
   return api;
+}
+
+function isTicketStatus(v: string): v is TicketStatus {
+  return (
+    v === 'open' ||
+    v === 'in_progress' ||
+    v === 'planned' ||
+    v === 'resolved' ||
+    v === 'closed' ||
+    v === 'wont_fix'
+  );
+}
+
+function isTicketPriority(v: string): v is TicketPriority {
+  return v === 'low' || v === 'medium' || v === 'high' || v === 'critical';
 }
 
 function daysAgo(days: number): Date {
