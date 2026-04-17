@@ -70,7 +70,36 @@ export interface AdminTicket {
 export interface TicketListQuery {
   kind?: TicketKind;
   status?: TicketStatus;
+  priority?: TicketPriority;
+  verified?: boolean;
+  search?: string;
   limit?: number;
+  cursor?: string;
+}
+
+export interface TicketListPage {
+  items: AdminTicket[];
+  pageInfo: {
+    nextCursor: string | null;
+    hasMore: boolean;
+    limit: number;
+  };
+}
+
+/**
+ * Overview counters for the project landing page. Mirrors the shape
+ * returned by `GET /v1/admin/projects/:key/overview` — the aggregate
+ * query lives server-side so the dashboard only pays a single round
+ * trip on load.
+ */
+export interface ProjectOverview {
+  openBugs: number;
+  openFeatures: number;
+  criticalOpenBugs: number;
+  resolvedLast14d: number;
+  openedLast14d: number;
+  topVotedThisWeek: AdminTicket[];
+  recent: AdminTicket[];
 }
 
 type Envelope<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
@@ -121,15 +150,37 @@ export class AdminApiClient {
     return this.get<AdminProject[]>('/projects');
   }
 
-  listTickets(projectKey: string, query: TicketListQuery = {}): Promise<AdminTicket[]> {
+  /**
+   * Paged ticket list. Filter by kind/status/priority/verified plus a
+   * free-text search over title and description. The response carries
+   * `pageInfo.nextCursor` — pass it back as `cursor` to fetch the next
+   * page. Cursors are opaque; treat them as strings.
+   */
+  listTickets(
+    projectKey: string,
+    query: TicketListQuery = {},
+  ): Promise<TicketListPage> {
     const params = new URLSearchParams();
     if (query.kind) params.set('kind', query.kind);
     if (query.status) params.set('status', query.status);
+    if (query.priority) params.set('priority', query.priority);
+    if (query.verified !== undefined) params.set('verified', String(query.verified));
+    if (query.search) params.set('search', query.search);
     if (query.limit) params.set('limit', String(query.limit));
+    if (query.cursor) params.set('cursor', query.cursor);
     const qs = params.toString();
-    return this.get<AdminTicket[]>(
+    return this.get<TicketListPage>(
       `/projects/${encodeURIComponent(projectKey)}/tickets${qs ? `?${qs}` : ''}`,
     );
+  }
+
+  /**
+   * One-call snapshot for the project home page: open counts, 14-day
+   * throughput, top-voted features this week, and the most recent
+   * tickets. All scoped to the caller's membership.
+   */
+  overview(projectKey: string): Promise<ProjectOverview> {
+    return this.get<ProjectOverview>(`/projects/${encodeURIComponent(projectKey)}/overview`);
   }
 
   /**
