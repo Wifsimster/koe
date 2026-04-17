@@ -142,6 +142,30 @@ export function TicketDetailPage() {
     }
   };
 
+  const revertBatch = async (batchId: string): Promise<void> => {
+    if (!activeKey) return;
+    // Cheap cross-tab guardrail — a batch revert can touch many
+    // tickets beyond the one on screen. Native confirm is enough;
+    // the audit trail makes this reversible too if it surprises ops.
+    const yes = window.confirm(
+      'Undo this batch? Every ticket that was part of the bulk action will be reverted where possible.',
+    );
+    if (!yes) return;
+    try {
+      const res = await api.revertEventBatch(activeKey, batchId);
+      // Refetch this ticket's view — its state may or may not have
+      // changed depending on whether it was part of the batch.
+      void loadEvents();
+      if (res.skipped.length > 0) {
+        setMutError(
+          `Batch partially reverted: ${res.reverted} succeeded, ${res.skipped.length} skipped.`,
+        );
+      }
+    } catch (err) {
+      setMutError(err instanceof Error ? err.message : 'Batch revert failed');
+    }
+  };
+
   const applyPatch = async (patch: {
     status?: TicketStatus;
     priority?: TicketPriority;
@@ -328,6 +352,7 @@ export function TicketDetailPage() {
           members={members}
           canRevert={canWrite}
           onRevert={revertEvent}
+          onRevertBatch={revertBatch}
         />
       </Section>
     </div>
@@ -425,11 +450,13 @@ function ActivityList({
   members,
   canRevert,
   onRevert,
+  onRevertBatch,
 }: {
   events: TicketEvent[] | null;
   members: ProjectMember[] | null;
   canRevert: boolean;
   onRevert: (eventId: string) => Promise<void>;
+  onRevertBatch: (batchId: string) => Promise<void>;
 }) {
   const [reverting, setReverting] = useState<string | null>(null);
 
@@ -480,15 +507,28 @@ function ActivityList({
               </div>
             </div>
             {canRevert && revertable && (
-              <button
-                type="button"
-                onClick={() => void handleRevert(ev.id)}
-                disabled={reverting !== null}
-                title="Revert this change"
-                className="text-xs text-indigo-700 hover:text-indigo-900 underline underline-offset-2 disabled:opacity-60 shrink-0"
-              >
-                {reverting === ev.id ? 'Reverting…' : 'Undo'}
-              </button>
+              <div className="flex flex-col items-end shrink-0 gap-1">
+                <button
+                  type="button"
+                  onClick={() => void handleRevert(ev.id)}
+                  disabled={reverting !== null}
+                  title="Revert this change"
+                  className="text-xs text-indigo-700 hover:text-indigo-900 underline underline-offset-2 disabled:opacity-60"
+                >
+                  {reverting === ev.id ? 'Reverting…' : 'Undo'}
+                </button>
+                {ev.batchId && (
+                  <button
+                    type="button"
+                    onClick={() => void onRevertBatch(ev.batchId!)}
+                    disabled={reverting !== null}
+                    title="Undo the whole bulk action this event came from"
+                    className="text-xs text-gray-600 hover:text-gray-800 underline underline-offset-2 disabled:opacity-60"
+                  >
+                    Undo batch
+                  </button>
+                )}
+              </div>
             )}
           </li>
         );

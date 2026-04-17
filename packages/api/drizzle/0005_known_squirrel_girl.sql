@@ -1,0 +1,1 @@
+ALTER TABLE "admin_ticket_events" ADD COLUMN IF NOT EXISTS "batch_id" uuid;

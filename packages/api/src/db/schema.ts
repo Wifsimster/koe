@@ -336,6 +336,17 @@ export const adminTicketEvents = pgTable('admin_ticket_events', {
   }),
   kind: ticketEventKindEnum('kind').notNull(),
   payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  /**
+   * Bulk-action correlation. Every event emitted from a single bulk
+   * call shares the same `batchId`; events from individual PATCHes
+   * stay `null`. Makes "undo that whole bulk action" a one-query
+   * revert instead of N independent ones.
+   *
+   * Unindexed today — the one query pattern is "give me the events
+   * for this batchId" which fans out to < 100 rows max. Add an
+   * explicit index if batch reverts become hot.
+   */
+  batchId: uuid('batch_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
