@@ -12,6 +12,8 @@ import { LoginPage } from './pages/LoginPage';
 import { InboxPage } from './pages/InboxPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
 import { BatchesPage } from './pages/BatchesPage';
+import { OnboardingPage } from './pages/OnboardingPage';
+import { MembersPage } from './pages/MembersPage';
 import { AppShell } from './components/AppShell';
 import { useAuth, type AuthContextValue } from './auth/AuthContext';
 import type { AssigneeFilter } from './api/client';
@@ -42,12 +44,24 @@ const authenticatedLayoutRoute = createRoute({
   // Bounce to /login unless we have an authenticated state. We
   // don't await anything — the state is already resolved by the
   // AuthProvider at mount; loaders see its current snapshot.
+  //
+  // Empty-memberships gate: a newly-created admin user (first login,
+  // or one removed from every project) lands on /onboarding instead
+  // of the inbox. The guard only fires for authenticated callers —
+  // unauthenticated still wins the redirect to /login.
   beforeLoad: ({ context, location }) => {
     if (context.auth.state.status === 'unauthenticated') {
       throw redirect({
         to: '/login',
         search: { redirectTo: location.pathname },
       });
+    }
+    if (
+      context.auth.state.status === 'authenticated' &&
+      context.auth.state.me.memberships.length === 0 &&
+      location.pathname !== '/onboarding'
+    ) {
+      throw redirect({ to: '/onboarding' });
     }
   },
   component: AuthenticatedLayout,
@@ -124,12 +138,26 @@ const batchesRoute = createRoute({
   component: BatchesPage,
 });
 
+const onboardingRoute = createRoute({
+  getParentRoute: () => authenticatedLayoutRoute,
+  path: '/onboarding',
+  component: OnboardingPage,
+});
+
+const membersRoute = createRoute({
+  getParentRoute: () => authenticatedLayoutRoute,
+  path: '/projects/$key/members',
+  component: MembersPage,
+});
+
 export const routeTree = rootRoute.addChildren([
   loginRoute,
   authenticatedLayoutRoute.addChildren([
     inboxRoute,
     ticketDetailRoute,
     batchesRoute,
+    onboardingRoute,
+    membersRoute,
   ]),
 ]);
 
@@ -160,8 +188,27 @@ function AuthenticatedLayout() {
     }
   }, [state.status, navigate, pathname]);
 
+  // Mirror the beforeLoad empty-memberships redirect for mid-session
+  // transitions (refreshMe after removing yourself from the last
+  // project) — same "loading → state flips → stranded" race as the
+  // unauthenticated redirect.
+  useEffect(() => {
+    if (
+      state.status === 'authenticated' &&
+      state.me.memberships.length === 0 &&
+      pathname !== '/onboarding'
+    ) {
+      void navigate({ to: '/onboarding' });
+    }
+  }, [state, navigate, pathname]);
+
   if (state.status !== 'authenticated') {
     return <LoadingScreen />;
+  }
+  // Onboarding has its own full-page layout (no sidebar, no header).
+  // Rendering it inside AppShell would double-nest the page chrome.
+  if (pathname === '/onboarding') {
+    return <Outlet />;
   }
   return (
     <AppShell header={<RouteHeader />}>
@@ -178,27 +225,22 @@ function AuthenticatedLayout() {
 function RouteHeader(): ReactNode {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (pathname.startsWith('/batches')) {
-    return (
-      <div>
-        <h2 className="text-xl md:text-2xl font-semibold">Recent batches</h2>
-        <p className="text-sm text-gray-600">
-          Bulk actions your team has run on this project, newest first. Undo a whole batch from
-          here if it looks off.
-        </p>
-      </div>
-    );
+    return <Crumb label="Batches" caption="Undo bulk actions across the project." />;
   }
   if (pathname.startsWith('/tickets/')) {
-    return (
-      <div>
-        <h2 className="text-xl md:text-2xl font-semibold">Ticket</h2>
-      </div>
-    );
+    return <Crumb label="Ticket" caption="Triage, route, respond." />;
   }
+  if (/^\/projects\/[^/]+\/members$/.test(pathname)) {
+    return <Crumb label="Members" caption="Invite admins, change roles, revoke access." />;
+  }
+  return <Crumb label="Inbox" caption="Triage bugs and ideas as they arrive." />;
+}
+
+function Crumb({ label, caption }: { label: string; caption: string }) {
   return (
-    <div>
-      <h2 className="text-xl md:text-2xl font-semibold">Inbox</h2>
-      <p className="text-sm text-gray-600">Triage incoming bug reports and feature requests.</p>
+    <div className="flex items-baseline gap-3">
+      <span className="font-heading text-base tracking-tight">{label}</span>
+      <span className="hidden text-[11px] text-muted-foreground sm:inline">{caption}</span>
     </div>
   );
 }
@@ -217,7 +259,7 @@ export const INBOX_DEFAULT_SEARCH: InboxSearch = {
 
 function LoadingScreen(): ReactNode {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 text-sm text-gray-500">
+    <div className="min-h-screen flex items-center justify-center bg-background text-sm text-muted-foreground">
       Loading…
     </div>
   );

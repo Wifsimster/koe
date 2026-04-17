@@ -34,6 +34,12 @@ export function AppShell({
   }
 
   const closeDrawer = () => setDrawerOpen(false);
+  // The Members link routes to the active project's page. Resolved
+  // from `activeProjectKey` so switching projects re-targets the
+  // link without remounting the nav.
+  const activeMembership = state.activeProjectKey
+    ? state.me.memberships.find((m) => m.projectKey === state.activeProjectKey)
+    : null;
 
   const nav = (
     <nav className="flex flex-col gap-1">
@@ -63,6 +69,17 @@ export function AppShell({
       >
         Recent batches
       </Link>
+      {activeMembership && (
+        <Link
+          to="/projects/$key/members"
+          params={{ key: activeMembership.projectKey }}
+          onClick={closeDrawer}
+          className="mx-3 px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-gray-100"
+          activeProps={{ className: 'mx-3 px-3 py-2 rounded-md text-sm bg-indigo-50 text-indigo-700' }}
+        >
+          Members
+        </Link>
+      )}
 
       <div className="mt-2 border-t border-gray-200 pt-3 px-3 text-xs text-gray-500 truncate">
         {state.me.user.email}

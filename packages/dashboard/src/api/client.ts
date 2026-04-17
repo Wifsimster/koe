@@ -55,6 +55,34 @@ export interface ProjectMember {
   role: 'owner' | 'member' | 'viewer';
 }
 
+export interface CreateProjectPayload {
+  name: string;
+  key: string;
+  allowedOrigins?: string[];
+  requireIdentityVerification?: boolean;
+}
+
+export interface CreateProjectResult {
+  project: AdminProject;
+  /**
+   * Plaintext HMAC secret the caller must show to the operator once.
+   * The server never returns this value again (the DB stores an
+   * encrypted envelope).
+   */
+  identitySecret: string;
+}
+
+export interface InviteMemberPayload {
+  email: string;
+  role: ProjectMember['role'];
+  displayName?: string;
+  /**
+   * Required when the email doesn't match an existing admin user.
+   * argon2id-hashed server-side. At least 12 chars.
+   */
+  initialPassword?: string;
+}
+
 export type TicketEventKind =
   | 'status_changed'
   | 'priority_changed'
@@ -373,6 +401,53 @@ export class AdminApiClient {
   listProjectMembers(projectKey: string): Promise<ProjectMember[]> {
     return this.get<ProjectMember[]>(
       `/projects/${encodeURIComponent(projectKey)}/members`,
+    );
+  }
+
+  /**
+   * Create a new project + grant the caller `owner` membership. The
+   * response carries the plaintext `identitySecret` once — callers
+   * must surface it to the operator immediately; the server never
+   * returns it again.
+   */
+  createProject(payload: CreateProjectPayload): Promise<CreateProjectResult> {
+    return this.send<CreateProjectResult>('POST', '/projects', payload);
+  }
+
+  /**
+   * Invite a user to a project. Behaviour per caller scenario:
+   *   - email matches an existing admin → the user gains membership,
+   *     no password change.
+   *   - email is new → caller must pass `initialPassword`; server
+   *     provisions the admin_users row with an argon2id hash.
+   */
+  inviteProjectMember(
+    projectKey: string,
+    payload: InviteMemberPayload,
+  ): Promise<ProjectMember> {
+    return this.send<ProjectMember>(
+      'POST',
+      `/projects/${encodeURIComponent(projectKey)}/members`,
+      payload,
+    );
+  }
+
+  updateProjectMember(
+    projectKey: string,
+    userId: string,
+    role: ProjectMember['role'],
+  ): Promise<ProjectMember> {
+    return this.send<ProjectMember>(
+      'PATCH',
+      `/projects/${encodeURIComponent(projectKey)}/members/${encodeURIComponent(userId)}`,
+      { role },
+    );
+  }
+
+  removeProjectMember(projectKey: string, userId: string): Promise<{ ok: true }> {
+    return this.send<{ ok: true }>(
+      'DELETE',
+      `/projects/${encodeURIComponent(projectKey)}/members/${encodeURIComponent(userId)}`,
     );
   }
 

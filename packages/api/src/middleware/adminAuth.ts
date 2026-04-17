@@ -213,3 +213,20 @@ export const requireProjectWriter: MiddlewareHandler<{
   }
   await next();
 };
+
+/**
+ * Owner-gate: admin-of-the-admin actions (inviting/removing members,
+ * changing roles). `member` and `viewer` get 403 here — different from
+ * the 404 we return for writer-gate failures because at this point the
+ * caller has already proven project membership via `requireProjectMember`,
+ * so hiding the project's existence is moot.
+ */
+export const requireProjectOwner: MiddlewareHandler<{
+  Variables: AdminContext & { project: ProjectMembership };
+}> = async (c, next) => {
+  const project = c.get('project');
+  if (project.role !== 'owner') {
+    return fail(c, 'forbidden', 'Owner role required', 403);
+  }
+  await next();
+};

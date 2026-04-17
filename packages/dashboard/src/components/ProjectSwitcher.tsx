@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
 
 /**
@@ -12,9 +13,16 @@ export function ProjectSwitcher({ onChange }: { onChange?: () => void }) {
   const active = state.activeProjectKey;
 
   if (memberships.length === 0) {
+    // Reachable only if the router's empty-memberships redirect to
+    // /onboarding fails to fire — normal flow takes the user there
+    // directly. Offer the same destination as a safety net.
     return (
       <div className="text-sm text-gray-500">
-        No project memberships. Ask an owner to add you.
+        No project memberships yet.{' '}
+        <Link to="/onboarding" className="text-indigo-700 underline">
+          Create your first project
+        </Link>
+        .
       </div>
     );
   }
