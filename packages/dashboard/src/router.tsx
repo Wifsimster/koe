@@ -65,6 +65,9 @@ export interface InboxSearch {
   kind: TicketKind | 'all';
   status: TicketStatus | 'all';
   assignee: AssigneeFilter | 'all';
+  /** Free-text query matched server-side against title, description,
+   *  reporter email, and assignee email. Empty string ≡ unset. */
+  q: string;
 }
 
 const VALID_KINDS: ReadonlySet<string> = new Set(['all', 'bug', 'feature']);
@@ -104,6 +107,7 @@ const inboxRoute = createRoute({
     kind: parseKind(raw.kind),
     status: parseStatus(raw.status),
     assignee: parseAssignee(raw.assignee),
+    q: typeof raw.q === 'string' ? raw.q.slice(0, 200) : '',
   }),
 });
 
@@ -183,6 +187,18 @@ function RouteHeader(): ReactNode {
     </div>
   );
 }
+
+/**
+ * Post-login default search. The router requires the full shape on
+ * `<Link to="/">` because `validateSearch` is non-optional; exported
+ * so callers don't repeat the defaults.
+ */
+export const INBOX_DEFAULT_SEARCH: InboxSearch = {
+  kind: 'all',
+  status: 'open',
+  assignee: 'all',
+  q: '',
+};
 
 function LoadingScreen(): ReactNode {
   return (
