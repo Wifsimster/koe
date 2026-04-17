@@ -8,6 +8,7 @@ import {
   type IdentitySecret,
   type NonceCache,
 } from '../lib/identityToken';
+import { getSecretStoreFromEnv } from '../lib/secretStore';
 import type { ProjectContext } from './project';
 
 /**
@@ -72,9 +73,17 @@ async function loadActiveSecrets(projectId: string): Promise<Map<string, Identit
     .from(schema.projectIdentitySecrets)
     .where(eq(schema.projectIdentitySecrets.projectId, projectId));
 
+  const secretStore = getSecretStoreFromEnv();
   const map = new Map<string, IdentitySecret>();
   for (const r of rows) {
-    map.set(r.kid, { kid: r.kid, secret: r.secret, status: r.status });
+    // Decrypt at the boundary. Rows written before KOE_SECRET_KEYS was
+    // configured come back as legacy plaintext — `decrypt` detects the
+    // absence of the envelope prefix and passes them through.
+    map.set(r.kid, {
+      kid: r.kid,
+      secret: secretStore.decrypt(r.secret),
+      status: r.status,
+    });
   }
   return map;
 }
