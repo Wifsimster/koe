@@ -14,6 +14,21 @@ export interface TicketPatch {
 export interface BulkUpdateResult {
   updated: number;
   failed: Array<{ id: string; reason: 'not_found' }>;
+  /**
+   * Shared audit correlation id for every event the bulk call
+   * emitted. `null` when the patch was a no-op against every
+   * matched ticket. Clients can pass this back to the batch-revert
+   * endpoint to undo the whole thing.
+   */
+  batchId: string | null;
+}
+
+export interface BatchRevertResult {
+  reverted: number;
+  skipped: Array<{
+    eventId: string;
+    reason: 'unrevertable' | 'no_change' | 'assignee_gone';
+  }>;
 }
 
 export interface ProjectMember {
@@ -37,6 +52,13 @@ export interface TicketEvent {
   createdAt: string;
   actorUserId: string | null;
   actorEmail: string | null;
+  /**
+   * Correlation id for events emitted from the same bulk call.
+   * `null` for single-ticket mutations. Lets the dashboard offer a
+   * single "Undo batch" action next to any event that came from a
+   * bulk apply.
+   */
+  batchId: string | null;
 }
 
 export interface TicketComment {
@@ -301,6 +323,23 @@ export class AdminApiClient {
       `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(
         ticketId,
       )}/events/${encodeURIComponent(eventId)}/revert`,
+    );
+  }
+
+  /**
+   * Revert every event sharing a bulk-action `batchId`. Skipped
+   * events are returned with a reason — the dashboard can surface
+   * the count ("12 reverted, 2 skipped").
+   */
+  revertEventBatch(
+    projectKey: string,
+    batchId: string,
+  ): Promise<BatchRevertResult> {
+    return this.send<BatchRevertResult>(
+      'POST',
+      `/projects/${encodeURIComponent(projectKey)}/events/batches/${encodeURIComponent(
+        batchId,
+      )}/revert`,
     );
   }
 

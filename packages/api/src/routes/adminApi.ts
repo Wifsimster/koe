@@ -610,6 +610,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
           createdAt: schema.adminTicketEvents.createdAt,
           actorUserId: schema.adminTicketEvents.actorUserId,
           actorEmail: schema.adminUsers.email,
+          batchId: schema.adminTicketEvents.batchId,
         })
         .from(schema.adminTicketEvents)
         .leftJoin(
@@ -911,6 +912,12 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
           )
           .returning({ id: schema.tickets.id });
 
+        // Correlate every event emitted from this call with the same
+        // `batchId` — lets the dashboard offer "undo this whole bulk
+        // action" as a single button later. The id is purely
+        // informational; it's never used as a FK.
+        const batchId = crypto.randomUUID();
+
         // One audit event per actually-changed field per ticket.
         // Same shape as the single PATCH — the Activity feed can't
         // tell whether a change came from bulk or not, which is
@@ -920,6 +927,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
           actorUserId: string;
           kind: 'status_changed' | 'priority_changed' | 'assigned';
           payload: Record<string, unknown>;
+          batchId: string;
         }> = [];
         for (const row of before) {
           if (patch.status && patch.status !== row.status) {
@@ -928,6 +936,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
               actorUserId: user.id,
               kind: 'status_changed',
               payload: { from: row.status, to: patch.status },
+              batchId,
             });
           }
           if (patch.priority && patch.priority !== row.priority) {
@@ -936,6 +945,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
               actorUserId: user.id,
               kind: 'priority_changed',
               payload: { from: row.priority, to: patch.priority },
+              batchId,
             });
           }
           if (
@@ -950,6 +960,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
                 fromUserId: row.assignedToUserId,
                 toUserId: patch.assignedToUserId,
               },
+              batchId,
             });
           }
         }
@@ -961,6 +972,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
           invalidAssignee: false,
           updatedCount: updated.length,
           failed,
+          batchId: events.length > 0 ? batchId : null,
         } as const;
       });
 
@@ -976,6 +988,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       return ok(c, {
         updated: result.updatedCount,
         failed: result.failed,
+        batchId: 'batchId' in result ? result.batchId : null,
       });
     },
   );
@@ -1194,6 +1207,179 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         assignedToEmail: row.assignedToEmail,
         assignedToDisplayName: row.assignedToDisplayName,
       });
+    },
+  );
+
+  /**
+   * Batch revert — rewind every event that shares a `batchId`, which
+   * is the tag the bulk endpoint stamps on its event batch. One
+   * transaction; partial success is possible (an assignee may have
+   * left the project since the bulk ran, a field may have drifted
+   * to a third value, etc.). The response reports per-event outcome
+   * so the dashboard can tell ops "12 reverted, 2 skipped".
+   *
+   * Read is project-scoped via the ticket.projectId join — a batch
+   * id that belongs to another project produces zero events, and
+   * the response is `reverted: 0, skipped: []` (indistinguishable
+   * from an unknown batch). Same IDOR posture as single revert.
+   */
+  api.post(
+    '/projects/:key/events/batches/:batchId/revert',
+    requireProjectMember,
+    requireProjectWriter,
+    async (c) => {
+      const project = c.get('project');
+      const user = c.get('user');
+      const batchId = c.req.param('batchId');
+
+      const outcome = await db.transaction(async (tx) => {
+        // Select every event in the batch, scoped to this project
+        // via an inner join on the ticket. Ordered by `created_at`
+        // descending so that if the same ticket has multiple fields
+        // in the batch (e.g. status + priority), we revert them in
+        // the same order they'd surface in the feed.
+        const events = await tx
+          .select({
+            event: schema.adminTicketEvents,
+            ticket: schema.tickets,
+          })
+          .from(schema.adminTicketEvents)
+          .innerJoin(
+            schema.tickets,
+            eq(schema.tickets.id, schema.adminTicketEvents.ticketId),
+          )
+          .where(
+            and(
+              eq(schema.adminTicketEvents.batchId, batchId),
+              eq(schema.tickets.projectId, project.id),
+            ),
+          )
+          .orderBy(desc(schema.adminTicketEvents.createdAt));
+
+        type Skip = { eventId: string; reason: string };
+        const skipped: Skip[] = [];
+        let reverted = 0;
+
+        // In-memory map of the ticket's current state per ticketId.
+        // After we revert one field on a ticket, the next event on
+        // the same ticket should see the updated value so subsequent
+        // "is this a no-op" checks are against the latest state.
+        const currentState = new Map<
+          string,
+          {
+            status: TicketStatus;
+            priority: TicketPriority;
+            assignedToUserId: string | null;
+          }
+        >();
+        for (const { ticket } of events) {
+          if (!currentState.has(ticket.id)) {
+            currentState.set(ticket.id, {
+              status: ticket.status,
+              priority: ticket.priority,
+              assignedToUserId: ticket.assignedToUserId,
+            });
+          }
+        }
+
+        for (const { event } of events) {
+          const state = currentState.get(event.ticketId)!;
+          const payload = event.payload as Record<string, unknown>;
+
+          let update:
+            | { column: 'status'; value: TicketStatus }
+            | { column: 'priority'; value: TicketPriority }
+            | { column: 'assignedToUserId'; value: string | null }
+            | null = null;
+
+          if (event.kind === 'status_changed') {
+            const from = typeof payload.from === 'string' ? payload.from : null;
+            if (from && isTicketStatus(from)) update = { column: 'status', value: from };
+          } else if (event.kind === 'priority_changed') {
+            const from = typeof payload.from === 'string' ? payload.from : null;
+            if (from && isTicketPriority(from)) update = { column: 'priority', value: from };
+          } else if (event.kind === 'assigned') {
+            const from =
+              payload.fromUserId === null
+                ? null
+                : typeof payload.fromUserId === 'string'
+                  ? payload.fromUserId
+                  : undefined;
+            if (from !== undefined) update = { column: 'assignedToUserId', value: from };
+          }
+
+          if (!update) {
+            skipped.push({ eventId: event.id, reason: 'unrevertable' });
+            continue;
+          }
+
+          const currentValue = state[update.column];
+          if (currentValue === update.value) {
+            // No-op: the field is already at the target. Skip without
+            // emitting an event — audit stays clean.
+            skipped.push({ eventId: event.id, reason: 'no_change' });
+            continue;
+          }
+
+          if (update.column === 'assignedToUserId' && update.value !== null) {
+            const [stillMember] = await tx
+              .select({ userId: schema.projectMembers.userId })
+              .from(schema.projectMembers)
+              .where(
+                and(
+                  eq(schema.projectMembers.projectId, project.id),
+                  eq(schema.projectMembers.userId, update.value),
+                ),
+              )
+              .limit(1);
+            if (!stillMember) {
+              skipped.push({ eventId: event.id, reason: 'assignee_gone' });
+              continue;
+            }
+          }
+
+          await tx
+            .update(schema.tickets)
+            .set({
+              ...(update.column === 'status' ? { status: update.value } : {}),
+              ...(update.column === 'priority' ? { priority: update.value } : {}),
+              ...(update.column === 'assignedToUserId'
+                ? { assignedToUserId: update.value }
+                : {}),
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.tickets.id, event.ticketId));
+
+          await tx.insert(schema.adminTicketEvents).values({
+            ticketId: event.ticketId,
+            actorUserId: user.id,
+            kind: event.kind,
+            payload:
+              update.column === 'assignedToUserId'
+                ? {
+                    fromUserId: currentValue,
+                    toUserId: update.value,
+                    revertOf: event.id,
+                  }
+                : {
+                    from: currentValue,
+                    to: update.value,
+                    revertOf: event.id,
+                  },
+          });
+
+          // Record the new state so subsequent events on the same
+          // ticket in this same batch see the up-to-date value.
+          if (update.column === 'status') state.status = update.value;
+          else if (update.column === 'priority') state.priority = update.value;
+          else state.assignedToUserId = update.value;
+          reverted += 1;
+        }
+
+        return { reverted, skipped } as const;
+      });
+
+      return ok(c, outcome);
     },
   );
 
