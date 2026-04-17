@@ -169,6 +169,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     requireProjectWriter,
     async (c) => {
       const project = c.get('project');
+      const user = c.get('user');
       const id = c.req.param('id');
 
       const body = await c.req.json().catch(() => null);
@@ -179,26 +180,72 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         });
       }
 
-      // Scope the update to `(project_id, id)` so a caller can't mutate
-      // a ticket that belongs to another project by passing its id in
-      // the URL. Returning rows lets us distinguish "not found" from
-      // "not yours" — same 404 either way.
-      const updated = await db
-        .update(schema.tickets)
-        .set({
-          ...(parsed.data.status ? { status: parsed.data.status } : {}),
-          ...(parsed.data.priority ? { priority: parsed.data.priority } : {}),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(schema.tickets.id, id),
-            eq(schema.tickets.projectId, project.id),
-          ),
-        )
-        .returning();
+      // UPDATE + audit events in one transaction: if either step
+      // fails, neither half lands. The SELECT-for-before is inside
+      // the same tx so a concurrent mutation can't shift the ground
+      // between our read and our write.
+      const result = await db.transaction(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(schema.tickets)
+          .where(
+            and(
+              eq(schema.tickets.id, id),
+              eq(schema.tickets.projectId, project.id),
+            ),
+          )
+          .limit(1);
+        if (!before) return { notFound: true } as const;
 
-      if (updated.length === 0) {
+        const updated = await tx
+          .update(schema.tickets)
+          .set({
+            ...(parsed.data.status ? { status: parsed.data.status } : {}),
+            ...(parsed.data.priority ? { priority: parsed.data.priority } : {}),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.tickets.id, id),
+              eq(schema.tickets.projectId, project.id),
+            ),
+          )
+          .returning();
+        const after = firstOrThrow(updated, 'ticket after update');
+
+        // Emit one event per field that actually changed. A PATCH
+        // that sets status to the same value is silent in the log —
+        // we don't pollute the audit trail with no-ops.
+        const events: Array<{
+          ticketId: string;
+          actorUserId: string;
+          kind: 'status_changed' | 'priority_changed';
+          payload: Record<string, unknown>;
+        }> = [];
+        if (parsed.data.status && parsed.data.status !== before.status) {
+          events.push({
+            ticketId: id,
+            actorUserId: user.id,
+            kind: 'status_changed',
+            payload: { from: before.status, to: parsed.data.status },
+          });
+        }
+        if (parsed.data.priority && parsed.data.priority !== before.priority) {
+          events.push({
+            ticketId: id,
+            actorUserId: user.id,
+            kind: 'priority_changed',
+            payload: { from: before.priority, to: parsed.data.priority },
+          });
+        }
+        if (events.length > 0) {
+          await tx.insert(schema.adminTicketEvents).values(events);
+        }
+
+        return { notFound: false, after } as const;
+      });
+
+      if (result.notFound) {
         return fail(c, 'not_found', 'Ticket not found', 404);
       }
 
@@ -217,6 +264,61 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
 
       const row = firstOrThrow(withVotes ? [withVotes] : []);
       return ok(c, { ...row.ticket, voteCount: row.voteCount });
+    },
+  );
+
+  /**
+   * Audit trail for a ticket. Read-only and available to every member
+   * of the project (including viewers) — the history is the first
+   * thing an operator asks for when triaging "why is this open again?".
+   *
+   * Joined with `admin_users` so the dashboard can render the actor's
+   * email without a second round trip. Deleted users come back as
+   * `actorEmail: null` (the FK is `ON DELETE SET NULL`).
+   */
+  api.get(
+    '/projects/:key/tickets/:id/events',
+    requireProjectMember,
+    async (c) => {
+      const project = c.get('project');
+      const id = c.req.param('id');
+
+      // Confirm the ticket belongs to this project before exposing
+      // its audit log — same IDOR protection as the mutation path.
+      const [ticket] = await db
+        .select({ id: schema.tickets.id })
+        .from(schema.tickets)
+        .where(
+          and(
+            eq(schema.tickets.id, id),
+            eq(schema.tickets.projectId, project.id),
+          ),
+        )
+        .limit(1);
+      if (!ticket) {
+        return fail(c, 'not_found', 'Ticket not found', 404);
+      }
+
+      const rows = await db
+        .select({
+          id: schema.adminTicketEvents.id,
+          ticketId: schema.adminTicketEvents.ticketId,
+          kind: schema.adminTicketEvents.kind,
+          payload: schema.adminTicketEvents.payload,
+          createdAt: schema.adminTicketEvents.createdAt,
+          actorUserId: schema.adminTicketEvents.actorUserId,
+          actorEmail: schema.adminUsers.email,
+        })
+        .from(schema.adminTicketEvents)
+        .leftJoin(
+          schema.adminUsers,
+          eq(schema.adminUsers.id, schema.adminTicketEvents.actorUserId),
+        )
+        .where(eq(schema.adminTicketEvents.ticketId, id))
+        .orderBy(desc(schema.adminTicketEvents.createdAt))
+        .limit(200);
+
+      return ok(c, rows);
     },
   );
 

@@ -43,6 +43,20 @@ export const projectMemberRoleEnum = pgEnum('project_member_role', [
   'viewer',
 ]);
 
+/**
+ * Audit event kinds. `status_changed` and `priority_changed` are the
+ * two a PATCH actually emits today; `assigned` and `commented` are
+ * listed so the schema doesn't need a migration the day those flows
+ * ship. Postgres enum additions are their own DDL, so forward-listing
+ * costs nothing and saves a round-trip.
+ */
+export const ticketEventKindEnum = pgEnum('ticket_event_kind', [
+  'status_changed',
+  'priority_changed',
+  'assigned',
+  'commented',
+]);
+
 export const projects = pgTable('projects', {
   id: uuid('id').defaultRandom().primaryKey(),
   key: text('key').notNull().unique(),
@@ -283,13 +297,58 @@ export const adminSessions = pgTable('admin_sessions', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+/**
+ * Audit trail for admin-driven ticket mutations. One row per state
+ * transition — what changed, who did it, when.
+ *
+ * Design notes:
+ *   - `actor_user_id` is nullable with `ON DELETE SET NULL`. When a
+ *     user leaves, we keep the history but lose the attribution. The
+ *     alternative (cascade-delete events with the user) would erase
+ *     audit data we might still need.
+ *   - `payload jsonb` carries the before/after. Schema is per-kind:
+ *       status_changed   → { from: string, to: string }
+ *       priority_changed → { from: string, to: string }
+ *       assigned         → { fromUserId?, toUserId? }  (future)
+ *       commented        → { body }                    (future)
+ *     We don't pull each shape into the schema today — a single
+ *     `jsonb` keeps forward compatibility while the flows settle.
+ *   - Indexed implicitly on ticket_id via the FK; that's the one
+ *     read pattern today (list events for a ticket). Add an explicit
+ *     index when a second pattern shows up.
+ */
+export const adminTicketEvents = pgTable('admin_ticket_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ticketId: uuid('ticket_id')
+    .notNull()
+    .references(() => tickets.id, { onDelete: 'cascade' }),
+  actorUserId: uuid('actor_user_id').references(() => adminUsers.id, {
+    onDelete: 'set null',
+  }),
+  kind: ticketEventKindEnum('kind').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const adminUsersRelations = relations(adminUsers, ({ many }) => ({
   sessions: many(adminSessions),
+  ticketEvents: many(adminTicketEvents),
 }));
 
 export const adminSessionsRelations = relations(adminSessions, ({ one }) => ({
   user: one(adminUsers, {
     fields: [adminSessions.userId],
+    references: [adminUsers.id],
+  }),
+}));
+
+export const adminTicketEventsRelations = relations(adminTicketEvents, ({ one }) => ({
+  ticket: one(tickets, {
+    fields: [adminTicketEvents.ticketId],
+    references: [tickets.id],
+  }),
+  actor: one(adminUsers, {
+    fields: [adminTicketEvents.actorUserId],
     references: [adminUsers.id],
   }),
 }));
