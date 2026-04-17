@@ -49,7 +49,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
 
   return (
     <SidebarProvider>
-      <Sidebar collapsible="offcanvas">
+      <Sidebar collapsible="offcanvas" className="z-20">
         <SidebarHeader className="gap-4 px-4 pt-5 pb-3">
           <Link
             to="/"
