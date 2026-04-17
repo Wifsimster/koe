@@ -20,6 +20,7 @@ on:
     tags: ['server-v*.*.*']
     paths:
       - 'packages/api/**'
+      - 'packages/dashboard/**'
       - 'packages/shared/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
