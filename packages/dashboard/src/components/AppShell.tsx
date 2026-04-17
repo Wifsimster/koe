@@ -85,13 +85,33 @@ export function AppShell({
         )}
       </div>
 
-      <main className="flex-1 min-w-0">
-        <div className="max-w-4xl mx-auto p-4 md:p-8">
+      <main className="flex-1 min-w-0 flex flex-col">
+        <div className="flex-1 max-w-4xl w-full mx-auto p-4 md:p-8">
           <div className={clsx('mb-6')}>{header}</div>
           {children}
         </div>
+        <AppFooter />
       </main>
     </div>
+  );
+}
+
+function AppFooter() {
+  const buildDate = new Date(__BUILD_DATE__);
+  const formattedDate = Number.isNaN(buildDate.getTime())
+    ? __BUILD_DATE__
+    : buildDate.toISOString().slice(0, 10);
+  return (
+    <footer className="border-t border-gray-200 px-4 md:px-8 py-3 text-xs text-gray-500">
+      <div className="max-w-4xl mx-auto flex flex-wrap gap-x-4 gap-y-1 justify-between">
+        <span>
+          Koe Dashboard <span className="font-mono">v{__APP_VERSION__}</span>
+        </span>
+        <span>
+          Built <time dateTime={__BUILD_DATE__}>{formattedDate}</time>
+        </span>
+      </div>
+    </footer>
   );
 }
 
