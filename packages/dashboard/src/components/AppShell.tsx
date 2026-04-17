@@ -3,6 +3,7 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import { Inbox, Layers, LogOut, Users } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { INBOX_DEFAULT_SEARCH } from '../router';
+import { ModeToggle } from './ModeToggle';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
@@ -128,6 +129,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
         <header className="sticky top-0 z-10 flex items-center gap-3 border-b bg-background/80 px-4 py-3 backdrop-blur md:px-8">
           <SidebarTrigger className="-ml-1 md:hidden" />
           <div className="flex-1 min-w-0">{header}</div>
+          <ModeToggle />
         </header>
         <main className="flex-1 px-4 py-8 md:px-12 md:py-12">
           <div className="mx-auto max-w-5xl">{children}</div>

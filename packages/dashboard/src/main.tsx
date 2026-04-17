@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree, type RouterContext } from './router';
 import { AuthProvider, useAuth, type AuthMode } from './auth/AuthContext';
+import { ThemeProvider } from './components/theme-provider';
 import './styles.css';
 
 // Match the Vite `base` config so the SPA can be mounted under
@@ -126,6 +127,8 @@ if (!container) throw new Error('#root element missing');
 
 createRoot(container).render(
   <StrictMode>
-    <Bootstrap />
+    <ThemeProvider>
+      <Bootstrap />
+    </ThemeProvider>
   </StrictMode>,
 );
