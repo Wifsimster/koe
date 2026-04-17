@@ -1211,6 +1211,86 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
   );
 
   /**
+   * Project-wide list of recent bulk actions. Groups audit events
+   * by `batch_id` and returns a summary row per batch so the
+   * dashboard can surface "Recent bulk actions" without forcing
+   * an operator to open individual tickets to find a batch they
+   * want to revert.
+   *
+   * Aggregates: first timestamp (the batch lands atomically, so
+   * every event shares it within a few µs), total events,
+   * distinct tickets affected, the kinds present, and the actor
+   * who triggered it. Actor is joined from `admin_users` once the
+   * group closes, not inside the aggregate, for index-only counts.
+   *
+   * Read-only; available to every project member (including
+   * viewers) — knowing what ops is doing is a read operation.
+   */
+  api.get(
+    '/projects/:key/events/batches',
+    requireProjectMember,
+    async (c) => {
+      const project = c.get('project');
+
+      // Straight SQL here — drizzle's agg helpers work but the query
+      // is clearer as a raw CTE and we need `array_agg(DISTINCT)`
+      // which drizzle would wrap anyway.
+      const rows = (await db.execute(sql`
+        with grouped as (
+          select
+            e.batch_id                                            as batch_id,
+            min(e.created_at)                                     as created_at,
+            min(e.actor_user_id::text)                            as actor_user_id,
+            count(*)::int                                         as event_count,
+            count(distinct e.ticket_id)::int                      as ticket_count,
+            array_agg(distinct e.kind::text)                      as kinds
+          from admin_ticket_events e
+          join tickets t on t.id = e.ticket_id
+          where e.batch_id is not null
+            and t.project_id = ${project.id}
+          group by e.batch_id
+        )
+        select
+          g.batch_id                                              as batch_id,
+          g.created_at                                            as created_at,
+          g.actor_user_id                                         as actor_user_id,
+          g.event_count                                           as event_count,
+          g.ticket_count                                          as ticket_count,
+          g.kinds                                                 as kinds,
+          u.email                                                 as actor_email,
+          u.display_name                                          as actor_display_name
+        from grouped g
+        left join admin_users u on u.id::text = g.actor_user_id
+        order by g.created_at desc
+        limit 50
+      `)) as unknown as Array<{
+        batch_id: string;
+        created_at: Date;
+        actor_user_id: string | null;
+        event_count: number;
+        ticket_count: number;
+        kinds: string[];
+        actor_email: string | null;
+        actor_display_name: string | null;
+      }>;
+
+      return ok(
+        c,
+        rows.map((r) => ({
+          batchId: r.batch_id,
+          createdAt: r.created_at,
+          actorUserId: r.actor_user_id,
+          actorEmail: r.actor_email,
+          actorDisplayName: r.actor_display_name,
+          eventCount: r.event_count,
+          ticketCount: r.ticket_count,
+          kinds: r.kinds,
+        })),
+      );
+    },
+  );
+
+  /**
    * Batch revert — rewind every event that shares a `batchId`, which
    * is the tag the bulk endpoint stamps on its event batch. One
    * transaction; partial success is possible (an assignee may have

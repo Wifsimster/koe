@@ -31,6 +31,23 @@ export interface BatchRevertResult {
   }>;
 }
 
+/**
+ * Summary row for the recent bulk actions panel. Mirrors the shape
+ * returned by `GET /v1/admin/projects/:key/events/batches` — the
+ * dashboard can surface a batch without opening every ticket it
+ * touched.
+ */
+export interface BatchSummary {
+  batchId: string;
+  createdAt: string;
+  actorUserId: string | null;
+  actorEmail: string | null;
+  actorDisplayName: string | null;
+  eventCount: number;
+  ticketCount: number;
+  kinds: string[];
+}
+
 export interface ProjectMember {
   userId: string;
   email: string;
@@ -340,6 +357,16 @@ export class AdminApiClient {
       `/projects/${encodeURIComponent(projectKey)}/events/batches/${encodeURIComponent(
         batchId,
       )}/revert`,
+    );
+  }
+
+  /**
+   * Project-wide list of recent bulk actions. Sorted newest-first
+   * by creation time. Server caps at 50 rows.
+   */
+  listEventBatches(projectKey: string): Promise<BatchSummary[]> {
+    return this.get<BatchSummary[]>(
+      `/projects/${encodeURIComponent(projectKey)}/events/batches`,
     );
   }
 

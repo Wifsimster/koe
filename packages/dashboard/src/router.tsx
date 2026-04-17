@@ -1,9 +1,16 @@
 import type { ReactNode } from 'react';
-import { createRootRouteWithContext, createRoute, Outlet, redirect } from '@tanstack/react-router';
+import {
+  createRootRouteWithContext,
+  createRoute,
+  Outlet,
+  redirect,
+  useRouterState,
+} from '@tanstack/react-router';
 import type { TicketKind, TicketStatus } from '@koe/shared';
 import { LoginPage } from './pages/LoginPage';
 import { InboxPage } from './pages/InboxPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
+import { BatchesPage } from './pages/BatchesPage';
 import { AppShell } from './components/AppShell';
 import { useAuth, type AuthContextValue } from './auth/AuthContext';
 import type { AssigneeFilter } from './api/client';
@@ -106,9 +113,19 @@ const ticketDetailRoute = createRoute({
   component: TicketDetailPage,
 });
 
+const batchesRoute = createRoute({
+  getParentRoute: () => authenticatedLayoutRoute,
+  path: '/batches',
+  component: BatchesPage,
+});
+
 export const routeTree = rootRoute.addChildren([
   loginRoute,
-  authenticatedLayoutRoute.addChildren([inboxRoute, ticketDetailRoute]),
+  authenticatedLayoutRoute.addChildren([
+    inboxRoute,
+    ticketDetailRoute,
+    batchesRoute,
+  ]),
 ]);
 
 function RootGate() {
@@ -128,18 +145,42 @@ function AuthenticatedLayout() {
     return <div className="p-8 text-red-600">Auth guard bypassed.</div>;
   }
   return (
-    <AppShell
-      header={
-        <div>
-          <h2 className="text-xl md:text-2xl font-semibold">Inbox</h2>
-          <p className="text-sm text-gray-600">
-            Triage incoming bug reports and feature requests.
-          </p>
-        </div>
-      }
-    >
+    <AppShell header={<RouteHeader />}>
       <Outlet />
     </AppShell>
+  );
+}
+
+/**
+ * Resolves the header copy from the current pathname. A proper
+ * implementation would hang it off each route's meta, but two
+ * pages is too few to pay for the abstraction.
+ */
+function RouteHeader(): ReactNode {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  if (pathname.startsWith('/batches')) {
+    return (
+      <div>
+        <h2 className="text-xl md:text-2xl font-semibold">Recent batches</h2>
+        <p className="text-sm text-gray-600">
+          Bulk actions your team has run on this project, newest first. Undo a whole batch from
+          here if it looks off.
+        </p>
+      </div>
+    );
+  }
+  if (pathname.startsWith('/tickets/')) {
+    return (
+      <div>
+        <h2 className="text-xl md:text-2xl font-semibold">Ticket</h2>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <h2 className="text-xl md:text-2xl font-semibold">Inbox</h2>
+      <p className="text-sm text-gray-600">Triage incoming bug reports and feature requests.</p>
+    </div>
   );
 }
 
