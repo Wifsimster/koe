@@ -285,6 +285,25 @@ export class AdminApiClient {
     );
   }
 
+  /**
+   * Revert a single audit event. Returns the updated ticket, same
+   * shape as `listTickets` / `updateTicket`. Only
+   * status / priority / assigned events are revertable — the
+   * server returns 422 for a comment or a malformed payload.
+   */
+  revertTicketEvent(
+    projectKey: string,
+    ticketId: string,
+    eventId: string,
+  ): Promise<AdminTicket> {
+    return this.send<AdminTicket>(
+      'POST',
+      `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(
+        ticketId,
+      )}/events/${encodeURIComponent(eventId)}/revert`,
+    );
+  }
+
   listProjectMembers(projectKey: string): Promise<ProjectMember[]> {
     return this.get<ProjectMember[]>(
       `/projects/${encodeURIComponent(projectKey)}/members`,
