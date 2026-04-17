@@ -8,6 +8,7 @@ import type {
   TicketComment,
   TicketEvent,
 } from '../api/client';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 /**
  * Ticket detail view with inline status + priority edits.
@@ -35,6 +36,13 @@ export function TicketDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
+  // Holds the `batchId` of a pending batch-revert. `null` = no
+  // confirmation in flight; a string = the ConfirmDialog is mounted
+  // and waiting for the operator's answer.
+  const [pendingBatchRevert, setPendingBatchRevert] = useState<string | null>(
+    null,
+  );
+  const [batchReverting, setBatchReverting] = useState(false);
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
@@ -142,17 +150,24 @@ export function TicketDetailPage() {
     }
   };
 
+  /**
+   * Stage a batch revert. The actual work happens after the
+   * operator confirms via `performBatchRevert`. Batch revert can
+   * touch many tickets beyond the one on screen, so the dialog is
+   * the guardrail — same pattern as the bulk destructive status
+   * change on the inbox.
+   */
   const revertBatch = async (batchId: string): Promise<void> => {
     if (!activeKey) return;
-    // Cheap cross-tab guardrail — a batch revert can touch many
-    // tickets beyond the one on screen. Native confirm is enough;
-    // the audit trail makes this reversible too if it surprises ops.
-    const yes = window.confirm(
-      'Undo this batch? Every ticket that was part of the bulk action will be reverted where possible.',
-    );
-    if (!yes) return;
+    setPendingBatchRevert(batchId);
+  };
+
+  const performBatchRevert = async (batchId: string): Promise<void> => {
+    if (!activeKey) return;
+    setBatchReverting(true);
     try {
       const res = await api.revertEventBatch(activeKey, batchId);
+      setPendingBatchRevert(null);
       // Refetch this ticket's view — its state may or may not have
       // changed depending on whether it was part of the batch.
       void loadEvents();
@@ -163,6 +178,9 @@ export function TicketDetailPage() {
       }
     } catch (err) {
       setMutError(err instanceof Error ? err.message : 'Batch revert failed');
+      setPendingBatchRevert(null);
+    } finally {
+      setBatchReverting(false);
     }
   };
 
@@ -355,6 +373,17 @@ export function TicketDetailPage() {
           onRevertBatch={revertBatch}
         />
       </Section>
+
+      {pendingBatchRevert && (
+        <ConfirmDialog
+          title="Undo this batch?"
+          body="Every ticket that was part of the bulk action will be reverted where possible. Skipped tickets (assignee left the project, already at the target state) will be reported."
+          confirmLabel="Undo batch"
+          submitting={batchReverting}
+          onConfirm={() => void performBatchRevert(pendingBatchRevert)}
+          onCancel={() => setPendingBatchRevert(null)}
+        />
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import type {
   AssigneeFilter,
   ProjectMember,
 } from '../api/client';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { HeartbeatBadge } from '../components/HeartbeatBadge';
 
 /**
@@ -710,75 +711,3 @@ function confirmLabelFor(status: TicketStatus): string {
   return "Mark won't fix";
 }
 
-/**
- * Minimal accessible confirm dialog. Backdrop click and Escape
- * cancel; Enter confirms. Focus lands on the Cancel button by
- * default — a keyboard pounder gets the safer action unless they
- * explicitly tab to the destructive one.
- */
-function ConfirmDialog({
-  title,
-  body,
-  confirmLabel,
-  submitting,
-  onConfirm,
-  onCancel,
-}: {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  submitting: boolean;
-  onConfirm: () => void | Promise<void>;
-  onCancel: () => void;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-title"
-      aria-describedby="confirm-body"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-      onClick={(e) => {
-        // Only treat clicks on the backdrop as cancel — clicks on
-        // the card itself shouldn't dismiss.
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-5">
-        <h3 id="confirm-title" className="text-base font-semibold text-gray-900">
-          {title}
-        </h3>
-        <p id="confirm-body" className="mt-2 text-sm text-gray-600">
-          {body}
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={submitting}
-            autoFocus
-            className="min-h-[36px] px-3 rounded-md text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-60"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void onConfirm()}
-            disabled={submitting}
-            className="min-h-[36px] px-3 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-60"
-          >
-            {submitting ? 'Applying…' : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
