@@ -1,24 +1,42 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
+import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
 import type { AdminTicket } from '../api/client';
 
 /**
- * Read-only ticket view. Mutations (status change, assignment, notes)
- * are intentionally out of scope until the triage flow tells us which
- * ones are worth wiring — we'll add them one at a time, each earning
- * its way in.
+ * Ticket detail view with inline status + priority edits.
  *
- * The reporter's captured browser metadata is shown in a collapsible
- * block; it's noisy but critical when reproducing a bug.
+ * Role-gated: owners and members see editable dropdowns, viewers see
+ * read-only chips. The backend enforces the same rule — the UI
+ * hiding the controls is convenience, not security.
+ *
+ * Optimistic update shape: flip the local value immediately, call the
+ * API, revert + surface an error if the call fails. A plain `<select>`
+ * is the widget here — it's keyboard-accessible by default, works
+ * thumb-first on mobile, and doesn't need a custom dropdown library.
+ *
+ * Notes / comments and assignment are deliberately out of scope; they
+ * earn their way in one at a time as the flow demands them (see the
+ * meeting analysis).
  */
 export function TicketDetailPage() {
   const { id } = useParams({ from: '/_authenticated/tickets/$id' });
   const { state, api } = useAuth();
   const [ticket, setTicket] = useState<AdminTicket | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mutError, setMutError] = useState<string | null>(null);
+  const [mutating, setMutating] = useState(false);
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
+
+  // Membership role for the active project — decides whether the
+  // edit controls render at all.
+  const role =
+    state.status === 'authenticated'
+      ? state.me.memberships.find((m) => m.projectKey === activeKey)?.role ?? 'viewer'
+      : 'viewer';
+  const canWrite = role === 'owner' || role === 'member';
 
   // There's no dedicated "get ticket" endpoint — we find it in the
   // project's list. Acceptable while the lists are small; when they
@@ -45,6 +63,25 @@ export function TicketDetailPage() {
       alive = false;
     };
   }, [activeKey, api, id]);
+
+  const applyPatch = async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
+    if (!activeKey || !ticket) return;
+    const prev = ticket;
+    setMutError(null);
+    setMutating(true);
+    // Optimistic swap.
+    setTicket({ ...ticket, ...patch });
+    try {
+      const next = await api.updateTicket(activeKey, ticket.id, patch);
+      setTicket(next);
+    } catch (err) {
+      // Roll back and surface the reason.
+      setTicket(prev);
+      setMutError(err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      setMutating(false);
+    }
+  };
 
   if (error) {
     return (
@@ -77,12 +114,35 @@ export function TicketDetailPage() {
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="text-xl font-semibold text-gray-900 break-words">{ticket.title}</h2>
-            <div className="mt-1 text-xs text-gray-500 flex flex-wrap gap-x-3">
+            <div className="mt-1 text-xs text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
               <span>{new Date(ticket.createdAt).toLocaleString()}</span>
-              <span>status: {ticket.status.replace('_', ' ')}</span>
-              <span>priority: {ticket.priority}</span>
               {ticket.kind === 'feature' && <span>{ticket.voteCount} votes</span>}
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {canWrite ? (
+                <StatusSelect
+                  value={ticket.status}
+                  disabled={mutating}
+                  onChange={(status) => void applyPatch({ status })}
+                />
+              ) : (
+                <ReadonlyChip label={`status: ${ticket.status.replace('_', ' ')}`} />
+              )}
+              {canWrite ? (
+                <PrioritySelect
+                  value={ticket.priority}
+                  disabled={mutating}
+                  onChange={(priority) => void applyPatch({ priority })}
+                />
+              ) : (
+                <ReadonlyChip label={`priority: ${ticket.priority}`} />
+              )}
+            </div>
+            {mutError && (
+              <p role="alert" className="mt-2 text-xs text-red-700">
+                {mutError}
+              </p>
+            )}
           </div>
         </div>
       </header>
@@ -151,6 +211,86 @@ export function TicketDetailPage() {
         </Section>
       )}
     </div>
+  );
+}
+
+const STATUS_OPTIONS: Array<{ value: TicketStatus; label: string }> = [
+  { value: 'open', label: 'Open' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'planned', label: 'Planned' },
+  { value: 'resolved', label: 'Resolved' },
+  { value: 'closed', label: 'Closed' },
+  { value: 'wont_fix', label: "Won't fix" },
+];
+
+const PRIORITY_OPTIONS: Array<{ value: TicketPriority; label: string }> = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'critical', label: 'Critical' },
+];
+
+function StatusSelect({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: TicketStatus;
+  disabled: boolean;
+  onChange: (v: TicketStatus) => void;
+}) {
+  return (
+    <label className="inline-flex items-center gap-2">
+      <span className="text-xs text-gray-500 uppercase tracking-wide">status</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as TicketStatus)}
+        disabled={disabled}
+        className="text-sm px-2 py-1 rounded-md border border-gray-300 bg-white min-h-[36px] disabled:opacity-60"
+      >
+        {STATUS_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function PrioritySelect({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: TicketPriority;
+  disabled: boolean;
+  onChange: (v: TicketPriority) => void;
+}) {
+  return (
+    <label className="inline-flex items-center gap-2">
+      <span className="text-xs text-gray-500 uppercase tracking-wide">priority</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as TicketPriority)}
+        disabled={disabled}
+        className="text-sm px-2 py-1 rounded-md border border-gray-300 bg-white min-h-[36px] disabled:opacity-60"
+      >
+        {PRIORITY_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ReadonlyChip({ label }: { label: string }) {
+  return (
+    <span className="text-xs text-gray-600 bg-gray-100 border border-gray-200 rounded px-2 py-1">
+      {label}
+    </span>
   );
 }
 
