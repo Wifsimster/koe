@@ -29,6 +29,13 @@
       "when": 1776433989473,
       "tag": "0003_dusty_saracen",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776437612846,
+      "tag": "0004_bumpy_magik",
+      "breakpoints": true
     }
   ]
 }

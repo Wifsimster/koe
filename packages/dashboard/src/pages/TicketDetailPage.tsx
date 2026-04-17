@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type { AdminTicket, ProjectMember, TicketEvent } from '../api/client';
+import type {
+  AdminTicket,
+  ProjectMember,
+  TicketComment,
+  TicketEvent,
+} from '../api/client';
 
 /**
  * Ticket detail view with inline status + priority edits.
@@ -26,6 +31,7 @@ export function TicketDetailPage() {
   const [ticket, setTicket] = useState<AdminTicket | null>(null);
   const [events, setEvents] = useState<TicketEvent[] | null>(null);
   const [members, setMembers] = useState<ProjectMember[] | null>(null);
+  const [comments, setComments] = useState<TicketComment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
@@ -78,9 +84,29 @@ export function TicketDetailPage() {
     }
   }, [activeKey, api, id]);
 
+  const loadComments = useCallback(async () => {
+    if (!activeKey) return;
+    try {
+      const rows = await api.listTicketComments(activeKey, id);
+      setComments(rows);
+    } catch (err) {
+      console.warn('[koe/dashboard] listTicketComments failed', err);
+    }
+  }, [activeKey, api, id]);
+
   useEffect(() => {
     void loadEvents();
-  }, [loadEvents]);
+    void loadComments();
+  }, [loadEvents, loadComments]);
+
+  const postComment = async (body: string) => {
+    if (!activeKey) return;
+    const created = await api.createTicketComment(activeKey, id, body);
+    // Prepend the new comment (list is newest-first) and refresh the
+    // audit trail so the `commented` event shows up in Activity.
+    setComments((prev) => (prev ? [created, ...prev] : [created]));
+    void loadEvents();
+  };
 
   // Members only need loading when the user can actually assign —
   // viewers never see the picker, so spare them the round-trip.
@@ -274,9 +300,103 @@ export function TicketDetailPage() {
         </Section>
       )}
 
+      <Section title="Comments">
+        <CommentsPanel
+          comments={comments}
+          canWrite={canWrite}
+          onSubmit={postComment}
+        />
+      </Section>
+
       <Section title="Activity">
         <ActivityList events={events} members={members} />
       </Section>
+    </div>
+  );
+}
+
+function CommentsPanel({
+  comments,
+  canWrite,
+  onSubmit,
+}: {
+  comments: TicketComment[] | null;
+  canWrite: boolean;
+  onSubmit: (body: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const body = draft.trim();
+    if (!body) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(body);
+      setDraft('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to post comment');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {canWrite && (
+        <form onSubmit={handleSubmit} className="space-y-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Leave a note for your teammates…"
+            rows={3}
+            maxLength={10_000}
+            className="w-full text-sm px-3 py-2 rounded-md border border-gray-300 bg-white focus:outline-none focus:border-indigo-500"
+            disabled={submitting}
+          />
+          <div className="flex items-center justify-between">
+            {error && (
+              <p role="alert" className="text-xs text-red-700 flex-1">
+                {error}
+              </p>
+            )}
+            <div className="ml-auto">
+              <button
+                type="submit"
+                disabled={submitting || draft.trim().length === 0}
+                className="min-h-[36px] px-3 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {submitting ? 'Posting…' : 'Post comment'}
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {comments === null ? (
+        <p className="text-sm text-gray-500">Loading…</p>
+      ) : comments.length === 0 ? (
+        <p className="text-sm text-gray-500">
+          No comments yet.{canWrite ? ' Be the first — internal notes stay off the reporter.' : ''}
+        </p>
+      ) : (
+        <ol className="space-y-3">
+          {comments.map((c) => (
+            <li key={c.id} className="text-sm text-gray-800 border border-gray-200 rounded-md p-3">
+              <div className="text-xs text-gray-500 mb-1 flex flex-wrap gap-x-2">
+                <span className="font-medium">
+                  {c.authorDisplayName ?? c.authorEmail ?? 'deleted user'}
+                </span>
+                <span>{new Date(c.createdAt).toLocaleString()}</span>
+              </div>
+              <p className="whitespace-pre-wrap">{c.body}</p>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
@@ -340,7 +460,8 @@ function describeEvent(ev: TicketEvent, members: ProjectMember[] | null): string
     return `assigned the ticket to ${target?.email ?? 'someone'}`;
   }
   if (ev.kind === 'commented') {
-    return 'left a comment';
+    const excerpt = readString(ev.payload.excerpt);
+    return excerpt === '?' ? 'left a comment' : `left a comment: "${excerpt}"`;
   }
   return `performed ${ev.kind}`;
 }

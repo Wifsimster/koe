@@ -342,6 +342,7 @@ export const adminTicketEvents = pgTable('admin_ticket_events', {
 export const adminUsersRelations = relations(adminUsers, ({ many }) => ({
   sessions: many(adminSessions),
   ticketEvents: many(adminTicketEvents),
+  ticketComments: many(adminTicketComments),
 }));
 
 export const adminSessionsRelations = relations(adminSessions, ({ one }) => ({
@@ -358,6 +359,46 @@ export const adminTicketEventsRelations = relations(adminTicketEvents, ({ one })
   }),
   actor: one(adminUsers, {
     fields: [adminTicketEvents.actorUserId],
+    references: [adminUsers.id],
+  }),
+}));
+
+/**
+ * Admin-side comments on tickets. Internal triage notes — not shown
+ * to the widget reporter, separate table from the widget-facing
+ * `messages` surface by design. This is the surface used by
+ * teammates coordinating on a ticket ("already spoke to the user",
+ * "pinged infra, waiting on deploy").
+ *
+ * `author_user_id` is `ON DELETE SET NULL` to preserve the comment
+ * history when a user leaves — same policy as the audit `actor`
+ * column. The comment body itself is the work product; attribution
+ * is observable via email when the user exists.
+ *
+ * No edit/delete endpoints today. We may add them, but "I wrote
+ * something, I want to take it back" is a different flow from
+ * triage, and locking the body down matches the audit-trail
+ * posture (events don't get rewritten either).
+ */
+export const adminTicketComments = pgTable('admin_ticket_comments', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ticketId: uuid('ticket_id')
+    .notNull()
+    .references(() => tickets.id, { onDelete: 'cascade' }),
+  authorUserId: uuid('author_user_id').references(() => adminUsers.id, {
+    onDelete: 'set null',
+  }),
+  body: text('body').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const adminTicketCommentsRelations = relations(adminTicketComments, ({ one }) => ({
+  ticket: one(tickets, {
+    fields: [adminTicketComments.ticketId],
+    references: [tickets.id],
+  }),
+  author: one(adminUsers, {
+    fields: [adminTicketComments.authorUserId],
     references: [adminUsers.id],
   }),
 }));

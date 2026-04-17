@@ -34,6 +34,16 @@ export interface TicketEvent {
   actorEmail: string | null;
 }
 
+export interface TicketComment {
+  id: string;
+  ticketId: string;
+  body: string;
+  createdAt: string;
+  authorUserId: string | null;
+  authorEmail: string | null;
+  authorDisplayName: string | null;
+}
+
 /**
  * Admin dashboard → `/v1/admin/*` HTTP client. Thin on purpose: the
  * surface is read-only today, mutations join when the triage UI needs
@@ -240,6 +250,24 @@ export class AdminApiClient {
   listProjectMembers(projectKey: string): Promise<ProjectMember[]> {
     return this.get<ProjectMember[]>(
       `/projects/${encodeURIComponent(projectKey)}/members`,
+    );
+  }
+
+  listTicketComments(projectKey: string, id: string): Promise<TicketComment[]> {
+    return this.get<TicketComment[]>(
+      `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}/comments`,
+    );
+  }
+
+  createTicketComment(
+    projectKey: string,
+    id: string,
+    body: string,
+  ): Promise<TicketComment> {
+    return this.send<TicketComment>(
+      'POST',
+      `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}/comments`,
+      { body },
     );
   }
 
