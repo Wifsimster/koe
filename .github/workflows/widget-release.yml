@@ -58,7 +58,12 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          registry-url: 'https://registry.npmjs.org'
+          # We deliberately do NOT set `registry-url` here. setup-node
+          # would inject a `~/.npmrc` with `_authToken=${NODE_AUTH_TOKEN}`
+          # that shadows whatever @semantic-release/npm writes and fails
+          # with 401 when NODE_AUTH_TOKEN is not in the env.
+          # @semantic-release/npm reads `NPM_TOKEN` directly and writes
+          # its own auth line, which is what we want.
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
