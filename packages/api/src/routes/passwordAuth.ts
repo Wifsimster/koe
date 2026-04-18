@@ -28,16 +28,16 @@ const loginSchema = z.object({
 });
 
 /**
- * Hashed form of a sentinel value, computed lazily at first use. When
- * ADMIN_PASSWORD_HASH is unset we still verify against this dummy so
- * the login endpoint's response time doesn't reveal whether the auth
- * surface is configured at all.
+ * Hashed form of a sentinel value, precomputed at module load so the
+ * login endpoint's response time doesn't reveal whether the email
+ * matched the admin. A lazy first-call compute would make the first
+ * non-admin-email request measurably slower than the admin-email path;
+ * warming the promise here makes both paths pay the same cost.
  */
-let dummyHashPromise: Promise<string> | null = null;
+const dummyHashPromise: Promise<string> = hashPassword(
+  'koe-login-dummy-' + Math.random().toString(36),
+);
 function getDummyHash(): Promise<string> {
-  if (!dummyHashPromise) {
-    dummyHashPromise = hashPassword('koe-login-dummy-' + Math.random().toString(36));
-  }
   return dummyHashPromise;
 }
 
