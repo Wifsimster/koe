@@ -4,6 +4,7 @@ import { useVisualViewport } from '../hooks/useVisualViewport';
 import { BugReportForm } from './forms/BugReportForm';
 import { FeatureRequestForm } from './forms/FeatureRequestForm';
 import { IntentPicker, type Intent } from './IntentPicker';
+import { BrowseList } from './BrowseList';
 
 export interface PanelProps {
   onClose: () => void;
@@ -26,8 +27,9 @@ export function Panel({ onClose }: PanelProps) {
   const { locale, config } = useKoe();
   const features = config.features ?? { bugs: true, features: true };
 
-  const initialIntent: Intent | null =
-    features.bugs === false && features.features !== false ? 'feature' : null;
+  // If exactly one intent is enabled we skip the picker and land directly
+  // on that screen — one less tap for a single-purpose deployment.
+  const initialIntent = soloEnabledIntent(features);
   const [screen, setScreen] = useState<Intent | null>(initialIntent);
 
   // Track visual viewport so the panel body follows the keyboard on
@@ -90,14 +92,24 @@ export function Panel({ onClose }: PanelProps) {
         {screen === null && <IntentPicker onPick={setScreen} />}
         {screen === 'bug' && <BugReportForm />}
         {screen === 'feature' && <FeatureRequestForm />}
+        {screen === 'vote' && <BrowseList />}
       </div>
     </div>
   );
 }
 
+function soloEnabledIntent(features: { bugs?: boolean; features?: boolean; vote?: boolean }): Intent | null {
+  const enabled: Intent[] = [];
+  if (features.bugs !== false) enabled.push('bug');
+  if (features.features !== false) enabled.push('feature');
+  if (features.vote !== false) enabled.push('vote');
+  return enabled.length === 1 ? enabled[0]! : null;
+}
+
 function headerTitle(screen: Intent | null, locale: ReturnType<typeof useKoe>['locale']): string {
   if (screen === 'bug') return locale.picker?.bug ?? 'Report a bug';
   if (screen === 'feature') return locale.picker?.feature ?? 'Suggest an idea';
+  if (screen === 'vote') return locale.browse?.title ?? 'Ideas';
   return locale.title;
 }
 
