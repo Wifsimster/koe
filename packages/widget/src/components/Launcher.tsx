@@ -13,7 +13,7 @@ export function Launcher({ open, onToggle }: LauncherProps) {
       aria-label={locale.launcherLabel}
       aria-expanded={open}
       onClick={onToggle}
-      className="koe-flex koe-items-center koe-justify-center koe-w-14 koe-h-14 koe-rounded-full koe-shadow-koe koe-bg-koe-accent hover:koe-bg-koe-accent-hover koe-text-white koe-transition-all"
+      className="koe-flex koe-items-center koe-justify-center koe-w-12 koe-h-12 koe-shadow-koe koe-bg-koe-text koe-text-koe-bg hover:koe-bg-koe-accent-hover koe-transition-colors"
     >
       {open ? <CloseIcon /> : <ChatIcon />}
     </button>

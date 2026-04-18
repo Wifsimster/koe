@@ -9,19 +9,24 @@ export default {
   },
   theme: {
     extend: {
+      fontFamily: {
+        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+      },
       colors: {
         koe: {
-          accent: 'var(--koe-accent, #4f46e5)',
-          'accent-hover': 'var(--koe-accent-hover, #4338ca)',
-          bg: 'var(--koe-bg, #ffffff)',
-          'bg-muted': 'var(--koe-bg-muted, #f9fafb)',
-          border: 'var(--koe-border, #e5e7eb)',
-          text: 'var(--koe-text, #111827)',
-          'text-muted': 'var(--koe-text-muted, #6b7280)',
+          accent: 'var(--koe-accent, #0a0a0a)',
+          'accent-hover': 'var(--koe-accent-hover, #262626)',
+          bg: 'var(--koe-bg)',
+          'bg-muted': 'var(--koe-bg-muted)',
+          border: 'var(--koe-border)',
+          text: 'var(--koe-text)',
+          'text-muted': 'var(--koe-text-muted)',
         },
       },
       boxShadow: {
-        koe: '0 10px 40px -10px rgba(0,0,0,0.25)',
+        // Subtle two-layer shadow — matches the editorial feel without
+        // the heavy drop the purple accent used to need for contrast.
+        koe: '0 1px 3px rgba(0,0,0,0.06), 0 10px 30px -10px rgba(0,0,0,0.2)',
       },
     },
   },

@@ -136,8 +136,8 @@ export function FeatureRequestForm() {
         </div>
       )}
 
-      <div className="koe-panel-form-footer koe-flex koe-justify-end koe-gap-2">
-        <Button type="submit" loading={submitting}>
+      <div className="koe-panel-form-footer">
+        <Button type="submit" loading={submitting} block>
           {locale.featureForm.submit}
         </Button>
       </div>

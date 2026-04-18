@@ -163,7 +163,7 @@ export function BugReportForm() {
       )}
 
       <FormFooter>
-        <Button type="submit" loading={submitting}>
+        <Button type="submit" loading={submitting} block>
           {locale.bugForm.submit}
         </Button>
       </FormFooter>
@@ -179,11 +179,7 @@ export function BugReportForm() {
  * as the keyboard pops.
  */
 function FormFooter({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="koe-panel-form-footer koe-flex koe-justify-end koe-gap-2">
-      {children}
-    </div>
-  );
+  return <div className="koe-panel-form-footer">{children}</div>;
 }
 
 function SuccessMessage({ message, onDismiss }: { message: string; onDismiss: () => void }) {

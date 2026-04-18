@@ -44,12 +44,11 @@ export function Panel({ onClose }: PanelProps) {
       aria-modal="true"
       aria-labelledby="koe-panel-title"
       className="koe-panel-shell koe-mb-3 koe-bg-koe-bg koe-text-koe-text koe-shadow-koe koe-border koe-border-koe-border"
-      style={{ borderRadius: 'var(--koe-radius, 12px)' }}
     >
       {/* Grab handle, only visible in bottom-sheet mode (CSS-controlled). */}
       <div aria-hidden="true" className="koe-panel-grab" />
 
-      <header className="koe-panel-header koe-p-4 koe-bg-koe-accent koe-text-white">
+      <header className="koe-panel-header koe-px-4 koe-py-3 koe-border-b koe-border-koe-border">
         <div className="koe-flex koe-items-start koe-justify-between koe-gap-2">
           <div className="koe-flex koe-items-center koe-gap-2 koe-min-w-0">
             {screen !== null && (
@@ -58,16 +57,21 @@ export function Panel({ onClose }: PanelProps) {
                 onClick={() => setScreen(null)}
                 aria-label={back}
                 // 44px hit target, visible chevron only.
-                className="koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-min-w-[44px] koe-text-white koe-opacity-90 hover:koe-opacity-100 koe-shrink-0"
+                className="koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-min-w-[44px] koe-text-koe-text-muted hover:koe-text-koe-text koe-shrink-0 -koe-ml-2"
               >
                 <BackIcon />
               </button>
             )}
             <div className="koe-min-w-0">
-              <h2 id="koe-panel-title" className="koe-text-base koe-font-semibold koe-m-0 koe-truncate">
+              <h2
+                id="koe-panel-title"
+                className="koe-m-0 koe-text-[10px] koe-tracking-[0.18em] koe-uppercase koe-text-koe-text-muted"
+              >
                 {headerTitle(screen, locale)}
               </h2>
-              <p className="koe-text-xs koe-opacity-90 koe-mt-1 koe-m-0">{locale.subtitle}</p>
+              <p className="koe-text-[13px] koe-text-koe-text koe-mt-1 koe-m-0 koe-truncate">
+                {locale.subtitle}
+              </p>
             </div>
           </div>
           <button
@@ -75,7 +79,7 @@ export function Panel({ onClose }: PanelProps) {
             onClick={onClose}
             aria-label="Close"
             // 44px hit target fixes the previous 24px ✕ fat-finger hazard.
-            className="koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-min-w-[44px] koe-text-white koe-opacity-80 hover:koe-opacity-100 koe-shrink-0"
+            className="koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-min-w-[44px] koe-text-koe-text-muted hover:koe-text-koe-text koe-shrink-0 -koe-mr-2"
           >
             <CloseIcon />
           </button>

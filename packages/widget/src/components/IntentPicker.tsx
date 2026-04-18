@@ -33,14 +33,15 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
   const showFeatures = features.features !== false;
 
   return (
-    <div className="koe-flex koe-flex-col koe-gap-2">
-      <p
-        id="koe-picker-prompt"
-        className="koe-text-sm koe-text-koe-text-muted koe-mb-1 koe-m-0"
-      >
+    <div className="koe-flex koe-flex-col koe-gap-3">
+      <p id="koe-picker-prompt" className="koe-label koe-m-0">
         {picker.prompt}
       </p>
-      <div role="group" aria-labelledby="koe-picker-prompt" className="koe-flex koe-flex-col koe-gap-2">
+      <div
+        role="group"
+        aria-labelledby="koe-picker-prompt"
+        className="koe-flex koe-flex-col koe-gap-2"
+      >
         {showBugs && (
           <IntentCard
             emoji="🐞"
@@ -77,17 +78,17 @@ function IntentCard({ emoji, title, hint, onClick }: IntentCardProps) {
       className={clsx(
         'koe-flex koe-items-center koe-gap-3 koe-w-full koe-text-left',
         'koe-min-h-[64px] koe-px-4 koe-py-3',
-        'koe-rounded-lg koe-border koe-border-koe-border koe-bg-koe-bg',
-        'hover:koe-border-koe-accent focus:koe-outline-none focus-visible:koe-border-koe-accent',
+        'koe-border koe-border-koe-border koe-bg-koe-bg',
+        'hover:koe-border-koe-text focus:koe-outline-none focus-visible:koe-border-koe-text',
         'koe-transition-colors',
       )}
     >
-      <span className="koe-text-2xl" aria-hidden="true">
+      <span className="koe-text-xl koe-leading-none" aria-hidden="true">
         {emoji}
       </span>
-      <span className="koe-flex koe-flex-col">
-        <span className="koe-text-sm koe-font-medium koe-text-koe-text">{title}</span>
-        <span className="koe-text-xs koe-text-koe-text-muted">{hint}</span>
+      <span className="koe-flex koe-flex-col koe-min-w-0">
+        <span className="koe-text-sm koe-font-medium koe-text-koe-text koe-truncate">{title}</span>
+        <span className="koe-text-[11px] koe-text-koe-text-muted koe-truncate">{hint}</span>
       </span>
     </button>
   );

@@ -6,13 +6,22 @@
  * Koe widget styles. All selectors live under `.koe-root` so the widget
  * stays isolated from the host application's global styles. The utility
  * classes themselves are prefixed `koe-` via tailwind.config.js.
+ *
+ * Visual language mirrors the @koe/dashboard admin: editorial mono type,
+ * hairline rules, square corners, neutral palette. No heavy primary
+ * accents — the theme API still accepts `accentColor` but only paints
+ * focus rings so host apps can tint without fighting the chrome.
  */
 .koe-root {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
-  font-size: 14px;
+  --koe-bg: #ffffff;
+  --koe-bg-muted: #f7f7f7;
+  --koe-border: #e5e5e5;
+  --koe-text: #0a0a0a;
+  --koe-text-muted: #737373;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
   line-height: 1.5;
-  color: var(--koe-text, #111827);
+  color: var(--koe-text);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -22,7 +31,13 @@
   box-sizing: border-box;
 }
 
-.koe-root button {
+/*
+ * Resets wrapped in :where() so the whole selector carries zero
+ * specificity — Tailwind utilities (class-only) win every time.
+ * Without this, ".koe-root button { color: inherit }" (class + tag)
+ * beats any "koe-text-*" utility applied to the button.
+ */
+:where(.koe-root button) {
   font-family: inherit;
   cursor: pointer;
   border: none;
@@ -31,14 +46,13 @@
   color: inherit;
 }
 
-.koe-root input,
-.koe-root textarea {
+:where(.koe-root input, .koe-root textarea) {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
 }
 
-.koe-root textarea {
+:where(.koe-root textarea) {
   resize: vertical;
 }
 
@@ -50,7 +64,6 @@
  * virtual keyboard can't occlude the submit button.
  */
 .koe-panel-shell {
-  /* Default (desktop) posture. */
   width: 360px;
   max-width: calc(100vw - 2rem);
   /* `dvh` follows iOS Safari's URL-bar collapse; `--koe-vvh` (written by
@@ -94,10 +107,20 @@
 .koe-panel-form-footer {
   position: sticky;
   bottom: 0;
-  background: var(--koe-bg, #ffffff);
-  padding-block: 8px;
+  background: var(--koe-bg);
+  border-top: 1px solid var(--koe-border);
+  padding-block: 12px;
   padding-inline: 0;
-  margin-top: 4px;
+  margin-top: 8px;
+}
+
+/* Small caps label — echoes the dashboard's uppercase tracking pattern. */
+.koe-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--koe-text-muted);
 }
 
 /* Bottom-sheet posture on narrow viewports. */
@@ -117,7 +140,6 @@
     width: 100%;
     max-width: 100%;
     max-height: min(85dvh, calc(var(--koe-vvh, 100vh) - 24px));
-    border-radius: 16px 16px 0 0 !important;
     /* Respect the iPhone home-indicator safe area so the submit button
      * isn't hidden under the swipe gesture. */
     padding-bottom: env(safe-area-inset-bottom);
@@ -125,13 +147,10 @@
 
   .koe-panel-grab {
     display: block;
-    width: 40px;
-    height: 4px;
+    width: 36px;
+    height: 3px;
     margin: 8px auto 4px;
-    border-radius: 2px;
-    background: var(--koe-border, #e5e7eb);
-    /* The handle is a visual affordance; an adjacent 44px tap zone is
-     * already provided by the close button in the header. */
+    background: var(--koe-border);
   }
 
   /* The launcher stays in its own spot — only the opened panel flips
@@ -144,18 +163,18 @@
 
 @media (prefers-color-scheme: dark) {
   .koe-root[data-mode='auto'] {
-    --koe-bg: #111827;
-    --koe-bg-muted: #1f2937;
-    --koe-border: #374151;
-    --koe-text: #f9fafb;
-    --koe-text-muted: #9ca3af;
+    --koe-bg: #0a0a0a;
+    --koe-bg-muted: #171717;
+    --koe-border: #262626;
+    --koe-text: #fafafa;
+    --koe-text-muted: #a3a3a3;
   }
 }
 
 .koe-root[data-mode='dark'] {
-  --koe-bg: #111827;
-  --koe-bg-muted: #1f2937;
-  --koe-border: #374151;
-  --koe-text: #f9fafb;
-  --koe-text-muted: #9ca3af;
+  --koe-bg: #0a0a0a;
+  --koe-bg-muted: #171717;
+  --koe-border: #262626;
+  --koe-text: #fafafa;
+  --koe-text-muted: #a3a3a3;
 }

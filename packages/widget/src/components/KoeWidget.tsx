@@ -40,7 +40,7 @@ export function KoeWidget(props: KoeWidgetProps) {
         style={themeVars(config.theme)}
       >
         {open && <Panel onClose={() => setOpen(false)} />}
-        <Launcher open={open} onToggle={() => setOpen((v) => !v)} />
+        {!open && <Launcher open={open} onToggle={() => setOpen((v) => !v)} />}
       </div>
     </KoeProvider>
   );
