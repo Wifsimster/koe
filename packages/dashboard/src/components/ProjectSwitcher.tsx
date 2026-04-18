@@ -15,18 +15,16 @@ export function ProjectSwitcher({ onChange }: { onChange?: () => void }) {
   const { state, setActiveProject } = useAuth();
   const navigate = useNavigate();
   if (state.status !== 'authenticated') return null;
-  const memberships = state.me.memberships;
+  const projects = state.projects;
   const active = state.activeProjectKey;
-  const activeMembership = memberships.find((m) => m.projectKey === active) ?? memberships[0];
+  const activeProject = projects.find((p) => p.key === active) ?? projects[0];
 
-  if (memberships.length === 0) {
-    // Reachable only if the router's empty-memberships redirect fails
-    // to fire for some reason — normal flow takes the user straight to
-    // /onboarding. Keep the message as a safety net that still offers
-    // a way out.
+  if (projects.length === 0) {
+    // Reachable only if the router's empty-projects redirect fails to
+    // fire — normal flow takes the user straight to /onboarding.
     return (
       <div className="rounded-none border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        No project memberships yet.{' '}
+        No projects yet.{' '}
         <Link to="/onboarding" className="underline">
           Create your first project
         </Link>
@@ -54,7 +52,7 @@ export function ProjectSwitcher({ onChange }: { onChange?: () => void }) {
                   Project
                 </span>
                 <span className="truncate text-sm">
-                  {activeMembership?.projectName ?? 'Pick a project'}
+                  {activeProject?.name ?? 'Pick a project'}
                 </span>
               </div>
               <ChevronsUpDown className="size-3.5 opacity-60" />
@@ -65,17 +63,17 @@ export function ProjectSwitcher({ onChange }: { onChange?: () => void }) {
               Your projects
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {memberships.map((m) => {
-              const isActive = m.projectKey === active;
+            {projects.map((p) => {
+              const isActive = p.key === active;
               return (
                 <DropdownMenuItem
-                  key={m.projectKey}
+                  key={p.key}
                   onSelect={() => {
-                    setActiveProject(m.projectKey);
+                    setActiveProject(p.key);
                     onChange?.();
                   }}
                 >
-                  <span className="flex-1 truncate">{m.projectName}</span>
+                  <span className="flex-1 truncate">{p.name}</span>
                   {isActive && <Check className="size-3.5" />}
                 </DropdownMenuItem>
               );

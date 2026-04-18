@@ -13,18 +13,10 @@ import { InboxPage } from './pages/InboxPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
 import { BatchesPage } from './pages/BatchesPage';
 import { OnboardingPage } from './pages/OnboardingPage';
-import { MembersPage } from './pages/MembersPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { AppShell } from './components/AppShell';
 import { useAuth, type AuthContextValue } from './auth/AuthContext';
-import type { AssigneeFilter } from './api/client';
 
-/**
- * Router context: the auth state plugged into `createRouter` in
- * main.tsx. Loaders read from here to decide whether to `redirect`
- * to `/login`, so the guard is centralized at the route level (not
- * duplicated in every page component).
- */
 export interface RouterContext {
   auth: AuthContextValue;
 }
@@ -42,14 +34,12 @@ const loginRoute = createRoute({
 const authenticatedLayoutRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: '_authenticated',
-  // Bounce to /login unless we have an authenticated state. We
-  // don't await anything — the state is already resolved by the
-  // AuthProvider at mount; loaders see its current snapshot.
+  // Bounce to /login unless we have an authenticated state. State is
+  // already resolved by the AuthProvider on mount; loaders see the
+  // current snapshot.
   //
-  // Empty-memberships gate: a newly-created admin user (first login,
-  // or one removed from every project) lands on /onboarding instead
-  // of the inbox. The guard only fires for authenticated callers —
-  // unauthenticated still wins the redirect to /login.
+  // Empty-projects gate: a fresh deploy with no projects yet lands
+  // on /onboarding instead of the inbox.
   beforeLoad: ({ context, location }) => {
     if (context.auth.state.status === 'unauthenticated') {
       throw redirect({
@@ -59,7 +49,7 @@ const authenticatedLayoutRoute = createRoute({
     }
     if (
       context.auth.state.status === 'authenticated' &&
-      context.auth.state.me.memberships.length === 0 &&
+      context.auth.state.projects.length === 0 &&
       location.pathname !== '/onboarding'
     ) {
       throw redirect({ to: '/onboarding' });
@@ -68,21 +58,9 @@ const authenticatedLayoutRoute = createRoute({
   component: AuthenticatedLayout,
 });
 
-/**
- * Search-param contract for the inbox. Survives refresh, is
- * shareable, and lets the back/forward buttons work on filter
- * changes. All fields default to the "show everything interesting"
- * starting view so a clean URL (`/`) is never empty.
- *
- * Unknown values coerce to defaults rather than throwing — a
- * clipboard'd URL from an older version still opens.
- */
 export interface InboxSearch {
   kind: TicketKind | 'all';
   status: TicketStatus | 'all';
-  assignee: AssigneeFilter | 'all';
-  /** Free-text query matched server-side against title, description,
-   *  reporter email, and assignee email. Empty string ≡ unset. */
   q: string;
   sort: 'recent' | 'votes';
 }
@@ -97,9 +75,7 @@ const VALID_STATUSES: ReadonlySet<string> = new Set([
   'closed',
   'wont_fix',
 ]);
-const ASSIGNEE_SHORTCUTS: ReadonlySet<string> = new Set(['all', 'me', 'unassigned']);
 const VALID_SORTS: ReadonlySet<string> = new Set(['recent', 'votes']);
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseKind(raw: unknown): InboxSearch['kind'] {
   return typeof raw === 'string' && VALID_KINDS.has(raw)
@@ -110,11 +86,6 @@ function parseStatus(raw: unknown): InboxSearch['status'] {
   return typeof raw === 'string' && VALID_STATUSES.has(raw)
     ? (raw as InboxSearch['status'])
     : 'open';
-}
-function parseAssignee(raw: unknown): InboxSearch['assignee'] {
-  if (typeof raw !== 'string') return 'all';
-  if (ASSIGNEE_SHORTCUTS.has(raw)) return raw as InboxSearch['assignee'];
-  return UUID_RE.test(raw) ? raw : 'all';
 }
 function parseSort(raw: unknown): InboxSearch['sort'] {
   return typeof raw === 'string' && VALID_SORTS.has(raw)
@@ -129,7 +100,6 @@ export const inboxRoute = createRoute({
   validateSearch: (raw: Record<string, unknown>): InboxSearch => ({
     kind: parseKind(raw.kind),
     status: parseStatus(raw.status),
-    assignee: parseAssignee(raw.assignee),
     q: typeof raw.q === 'string' ? raw.q.slice(0, 200) : '',
     sort: parseSort(raw.sort),
   }),
@@ -153,12 +123,6 @@ const onboardingRoute = createRoute({
   component: OnboardingPage,
 });
 
-const membersRoute = createRoute({
-  getParentRoute: () => authenticatedLayoutRoute,
-  path: '/projects/$key/members',
-  component: MembersPage,
-});
-
 const overviewRoute = createRoute({
   getParentRoute: () => authenticatedLayoutRoute,
   path: '/overview',
@@ -172,14 +136,11 @@ export const routeTree = rootRoute.addChildren([
     ticketDetailRoute,
     batchesRoute,
     onboardingRoute,
-    membersRoute,
     overviewRoute,
   ]),
 ]);
 
 function RootGate() {
-  // Top-level outlet. The auth gate lives on the `_authenticated`
-  // parent route, so this layer just renders whatever matched.
   return <Outlet />;
 }
 
@@ -188,42 +149,27 @@ function AuthenticatedLayout() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  // beforeLoad only runs on navigation, so a mid-session transition
-  // from `loading` → `unauthenticated` (e.g. /me returns 401 after
-  // the route already matched) would otherwise strand the user on a
-  // guarded route. Mirror the beforeLoad redirect here.
-  //
-  // The `pathname !== '/login'` guard matters: TanStack Router updates
-  // `useRouterState` during the navigation transition, and this
-  // component stays mounted briefly across it. Without the guard, the
-  // effect re-fires once `pathname` flips to `/login` and navigates
-  // again with `redirectTo=/login` — the loop the user lands in.
+  // Mid-session 401 → kick to /login. beforeLoad only runs on
+  // navigation, so this mirror catches the case where /me starts
+  // returning 401 after the route already matched.
   useEffect(() => {
     if (state.status === 'unauthenticated' && pathname !== '/login') {
       void navigate({ to: '/login', search: { redirectTo: pathname } });
     }
   }, [state.status, navigate, pathname]);
 
-  // Mirror the beforeLoad empty-memberships redirect for mid-session
-  // transitions (refreshMe after removing yourself from the last
-  // project) — same "loading → state flips → stranded" race as the
-  // unauthenticated redirect.
+  // Mid-session empty-projects → /onboarding (mirrors beforeLoad).
   useEffect(() => {
     if (
       state.status === 'authenticated' &&
-      state.me.memberships.length === 0 &&
+      state.projects.length === 0 &&
       pathname !== '/onboarding'
     ) {
       void navigate({ to: '/onboarding' });
     }
   }, [state, navigate, pathname]);
 
-  // Multi-project landing. Fires once per auth transition (login or
-  // initial cookie-carried session), not on every navigation — so a
-  // user who clicks "Inbox" in the sidebar from `/overview` still
-  // lands on `/`, even though they have ≥ 2 memberships. A ref gates
-  // the effect so it's inert after the first fire, and resets when
-  // auth drops so logging back in re-triggers the landing logic.
+  // Multi-project landing — fires once per auth transition.
   const didLandingRef = useRef(false);
   useEffect(() => {
     if (state.status === 'unauthenticated') {
@@ -233,15 +179,12 @@ function AuthenticatedLayout() {
     if (
       state.status === 'authenticated' &&
       !didLandingRef.current &&
-      state.me.memberships.length >= 2 &&
+      state.projects.length >= 2 &&
       pathname === '/'
     ) {
       didLandingRef.current = true;
       void navigate({ to: '/overview' });
     } else if (state.status === 'authenticated') {
-      // Arm the ref even when we don't redirect (e.g. single-project
-      // user, or landed on a non-root path) so a later navigation to
-      // `/` via the sidebar isn't auto-bounced.
       didLandingRef.current = true;
     }
   }, [state, pathname, navigate]);
@@ -249,8 +192,6 @@ function AuthenticatedLayout() {
   if (state.status !== 'authenticated') {
     return <LoadingScreen />;
   }
-  // Onboarding has its own full-page layout (no sidebar, no header).
-  // Rendering it inside AppShell would double-nest the page chrome.
   if (pathname === '/onboarding') {
     return <Outlet />;
   }
@@ -261,11 +202,6 @@ function AuthenticatedLayout() {
   );
 }
 
-/**
- * Resolves the header copy from the current pathname. A proper
- * implementation would hang it off each route's meta, but two
- * pages is too few to pay for the abstraction.
- */
 function RouteHeader(): ReactNode {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (pathname === '/overview') {
@@ -276,9 +212,6 @@ function RouteHeader(): ReactNode {
   }
   if (pathname.startsWith('/tickets/')) {
     return <Crumb label="Ticket" caption="Triage, route, respond." />;
-  }
-  if (/^\/projects\/[^/]+\/members$/.test(pathname)) {
-    return <Crumb label="Members" caption="Invite admins, change roles, revoke access." />;
   }
   return <Crumb label="Inbox" caption="Triage bugs and ideas as they arrive." />;
 }
@@ -292,15 +225,9 @@ function Crumb({ label, caption }: { label: string; caption: string }) {
   );
 }
 
-/**
- * Post-login default search. The router requires the full shape on
- * `<Link to="/">` because `validateSearch` is non-optional; exported
- * so callers don't repeat the defaults.
- */
 export const INBOX_DEFAULT_SEARCH: InboxSearch = {
   kind: 'all',
   status: 'open',
-  assignee: 'all',
   q: '',
   sort: 'recent',
 };

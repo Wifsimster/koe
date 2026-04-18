@@ -1,83 +1,40 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { and, count, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
 import { ok, fail } from '../lib/response';
-import { hashPassword } from '../lib/password';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
-import {
-  requireAdminSession,
-  requireProjectMember,
-  requireProjectOwner,
-  requireProjectWriter,
-  type AdminContext,
-  type ProjectMembership,
-} from '../middleware/adminAuth';
+import { requireAdmin, type AdminContext } from '../middleware/adminAuth';
+import type { MiddlewareHandler } from 'hono';
 
 /**
- * JSON admin API, mounted at `/v1/admin/*`. Kept distinct from the SPA
- * serving at `/admin/*` — different concerns, different middleware
- * chain, different CORS posture.
- *
- * CORS: static allowlist from `ADMIN_DASHBOARD_ORIGIN` (single origin).
- * Widget CORS is dynamic per-project because it runs on arbitrary host
- * sites; the admin dashboard has exactly one origin.
+ * JSON admin API, mounted at `/v1/admin/*`. Single-admin product —
+ * one founder managing multiple of their own SaaS projects. There
+ * are no roles, no members, no per-project access control: if the
+ * caller proved they're the admin, every project is theirs.
  */
-export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
-  const api = new Hono<{ Variables: AdminContext & { project: ProjectMembership } }>();
-
-  // Only attach CORS when an origin is configured. In same-origin
-  // deployments (dashboard served by the same Hono app at `/admin/*`),
-  // the browser never fires preflights against this API.
-  if (opts.dashboardOrigin) {
-    api.use(
-      '*',
-      cors({
-        origin: opts.dashboardOrigin,
-        credentials: false,
-        allowHeaders: ['Content-Type', 'Authorization'],
-        allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-      }),
-    );
-  }
+export function createAdminApiRoutes() {
+  const api = new Hono<{ Variables: AdminContext & { project: { id: string; key: string } } }>();
 
   // All admin routes require a valid session.
-  api.use('*', requireAdminSession);
+  api.use('*', requireAdmin);
 
   /**
-   * Identity of the current session + memberships. This is the
-   * "bootstrap" call the dashboard makes on load to know who the user
-   * is and which projects to show in the switcher.
+   * Identity probe. Returns the configured admin email — the dashboard
+   * calls this on load to confirm the cookie is still valid.
    */
   api.get('/me', async (c) => {
-    const user = c.get('user');
-
-    const memberships = await db
-      .select({
-        projectId: schema.projects.id,
-        projectKey: schema.projects.key,
-        projectName: schema.projects.name,
-        role: schema.projectMembers.role,
-      })
-      .from(schema.projectMembers)
-      .innerJoin(schema.projects, eq(schema.projects.id, schema.projectMembers.projectId))
-      .where(eq(schema.projectMembers.userId, user.id));
-
-    return ok(c, { user, memberships });
+    const admin = c.get('admin');
+    return ok(c, { email: admin.email });
   });
 
   /**
-   * Projects the current user is a member of. Returns heartbeat info
-   * (last_ping_at, last_ping_origin) so the dashboard empty state can
-   * show "Last ping from yoursite.com, 3 min ago" — which is how an
-   * operator tells whether their <script> tag is wired at all.
+   * All projects. Single-admin product, so there's no membership
+   * filter — the founder sees every project they've created.
    */
   api.get('/projects', async (c) => {
-    const user = c.get('user');
-
     const rows = await db
       .select({
         id: schema.projects.id,
@@ -89,26 +46,23 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         lastPingAt: schema.projects.lastPingAt,
         lastPingOrigin: schema.projects.lastPingOrigin,
         createdAt: schema.projects.createdAt,
-        role: schema.projectMembers.role,
       })
-      .from(schema.projectMembers)
-      .innerJoin(schema.projects, eq(schema.projects.id, schema.projectMembers.projectId))
-      .where(eq(schema.projectMembers.userId, user.id))
+      .from(schema.projects)
       .orderBy(desc(schema.projects.createdAt));
 
     return ok(c, rows);
   });
 
   /**
-   * Cross-project KPI landing for admins who belong to more than one
-   * project. Left-joining `ticket_votes` multiplies voted-ticket rows,
-   * so ticket counters use `count(DISTINCT tickets.id) FILTER (…)` to
-   * collapse duplicates; the vote counter itself wants the row count
-   * and so skips DISTINCT.
+   * Cross-project KPI landing. One row per project, counters are
+   * pre-aggregated in SQL so the dashboard pays a single round-trip.
+   *
+   * Left-joining `ticket_votes` multiplies voted-ticket rows, so ticket
+   * counters use `count(DISTINCT tickets.id) FILTER (…)` to collapse
+   * duplicates; the vote counter itself wants the row count and so
+   * skips DISTINCT.
    */
   api.get('/overview', async (c) => {
-    const user = c.get('user');
-
     const rows = await db
       .select({
         id: schema.projects.id,
@@ -119,11 +73,9 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         openFeatures: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.kind} = 'feature' and ${schema.tickets.status} = 'open')::int`,
         openFeatureVotes: sql<number>`count(${schema.ticketVotes.ticketId}) filter (where ${schema.tickets.kind} = 'feature' and ${schema.tickets.status} = 'open')::int`,
       })
-      .from(schema.projectMembers)
-      .innerJoin(schema.projects, eq(schema.projects.id, schema.projectMembers.projectId))
+      .from(schema.projects)
       .leftJoin(schema.tickets, eq(schema.tickets.projectId, schema.projects.id))
       .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
-      .where(eq(schema.projectMembers.userId, user.id))
       .groupBy(schema.projects.id)
       .orderBy(schema.projects.name);
 
@@ -142,16 +94,6 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     });
   });
 
-  /**
-   * Create a new project + grant the calling user `owner` membership in
-   * one transaction. Replaces the `bootstrap` CLI for operators who'd
-   * rather click a button than shell into a container.
-   *
-   * Returns the plaintext `identitySecret` once — the caller must copy
-   * it now; the stored value is encrypted and we never decrypt it back
-   * to a response body. Same contract the CLI honours, same security
-   * posture (the secret never lives in a logged request).
-   */
   const createProjectSchema = z.object({
     name: z.string().trim().min(1).max(120),
     key: z
@@ -164,9 +106,11 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     requireIdentityVerification: z.boolean().optional(),
   });
 
+  /**
+   * Create a project. Returns the plaintext `identitySecret` once —
+   * the server encrypts it at rest and never returns it again.
+   */
   api.post('/projects', async (c) => {
-    const user = c.get('user');
-
     const body = await c.req.json().catch(() => null);
     const parsed = createProjectSchema.safeParse(body);
     if (!parsed.success) {
@@ -176,8 +120,6 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     }
     const { name, key, allowedOrigins, requireIdentityVerification } = parsed.data;
 
-    // Uniqueness is enforced by a DB constraint too, but checking first
-    // lets us return a clean 409 instead of surfacing a driver error.
     const [existing] = await db
       .select({ id: schema.projects.id })
       .from(schema.projects)
@@ -190,51 +132,57 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     const identitySecret = randomBytes(32).toString('hex');
     const storedSecret = getSecretStoreFromEnv().encrypt(identitySecret);
 
-    // Project + owner membership in one tx. If either fails neither
-    // lands — a dangling project with no owner would be an orphaned
-    // row that no one in the dashboard can see.
-    const created = await db.transaction(async (tx) => {
-      const [row] = await tx
-        .insert(schema.projects)
-        .values({
-          name,
-          key,
-          allowedOrigins: allowedOrigins ?? [],
-          identitySecret: storedSecret,
-          requireIdentityVerification: requireIdentityVerification ?? false,
-        })
-        .returning();
-      const project = firstOrThrow(row ? [row] : [], 'project after insert');
-
-      await tx.insert(schema.projectMembers).values({
-        projectId: project.id,
-        userId: user.id,
-        role: 'owner',
-      });
-
-      return project;
-    });
+    const [created] = await db
+      .insert(schema.projects)
+      .values({
+        name,
+        key,
+        allowedOrigins: allowedOrigins ?? [],
+        identitySecret: storedSecret,
+        requireIdentityVerification: requireIdentityVerification ?? false,
+      })
+      .returning();
+    const project = firstOrThrow(created ? [created] : [], 'project after insert');
 
     return ok(
       c,
       {
         project: {
-          id: created.id,
-          key: created.key,
-          name: created.name,
-          accentColor: created.accentColor,
-          allowedOrigins: created.allowedOrigins,
-          requireIdentityVerification: created.requireIdentityVerification,
-          lastPingAt: created.lastPingAt,
-          lastPingOrigin: created.lastPingOrigin,
-          createdAt: created.createdAt,
-          role: 'owner' as const,
+          id: project.id,
+          key: project.key,
+          name: project.name,
+          accentColor: project.accentColor,
+          allowedOrigins: project.allowedOrigins,
+          requireIdentityVerification: project.requireIdentityVerification,
+          lastPingAt: project.lastPingAt,
+          lastPingOrigin: project.lastPingOrigin,
+          createdAt: project.createdAt,
         },
         identitySecret,
       },
       201,
     );
   });
+
+  /**
+   * Resolve `:key` → project id + key. Replaces the team-era
+   * `requireProjectMember`: there's no membership to check, only
+   * existence. Returns 404 on miss.
+   */
+  const resolveProject: MiddlewareHandler<{
+    Variables: AdminContext & { project: { id: string; key: string } };
+  }> = async (c, next) => {
+    const key = c.req.param('key');
+    if (!key) return fail(c, 'not_found', 'Project not found', 404);
+    const [row] = await db
+      .select({ id: schema.projects.id, key: schema.projects.key })
+      .from(schema.projects)
+      .where(eq(schema.projects.key, key))
+      .limit(1);
+    if (!row) return fail(c, 'not_found', 'Project not found', 404);
+    c.set('project', row);
+    await next();
+  };
 
   const ticketStatusSchema = z.enum([
     'open',
@@ -252,29 +200,15 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     priority: ticketPrioritySchema.optional(),
     verified: z.enum(['true', 'false']).optional(),
     search: z.string().trim().min(1).max(200).optional(),
-    /**
-     * Assignee filter. `me` resolves to the calling user's id,
-     * `unassigned` matches tickets with no assignee, and a bare uuid
-     * matches a specific project member. Kept as a string union rather
-     * than a uuid-only field so the `me` / `unassigned` shortcuts stay
-     * shareable in URLs.
-     */
-    assignee: z
-      .union([z.literal('me'), z.literal('unassigned'), z.string().uuid()])
-      .optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
     cursor: z.string().max(200).optional(),
     sort: z.enum(['recent', 'votes']).default('recent').optional(),
   });
 
   /**
-   * Cursor format: `${isoCreatedAt}|${ticketId}`, base64url-encoded so
-   * clients treat it as opaque. We sort by `(created_at desc, id desc)`,
-   * so the "give me rows strictly older than the cursor" predicate is
-   * `(created_at, id) < (cursorCreatedAt, cursorId)` — which expands to
-   * either a strictly older timestamp, or the same timestamp with a
-   * strictly smaller id. This avoids the offset-based pagination trap
-   * where late inserts shift page boundaries.
+   * Cursor format: `${isoCreatedAt}|${ticketId}`, base64url-encoded.
+   * Sort is `(created_at desc, id desc)` — the cursor predicate is
+   * `(created_at, id) < (cursorCreatedAt, cursorId)`.
    */
   function encodeCursor(createdAt: Date, id: string): string {
     return Buffer.from(`${createdAt.toISOString()}|${id}`, 'utf-8').toString('base64url');
@@ -292,26 +226,14 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     }
   }
 
-  /**
-   * Tickets for a project the admin is a member of. `requireProjectMember`
-   * returns 404 for non-members (not 403) so this endpoint does not
-   * confirm project existence to unauthorized callers.
-   *
-   * Filters are composable: `kind`, `status`, `priority`, `verified`,
-   * plus a free-text `search` over title and description. Pagination
-   * is cursor-based — the response carries `pageInfo.nextCursor` when
-   * more rows exist.
-   */
-  api.get('/projects/:key/tickets', requireProjectMember, async (c) => {
+  api.get('/projects/:key/tickets', resolveProject, async (c) => {
     const project = c.get('project');
-    const user = c.get('user');
     const queryResult = ticketQuerySchema.safeParse({
       kind: c.req.query('kind'),
       status: c.req.query('status'),
       priority: c.req.query('priority'),
       verified: c.req.query('verified'),
       search: c.req.query('search'),
-      assignee: c.req.query('assignee'),
       limit: c.req.query('limit'),
       cursor: c.req.query('cursor'),
       sort: c.req.query('sort'),
@@ -321,7 +243,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         issues: queryResult.error.issues,
       });
     }
-    const { kind, status, priority, verified, search, assignee, limit, cursor, sort } =
+    const { kind, status, priority, verified, search, limit, cursor, sort } =
       queryResult.data;
 
     // Features tab fits on one page at operator scale; skip the extra
@@ -335,37 +257,13 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
     if (status) conditions.push(eq(schema.tickets.status, status));
     if (priority) conditions.push(eq(schema.tickets.priority, priority));
     if (verified) conditions.push(eq(schema.tickets.reporterVerified, verified === 'true'));
-    if (assignee === 'unassigned') {
-      conditions.push(isNull(schema.tickets.assignedToUserId));
-    } else if (assignee === 'me') {
-      conditions.push(eq(schema.tickets.assignedToUserId, user.id));
-    } else if (assignee) {
-      // Bare uuid — specific user. No project-membership check here:
-      // the filter is a read hint, and the result set is already
-      // scoped to this project via `projectId`. An outsider's uuid
-      // just returns zero rows.
-      conditions.push(eq(schema.tickets.assignedToUserId, assignee));
-    }
     if (search) {
-      // Escape the ILIKE wildcards so a search for `50%` matches
-      // literally. We pick `\\` as the escape char because Postgres
-      // accepts the default backslash without an explicit ESCAPE clause.
       const needle = `%${search.replace(/[%_\\]/g, (ch) => `\\${ch}`)}%`;
-      // Includes the assignee's email via a correlated subquery —
-      // the list query already left-joins `admin_users` for
-      // display, but referencing the join alias inside `or()` here
-      // would make drizzle duplicate the join. A one-line scalar
-      // subquery is cheap enough at this volume.
       conditions.push(
         or(
           sql`${schema.tickets.title} ilike ${needle}`,
           sql`${schema.tickets.description} ilike ${needle}`,
           sql`${schema.tickets.reporterEmail} ilike ${needle}`,
-          sql`exists (
-            select 1 from ${schema.adminUsers} au
-            where au.id = ${schema.tickets.assignedToUserId}
-              and au.email ilike ${needle}
-          )`,
         )!,
       );
     }
@@ -385,29 +283,17 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       );
     }
 
-    // Vote count is a left-join aggregate — same pattern as the widget
-    // roadmap read; no denormalized counter to drift out of sync.
     const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
 
-    // Over-fetch by one so we can tell there's a next page without a
-    // second count query. Left-join `admin_users` via the nullable
-    // `assigned_to_user_id` so the inbox card can render the
-    // assignee's email without a second round-trip per ticket.
     const rows = await db
       .select({
         ticket: schema.tickets,
         voteCount: voteCountExpr,
-        assignedToEmail: schema.adminUsers.email,
-        assignedToDisplayName: schema.adminUsers.displayName,
       })
       .from(schema.tickets)
       .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
-      .leftJoin(
-        schema.adminUsers,
-        eq(schema.adminUsers.id, schema.tickets.assignedToUserId),
-      )
       .where(and(...conditions))
-      .groupBy(schema.tickets.id, schema.adminUsers.id)
+      .groupBy(schema.tickets.id)
       .orderBy(
         ...(sort === 'votes'
           ? [desc(voteCountExpr), desc(schema.tickets.createdAt), desc(schema.tickets.id)]
@@ -422,988 +308,324 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       hasMore && last ? encodeCursor(last.ticket.createdAt, last.ticket.id) : null;
 
     return ok(c, {
-      items: page.map((r) => ({
-        ...r.ticket,
-        voteCount: r.voteCount,
-        assignedToEmail: r.assignedToEmail,
-        assignedToDisplayName: r.assignedToDisplayName,
-      })),
+      items: page.map((r) => ({ ...r.ticket, voteCount: r.voteCount })),
       pageInfo: { nextCursor, hasMore, limit },
     });
   });
 
   /**
-   * Triage mutation. Owners and members can change status/priority;
-   * viewers get the same 404 as a non-member.
-   *
-   * Partial update: both fields optional, at least one required. We
-   * don't expose other columns on purpose — things like
+   * Triage mutation. Partial update: both fields optional, at least one
+   * required. We don't expose other columns on purpose — things like
    * `reporter_email` and `metadata` come from the submitter and must
-   * not be rewritable here. Notes / comments are a separate surface.
+   * not be rewritable here. Notes are a separate surface.
    */
   const patchTicketSchema = z
     .object({
-      status: z
-        .enum(['open', 'in_progress', 'planned', 'resolved', 'closed', 'wont_fix'])
-        .optional(),
-      priority: z.enum(['low', 'medium', 'high', 'critical']).optional(),
-      // `null` explicitly unassigns; a uuid sets. `undefined` (absent
-      // key) means "no change" — different from null, which is the
-      // canonical clear-the-field shape.
-      assignedToUserId: z.string().uuid().nullable().optional(),
+      status: ticketStatusSchema.optional(),
+      priority: ticketPrioritySchema.optional(),
     })
-    .refine(
-      (v) =>
-        v.status !== undefined ||
-        v.priority !== undefined ||
-        v.assignedToUserId !== undefined,
-      {
-        message:
-          'At least one of status, priority, or assignedToUserId is required',
-      },
-    );
+    .refine((v) => v.status !== undefined || v.priority !== undefined, {
+      message: 'At least one of status or priority is required',
+    });
 
-  api.patch(
-    '/projects/:key/tickets/:id',
-    requireProjectMember,
-    requireProjectWriter,
-    async (c) => {
-      const project = c.get('project');
-      const user = c.get('user');
-      const id = c.req.param('id');
+  api.patch('/projects/:key/tickets/:id', resolveProject, async (c) => {
+    const project = c.get('project');
+    const id = c.req.param('id');
 
-      const body = await c.req.json().catch(() => null);
-      const parsed = patchTicketSchema.safeParse(body);
-      if (!parsed.success) {
-        return fail(c, 'validation_failed', 'Invalid patch payload', 422, {
-          issues: parsed.error.issues,
-        });
-      }
-
-      // UPDATE + audit events in one transaction: if either step
-      // fails, neither half lands. The SELECT-for-before is inside
-      // the same tx so a concurrent mutation can't shift the ground
-      // between our read and our write.
-      const result = await db.transaction(async (tx) => {
-        const [before] = await tx
-          .select()
-          .from(schema.tickets)
-          .where(
-            and(
-              eq(schema.tickets.id, id),
-              eq(schema.tickets.projectId, project.id),
-            ),
-          )
-          .limit(1);
-        if (!before) return { notFound: true } as const;
-
-        // Assignee must be a member of *this* project. An admin user
-        // unknown to the project can't own its tickets — both because
-        // they couldn't act on it and because leaking membership via
-        // assignment would be an info-disclosure bug. `null` bypasses
-        // the check because unassigning is always allowed.
-        if (
-          parsed.data.assignedToUserId !== undefined &&
-          parsed.data.assignedToUserId !== null
-        ) {
-          const [assignee] = await tx
-            .select({ userId: schema.projectMembers.userId })
-            .from(schema.projectMembers)
-            .where(
-              and(
-                eq(schema.projectMembers.projectId, project.id),
-                eq(schema.projectMembers.userId, parsed.data.assignedToUserId),
-              ),
-            )
-            .limit(1);
-          if (!assignee) {
-            return { notFound: false, invalidAssignee: true } as const;
-          }
-        }
-
-        const updated = await tx
-          .update(schema.tickets)
-          .set({
-            ...(parsed.data.status ? { status: parsed.data.status } : {}),
-            ...(parsed.data.priority ? { priority: parsed.data.priority } : {}),
-            ...(parsed.data.assignedToUserId !== undefined
-              ? { assignedToUserId: parsed.data.assignedToUserId }
-              : {}),
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(schema.tickets.id, id),
-              eq(schema.tickets.projectId, project.id),
-            ),
-          )
-          .returning();
-        const after = firstOrThrow(updated, 'ticket after update');
-
-        // Emit one event per field that actually changed. A PATCH
-        // that sets status to the same value is silent in the log —
-        // we don't pollute the audit trail with no-ops.
-        const events: Array<{
-          ticketId: string;
-          actorUserId: string;
-          kind: 'status_changed' | 'priority_changed' | 'assigned';
-          payload: Record<string, unknown>;
-        }> = [];
-        if (parsed.data.status && parsed.data.status !== before.status) {
-          events.push({
-            ticketId: id,
-            actorUserId: user.id,
-            kind: 'status_changed',
-            payload: { from: before.status, to: parsed.data.status },
-          });
-        }
-        if (parsed.data.priority && parsed.data.priority !== before.priority) {
-          events.push({
-            ticketId: id,
-            actorUserId: user.id,
-            kind: 'priority_changed',
-            payload: { from: before.priority, to: parsed.data.priority },
-          });
-        }
-        if (
-          parsed.data.assignedToUserId !== undefined &&
-          parsed.data.assignedToUserId !== before.assignedToUserId
-        ) {
-          events.push({
-            ticketId: id,
-            actorUserId: user.id,
-            kind: 'assigned',
-            payload: {
-              fromUserId: before.assignedToUserId,
-              toUserId: parsed.data.assignedToUserId,
-            },
-          });
-        }
-        if (events.length > 0) {
-          await tx.insert(schema.adminTicketEvents).values(events);
-        }
-
-        return { notFound: false, after } as const;
+    const body = await c.req.json().catch(() => null);
+    const parsed = patchTicketSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(c, 'validation_failed', 'Invalid patch payload', 422, {
+        issues: parsed.error.issues,
       });
+    }
 
-      if (result.notFound) {
-        return fail(c, 'not_found', 'Ticket not found', 404);
-      }
-      if ('invalidAssignee' in result && result.invalidAssignee) {
-        return fail(
-          c,
-          'validation_failed',
-          'assignedToUserId must refer to a member of this project',
-          422,
-        );
-      }
-
-      // Re-read with the aggregate vote count + the assignee's
-      // email so the dashboard gets the same shape it receives
-      // from the list endpoint.
-      const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
-      const [withVotes] = await db
-        .select({
-          ticket: schema.tickets,
-          voteCount: voteCountExpr,
-          assignedToEmail: schema.adminUsers.email,
-          assignedToDisplayName: schema.adminUsers.displayName,
-        })
-        .from(schema.tickets)
-        .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
-        .leftJoin(
-          schema.adminUsers,
-          eq(schema.adminUsers.id, schema.tickets.assignedToUserId),
-        )
-        .where(eq(schema.tickets.id, id))
-        .groupBy(schema.tickets.id, schema.adminUsers.id);
-
-      const row = firstOrThrow(withVotes ? [withVotes] : []);
-      return ok(c, {
-        ...row.ticket,
-        voteCount: row.voteCount,
-        assignedToEmail: row.assignedToEmail,
-        assignedToDisplayName: row.assignedToDisplayName,
-      });
-    },
-  );
-
-  /**
-   * Audit trail for a ticket. Read-only and available to every member
-   * of the project (including viewers) — the history is the first
-   * thing an operator asks for when triaging "why is this open again?".
-   *
-   * Joined with `admin_users` so the dashboard can render the actor's
-   * email without a second round trip. Deleted users come back as
-   * `actorEmail: null` (the FK is `ON DELETE SET NULL`).
-   */
-  api.get(
-    '/projects/:key/tickets/:id/events',
-    requireProjectMember,
-    async (c) => {
-      const project = c.get('project');
-      const id = c.req.param('id');
-
-      // Confirm the ticket belongs to this project before exposing
-      // its audit log — same IDOR protection as the mutation path.
-      const [ticket] = await db
-        .select({ id: schema.tickets.id })
+    const result = await db.transaction(async (tx) => {
+      const [before] = await tx
+        .select()
         .from(schema.tickets)
         .where(
-          and(
-            eq(schema.tickets.id, id),
-            eq(schema.tickets.projectId, project.id),
-          ),
+          and(eq(schema.tickets.id, id), eq(schema.tickets.projectId, project.id)),
         )
         .limit(1);
-      if (!ticket) {
-        return fail(c, 'not_found', 'Ticket not found', 404);
+      if (!before) return { notFound: true } as const;
+
+      const updated = await tx
+        .update(schema.tickets)
+        .set({
+          ...(parsed.data.status ? { status: parsed.data.status } : {}),
+          ...(parsed.data.priority ? { priority: parsed.data.priority } : {}),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(schema.tickets.id, id), eq(schema.tickets.projectId, project.id)),
+        )
+        .returning();
+      const after = firstOrThrow(updated, 'ticket after update');
+
+      const events: Array<{
+        ticketId: string;
+        kind: 'status_changed' | 'priority_changed';
+        payload: Record<string, unknown>;
+      }> = [];
+      if (parsed.data.status && parsed.data.status !== before.status) {
+        events.push({
+          ticketId: id,
+          kind: 'status_changed',
+          payload: { from: before.status, to: parsed.data.status },
+        });
+      }
+      if (parsed.data.priority && parsed.data.priority !== before.priority) {
+        events.push({
+          ticketId: id,
+          kind: 'priority_changed',
+          payload: { from: before.priority, to: parsed.data.priority },
+        });
+      }
+      if (events.length > 0) {
+        await tx.insert(schema.adminTicketEvents).values(events);
       }
 
-      const rows = await db
-        .select({
-          id: schema.adminTicketEvents.id,
-          ticketId: schema.adminTicketEvents.ticketId,
-          kind: schema.adminTicketEvents.kind,
-          payload: schema.adminTicketEvents.payload,
-          createdAt: schema.adminTicketEvents.createdAt,
-          actorUserId: schema.adminTicketEvents.actorUserId,
-          actorEmail: schema.adminUsers.email,
-          batchId: schema.adminTicketEvents.batchId,
-        })
-        .from(schema.adminTicketEvents)
-        .leftJoin(
-          schema.adminUsers,
-          eq(schema.adminUsers.id, schema.adminTicketEvents.actorUserId),
-        )
-        .where(eq(schema.adminTicketEvents.ticketId, id))
-        .orderBy(desc(schema.adminTicketEvents.createdAt))
-        .limit(200);
+      return { notFound: false, after } as const;
+    });
 
-      return ok(c, rows);
-    },
-  );
+    if (result.notFound) {
+      return fail(c, 'not_found', 'Ticket not found', 404);
+    }
 
-  /**
-   * Members of a project, for the assignment picker. Joined with
-   * `admin_users` so the dashboard gets email + displayName in one
-   * round-trip. Available to every member (viewer included) — knowing
-   * who's on the project is a read operation, not a privileged one.
-   */
-  api.get(
-    '/projects/:key/members',
-    requireProjectMember,
-    async (c) => {
-      const project = c.get('project');
-      const rows = await db
-        .select({
-          userId: schema.adminUsers.id,
-          email: schema.adminUsers.email,
-          displayName: schema.adminUsers.displayName,
-          role: schema.projectMembers.role,
-        })
-        .from(schema.projectMembers)
-        .innerJoin(
-          schema.adminUsers,
-          eq(schema.adminUsers.id, schema.projectMembers.userId),
-        )
-        .where(eq(schema.projectMembers.projectId, project.id))
-        .orderBy(schema.adminUsers.email);
+    const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
+    const [withVotes] = await db
+      .select({ ticket: schema.tickets, voteCount: voteCountExpr })
+      .from(schema.tickets)
+      .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
+      .where(eq(schema.tickets.id, id))
+      .groupBy(schema.tickets.id);
 
-      return ok(c, rows);
-    },
-  );
-
-  /**
-   * Invite an admin to a project. Owner-only.
-   *
-   * Two flows collapsed into one endpoint:
-   *   1. User already exists in `admin_users` (OIDC-provisioned or
-   *      CLI-seeded) → just create the `project_members` row.
-   *   2. User doesn't exist → create `admin_users` with a provided
-   *      initial password (argon2id-hashed). Mirrors the `admin-user`
-   *      CLI behaviour so a dashboard-invited user can log in in
-   *      `ADMIN_AUTH_MODE=password` without a CLI roundtrip.
-   *
-   * In OIDC mode, `initialPassword` is irrelevant (the hash is never
-   * consulted); the endpoint accepts it but callers generally omit it.
-   */
-  const inviteMemberSchema = z.object({
-    email: z.string().trim().toLowerCase().email().max(254),
-    role: z.enum(['owner', 'member', 'viewer']),
-    displayName: z.string().trim().min(1).max(120).optional(),
-    initialPassword: z.string().min(12).max(200).optional(),
+    const row = firstOrThrow(withVotes ? [withVotes] : []);
+    return ok(c, { ...row.ticket, voteCount: row.voteCount });
   });
 
-  api.post(
-    '/projects/:key/members',
-    requireProjectMember,
-    requireProjectOwner,
-    async (c) => {
-      const project = c.get('project');
+  /** Audit trail for a ticket. Read-only. */
+  api.get('/projects/:key/tickets/:id/events', resolveProject, async (c) => {
+    const project = c.get('project');
+    const id = c.req.param('id');
 
-      const body = await c.req.json().catch(() => null);
-      const parsed = inviteMemberSchema.safeParse(body);
-      if (!parsed.success) {
-        return fail(c, 'validation_failed', 'Invalid invite payload', 422, {
-          issues: parsed.error.issues,
-        });
-      }
-      const { email, role, displayName, initialPassword } = parsed.data;
+    const [ticket] = await db
+      .select({ id: schema.tickets.id })
+      .from(schema.tickets)
+      .where(and(eq(schema.tickets.id, id), eq(schema.tickets.projectId, project.id)))
+      .limit(1);
+    if (!ticket) return fail(c, 'not_found', 'Ticket not found', 404);
 
-      // Provision the user lazily if missing. Hash outside the tx —
-      // argon2id is CPU-bound (~100ms) and holding a db connection
-      // across it would starve the pool under any real load.
-      const [existingUser] = await db
-        .select({
-          id: schema.adminUsers.id,
-          email: schema.adminUsers.email,
-          displayName: schema.adminUsers.displayName,
-        })
-        .from(schema.adminUsers)
-        .where(eq(schema.adminUsers.email, email))
-        .limit(1);
+    const rows = await db
+      .select({
+        id: schema.adminTicketEvents.id,
+        ticketId: schema.adminTicketEvents.ticketId,
+        kind: schema.adminTicketEvents.kind,
+        payload: schema.adminTicketEvents.payload,
+        createdAt: schema.adminTicketEvents.createdAt,
+        batchId: schema.adminTicketEvents.batchId,
+      })
+      .from(schema.adminTicketEvents)
+      .where(eq(schema.adminTicketEvents.ticketId, id))
+      .orderBy(desc(schema.adminTicketEvents.createdAt))
+      .limit(200);
 
-      let passwordHash: string | null = null;
-      if (!existingUser) {
-        if (!initialPassword) {
-          return fail(
-            c,
-            'validation_failed',
-            'No admin user with that email. Pass initialPassword (≥12 chars) to provision them.',
-            422,
-          );
-        }
-        passwordHash = await hashPassword(initialPassword);
-      }
-
-      const outcome = await db.transaction(async (tx) => {
-        let userId: string;
-        let userDisplayName: string | null;
-        if (existingUser) {
-          userId = existingUser.id;
-          userDisplayName = existingUser.displayName;
-        } else {
-          const [created] = await tx
-            .insert(schema.adminUsers)
-            .values({
-              email,
-              displayName: displayName ?? null,
-              passwordHash,
-            })
-            .returning({ id: schema.adminUsers.id, displayName: schema.adminUsers.displayName });
-          if (!created) throw new Error('failed to insert admin user');
-          userId = created.id;
-          userDisplayName = created.displayName;
-        }
-
-        // Reject duplicate membership with a clean 409 instead of
-        // letting the composite-PK violation bubble.
-        const [already] = await tx
-          .select({ userId: schema.projectMembers.userId })
-          .from(schema.projectMembers)
-          .where(
-            and(
-              eq(schema.projectMembers.projectId, project.id),
-              eq(schema.projectMembers.userId, userId),
-            ),
-          )
-          .limit(1);
-        if (already) {
-          return { kind: 'conflict' } as const;
-        }
-
-        await tx.insert(schema.projectMembers).values({
-          projectId: project.id,
-          userId,
-          role,
-        });
-
-        return {
-          kind: 'created',
-          userId,
-          email,
-          displayName: userDisplayName,
-          role,
-        } as const;
-      });
-
-      if (outcome.kind === 'conflict') {
-        return fail(c, 'conflict', 'User is already a member of this project', 409);
-      }
-
-      return ok(
-        c,
-        {
-          userId: outcome.userId,
-          email: outcome.email,
-          displayName: outcome.displayName,
-          role: outcome.role,
-        },
-        201,
-      );
-    },
-  );
-
-  /**
-   * Change a member's role. Owner-only.
-   *
-   * Guard: refuses to demote the last owner of the project. A project
-   * with zero owners is unrecoverable via dashboard — only CLI access
-   * gets you back in. Returning a clean 409 here prevents operators
-   * painting themselves into that corner.
-   */
-  const patchMemberSchema = z.object({
-    role: z.enum(['owner', 'member', 'viewer']),
+    return ok(c, rows);
   });
 
-  api.patch(
-    '/projects/:key/members/:userId',
-    requireProjectMember,
-    requireProjectOwner,
-    async (c) => {
-      const project = c.get('project');
-      const targetUserId = c.req.param('userId');
+  /** Triage notes on a ticket. */
+  api.get('/projects/:key/tickets/:id/comments', resolveProject, async (c) => {
+    const project = c.get('project');
+    const id = c.req.param('id');
 
-      const body = await c.req.json().catch(() => null);
-      const parsed = patchMemberSchema.safeParse(body);
-      if (!parsed.success) {
-        return fail(c, 'validation_failed', 'Invalid patch payload', 422, {
-          issues: parsed.error.issues,
-        });
-      }
-      const { role } = parsed.data;
+    const [ticket] = await db
+      .select({ id: schema.tickets.id })
+      .from(schema.tickets)
+      .where(and(eq(schema.tickets.id, id), eq(schema.tickets.projectId, project.id)))
+      .limit(1);
+    if (!ticket) return fail(c, 'not_found', 'Ticket not found', 404);
 
-      const outcome = await db.transaction(async (tx) => {
-        const [current] = await tx
-          .select({
-            userId: schema.projectMembers.userId,
-            role: schema.projectMembers.role,
-          })
-          .from(schema.projectMembers)
-          .where(
-            and(
-              eq(schema.projectMembers.projectId, project.id),
-              eq(schema.projectMembers.userId, targetUserId),
-            ),
-          )
-          .limit(1);
-        if (!current) return { kind: 'not_found' } as const;
+    const rows = await db
+      .select({
+        id: schema.adminTicketComments.id,
+        ticketId: schema.adminTicketComments.ticketId,
+        body: schema.adminTicketComments.body,
+        createdAt: schema.adminTicketComments.createdAt,
+      })
+      .from(schema.adminTicketComments)
+      .where(eq(schema.adminTicketComments.ticketId, id))
+      .orderBy(desc(schema.adminTicketComments.createdAt))
+      .limit(200);
 
-        // No-op — nothing to do, nothing to audit.
-        if (current.role === role) return { kind: 'noop' } as const;
-
-        if (current.role === 'owner' && role !== 'owner') {
-          const ownerCountRows = await tx
-            .select({ c: count() })
-            .from(schema.projectMembers)
-            .where(
-              and(
-                eq(schema.projectMembers.projectId, project.id),
-                eq(schema.projectMembers.role, 'owner'),
-              ),
-            );
-          const ownerCount = ownerCountRows[0]?.c ?? 0;
-          if (ownerCount <= 1) {
-            return { kind: 'last_owner' } as const;
-          }
-        }
-
-        await tx
-          .update(schema.projectMembers)
-          .set({ role })
-          .where(
-            and(
-              eq(schema.projectMembers.projectId, project.id),
-              eq(schema.projectMembers.userId, targetUserId),
-            ),
-          );
-
-        return { kind: 'updated' } as const;
-      });
-
-      if (outcome.kind === 'not_found') {
-        return fail(c, 'not_found', 'Member not found', 404);
-      }
-      if (outcome.kind === 'last_owner') {
-        return fail(
-          c,
-          'conflict',
-          'Cannot demote the last owner. Promote another member first.',
-          409,
-        );
-      }
-
-      // Re-read with the joined admin_users row for the response shape
-      // parity with the list endpoint.
-      const [row] = await db
-        .select({
-          userId: schema.adminUsers.id,
-          email: schema.adminUsers.email,
-          displayName: schema.adminUsers.displayName,
-          role: schema.projectMembers.role,
-        })
-        .from(schema.projectMembers)
-        .innerJoin(
-          schema.adminUsers,
-          eq(schema.adminUsers.id, schema.projectMembers.userId),
-        )
-        .where(
-          and(
-            eq(schema.projectMembers.projectId, project.id),
-            eq(schema.projectMembers.userId, targetUserId),
-          ),
-        )
-        .limit(1);
-      return ok(c, firstOrThrow(row ? [row] : []));
-    },
-  );
-
-  /**
-   * Remove a member. Owner-only. Mirrors the last-owner guard from
-   * PATCH — can't delete the last owner either.
-   *
-   * Note: deleting your own row is allowed as long as you aren't the
-   * last owner. The session keeps working (a session isn't scoped to a
-   * project), but the next /me call loses this membership from the
-   * dashboard view — intentional and matches "I removed myself".
-   */
-  api.delete(
-    '/projects/:key/members/:userId',
-    requireProjectMember,
-    requireProjectOwner,
-    async (c) => {
-      const project = c.get('project');
-      const targetUserId = c.req.param('userId');
-
-      const outcome = await db.transaction(async (tx) => {
-        const [current] = await tx
-          .select({ role: schema.projectMembers.role })
-          .from(schema.projectMembers)
-          .where(
-            and(
-              eq(schema.projectMembers.projectId, project.id),
-              eq(schema.projectMembers.userId, targetUserId),
-            ),
-          )
-          .limit(1);
-        if (!current) return { kind: 'not_found' } as const;
-
-        if (current.role === 'owner') {
-          const ownerCountRows = await tx
-            .select({ c: count() })
-            .from(schema.projectMembers)
-            .where(
-              and(
-                eq(schema.projectMembers.projectId, project.id),
-                eq(schema.projectMembers.role, 'owner'),
-              ),
-            );
-          const ownerCount = ownerCountRows[0]?.c ?? 0;
-          if (ownerCount <= 1) {
-            return { kind: 'last_owner' } as const;
-          }
-        }
-
-        await tx
-          .delete(schema.projectMembers)
-          .where(
-            and(
-              eq(schema.projectMembers.projectId, project.id),
-              eq(schema.projectMembers.userId, targetUserId),
-            ),
-          );
-
-        return { kind: 'deleted' } as const;
-      });
-
-      if (outcome.kind === 'not_found') {
-        return fail(c, 'not_found', 'Member not found', 404);
-      }
-      if (outcome.kind === 'last_owner') {
-        return fail(
-          c,
-          'conflict',
-          'Cannot remove the last owner. Promote another member first.',
-          409,
-        );
-      }
-      return ok(c, { ok: true });
-    },
-  );
-
-  /**
-   * Ticket comments — internal triage notes shared among admin
-   * members. Separate from the widget-facing `messages` surface
-   * (which is the reporter chat, not built today). Read is open to
-   * every project member; write is writer-gated.
-   *
-   * Writing a comment also emits a `commented` event in the same
-   * transaction so the Activity feed stays the single source of
-   * truth for "what has happened to this ticket".
-   */
-  api.get(
-    '/projects/:key/tickets/:id/comments',
-    requireProjectMember,
-    async (c) => {
-      const project = c.get('project');
-      const id = c.req.param('id');
-
-      // IDOR guard — same pattern as the events endpoint.
-      const [ticket] = await db
-        .select({ id: schema.tickets.id })
-        .from(schema.tickets)
-        .where(
-          and(
-            eq(schema.tickets.id, id),
-            eq(schema.tickets.projectId, project.id),
-          ),
-        )
-        .limit(1);
-      if (!ticket) {
-        return fail(c, 'not_found', 'Ticket not found', 404);
-      }
-
-      const rows = await db
-        .select({
-          id: schema.adminTicketComments.id,
-          ticketId: schema.adminTicketComments.ticketId,
-          body: schema.adminTicketComments.body,
-          createdAt: schema.adminTicketComments.createdAt,
-          authorUserId: schema.adminTicketComments.authorUserId,
-          authorEmail: schema.adminUsers.email,
-          authorDisplayName: schema.adminUsers.displayName,
-        })
-        .from(schema.adminTicketComments)
-        .leftJoin(
-          schema.adminUsers,
-          eq(schema.adminUsers.id, schema.adminTicketComments.authorUserId),
-        )
-        .where(eq(schema.adminTicketComments.ticketId, id))
-        .orderBy(desc(schema.adminTicketComments.createdAt))
-        .limit(200);
-
-      return ok(c, rows);
-    },
-  );
+    return ok(c, rows);
+  });
 
   const createCommentSchema = z.object({
     body: z.string().trim().min(1).max(10_000),
   });
 
-  api.post(
-    '/projects/:key/tickets/:id/comments',
-    requireProjectMember,
-    requireProjectWriter,
-    async (c) => {
-      const project = c.get('project');
-      const user = c.get('user');
-      const id = c.req.param('id');
+  api.post('/projects/:key/tickets/:id/comments', resolveProject, async (c) => {
+    const project = c.get('project');
+    const id = c.req.param('id');
 
-      const body = await c.req.json().catch(() => null);
-      const parsed = createCommentSchema.safeParse(body);
-      if (!parsed.success) {
-        return fail(c, 'validation_failed', 'Invalid comment payload', 422, {
-          issues: parsed.error.issues,
-        });
-      }
+    const body = await c.req.json().catch(() => null);
+    const parsed = createCommentSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(c, 'validation_failed', 'Invalid comment payload', 422, {
+        issues: parsed.error.issues,
+      });
+    }
 
-      // Comment + audit event in one transaction. If the event
-      // insert fails the comment doesn't land either — the feed
-      // can't diverge from reality.
-      const created = await db.transaction(async (tx) => {
-        // Confirm the ticket belongs to this project before
-        // creating a comment under it.
-        const [ticket] = await tx
-          .select({ id: schema.tickets.id })
-          .from(schema.tickets)
-          .where(
-            and(
-              eq(schema.tickets.id, id),
-              eq(schema.tickets.projectId, project.id),
-            ),
-          )
-          .limit(1);
-        if (!ticket) return { notFound: true } as const;
+    const created = await db.transaction(async (tx) => {
+      const [ticket] = await tx
+        .select({ id: schema.tickets.id })
+        .from(schema.tickets)
+        .where(and(eq(schema.tickets.id, id), eq(schema.tickets.projectId, project.id)))
+        .limit(1);
+      if (!ticket) return { notFound: true } as const;
 
-        const [row] = await tx
-          .insert(schema.adminTicketComments)
-          .values({
-            ticketId: id,
-            authorUserId: user.id,
-            body: parsed.data.body,
-          })
-          .returning();
-        const comment = firstOrThrow(row ? [row] : [], 'comment after insert');
+      const [row] = await tx
+        .insert(schema.adminTicketComments)
+        .values({ ticketId: id, body: parsed.data.body })
+        .returning();
+      const comment = firstOrThrow(row ? [row] : [], 'comment after insert');
 
-        // Payload carries the comment id + a short excerpt so the
-        // audit trail is readable without a second fetch. The full
-        // body lives in `admin_ticket_comments` itself.
-        const excerpt = comment.body.slice(0, 200);
-        await tx.insert(schema.adminTicketEvents).values({
-          ticketId: id,
-          actorUserId: user.id,
-          kind: 'commented',
-          payload: { commentId: comment.id, excerpt },
-        });
-
-        return { notFound: false, comment } as const;
+      const excerpt = comment.body.slice(0, 200);
+      await tx.insert(schema.adminTicketEvents).values({
+        ticketId: id,
+        kind: 'commented',
+        payload: { commentId: comment.id, excerpt },
       });
 
-      if (created.notFound) {
-        return fail(c, 'not_found', 'Ticket not found', 404);
-      }
-      return ok(
-        c,
-        {
-          ...created.comment,
-          authorEmail: user.email,
-          authorDisplayName: user.displayName,
-        },
-        201,
-      );
-    },
-  );
-
-  /**
-   * Bulk mutation — apply the same patch to up to 100 tickets in one
-   * call. Sibling of the single-ticket PATCH, not a replacement: the
-   * single form keeps its audit + response shape, this one optimises
-   * the "close these 20 duplicates" flow without making the UI walk a
-   * for-loop of requests.
-   *
-   * Semantics:
-   *   - Writer-gated, same as the single PATCH.
-   *   - All ids are scoped to the caller's project via the same
-   *     `(id, project_id)` WHERE the single form uses. Ids that
-   *     don't match are reported as `failed` with `reason: 'not_found'`.
-   *   - Assignee membership is validated once up front (the patch is
-   *     the same for every id); if it's bad we fail the whole batch
-   *     with a 422 — the caller never gets a partial write for that
-   *     case.
-   *   - Audit events are emitted per actually-changed field per
-   *     ticket, same shape as the single PATCH. A noop-for-this-row
-   *     ticket is silent.
-   *   - One transaction for the whole batch. Either every row lands
-   *     or none do.
-   */
-  const bulkPatchSchema = z
-    .object({
-      ids: z.array(z.string().uuid()).min(1).max(100),
-      patch: z
-        .object({
-          status: ticketStatusSchema.optional(),
-          priority: ticketPrioritySchema.optional(),
-          assignedToUserId: z.string().uuid().nullable().optional(),
-        })
-        .refine(
-          (v) =>
-            v.status !== undefined ||
-            v.priority !== undefined ||
-            v.assignedToUserId !== undefined,
-          {
-            message:
-              'At least one of status, priority, or assignedToUserId is required',
-          },
-        ),
+      return { notFound: false, comment } as const;
     });
 
-  api.post(
-    '/projects/:key/tickets/bulk',
-    requireProjectMember,
-    requireProjectWriter,
-    async (c) => {
-      const project = c.get('project');
-      const user = c.get('user');
-
-      const body = await c.req.json().catch(() => null);
-      const parsed = bulkPatchSchema.safeParse(body);
-      if (!parsed.success) {
-        return fail(c, 'validation_failed', 'Invalid bulk payload', 422, {
-          issues: parsed.error.issues,
-        });
-      }
-      const { ids, patch } = parsed.data;
-
-      type Failure = { id: string; reason: 'not_found' };
-      const result = await db.transaction(async (tx) => {
-        // Validate the assignee once. The same patch applies to every
-        // id, so checking per-row would be wasted round-trips.
-        if (patch.assignedToUserId !== undefined && patch.assignedToUserId !== null) {
-          const [assignee] = await tx
-            .select({ userId: schema.projectMembers.userId })
-            .from(schema.projectMembers)
-            .where(
-              and(
-                eq(schema.projectMembers.projectId, project.id),
-                eq(schema.projectMembers.userId, patch.assignedToUserId),
-              ),
-            )
-            .limit(1);
-          if (!assignee) {
-            return { invalidAssignee: true } as const;
-          }
-        }
-
-        // Fetch the before-state for every id that actually belongs
-        // to this project. Ids that aren't in the result set = not
-        // ours, and land in `failed` with a uniform reason.
-        const before = await tx
-          .select()
-          .from(schema.tickets)
-          .where(
-            and(
-              eq(schema.tickets.projectId, project.id),
-              inArray(schema.tickets.id, ids),
-            ),
-          );
-        const beforeById = new Map(before.map((t) => [t.id, t]));
-        const failed: Failure[] = ids
-          .filter((id) => !beforeById.has(id))
-          .map((id) => ({ id, reason: 'not_found' }));
-
-        if (before.length === 0) {
-          return { invalidAssignee: false, updatedCount: 0, failed } as const;
-        }
-
-        // A single UPDATE with an `IN (…)` WHERE. Drizzle batches
-        // values + where, Postgres executes one statement.
-        const updated = await tx
-          .update(schema.tickets)
-          .set({
-            ...(patch.status ? { status: patch.status } : {}),
-            ...(patch.priority ? { priority: patch.priority } : {}),
-            ...(patch.assignedToUserId !== undefined
-              ? { assignedToUserId: patch.assignedToUserId }
-              : {}),
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(schema.tickets.projectId, project.id),
-              inArray(
-                schema.tickets.id,
-                before.map((t) => t.id),
-              ),
-            ),
-          )
-          .returning({ id: schema.tickets.id });
-
-        // Correlate every event emitted from this call with the same
-        // `batchId` — lets the dashboard offer "undo this whole bulk
-        // action" as a single button later. The id is purely
-        // informational; it's never used as a FK.
-        const batchId = crypto.randomUUID();
-
-        // One audit event per actually-changed field per ticket.
-        // Same shape as the single PATCH — the Activity feed can't
-        // tell whether a change came from bulk or not, which is
-        // intentional: the log is about what happened, not how.
-        const events: Array<{
-          ticketId: string;
-          actorUserId: string;
-          kind: 'status_changed' | 'priority_changed' | 'assigned';
-          payload: Record<string, unknown>;
-          batchId: string;
-        }> = [];
-        for (const row of before) {
-          if (patch.status && patch.status !== row.status) {
-            events.push({
-              ticketId: row.id,
-              actorUserId: user.id,
-              kind: 'status_changed',
-              payload: { from: row.status, to: patch.status },
-              batchId,
-            });
-          }
-          if (patch.priority && patch.priority !== row.priority) {
-            events.push({
-              ticketId: row.id,
-              actorUserId: user.id,
-              kind: 'priority_changed',
-              payload: { from: row.priority, to: patch.priority },
-              batchId,
-            });
-          }
-          if (
-            patch.assignedToUserId !== undefined &&
-            patch.assignedToUserId !== row.assignedToUserId
-          ) {
-            events.push({
-              ticketId: row.id,
-              actorUserId: user.id,
-              kind: 'assigned',
-              payload: {
-                fromUserId: row.assignedToUserId,
-                toUserId: patch.assignedToUserId,
-              },
-              batchId,
-            });
-          }
-        }
-        if (events.length > 0) {
-          await tx.insert(schema.adminTicketEvents).values(events);
-        }
-
-        return {
-          invalidAssignee: false,
-          updatedCount: updated.length,
-          failed,
-          batchId: events.length > 0 ? batchId : null,
-        } as const;
-      });
-
-      if ('invalidAssignee' in result && result.invalidAssignee) {
-        return fail(
-          c,
-          'validation_failed',
-          'assignedToUserId must refer to a member of this project',
-          422,
-        );
-      }
-
-      return ok(c, {
-        updated: result.updatedCount,
-        failed: result.failed,
-        batchId: 'batchId' in result ? result.batchId : null,
-      });
-    },
-  );
+    if (created.notFound) return fail(c, 'not_found', 'Ticket not found', 404);
+    return ok(c, created.comment, 201);
+  });
 
   /**
-   * Revert a single audit event. "Take this ticket back to the
-   * `from` value stored on this event, and log the delta as a new
-   * event." Works for `status_changed`, `priority_changed`, and
-   * `assigned`; `commented` is ignored because deleting a comment is
-   * a different flow that may arrive later.
-   *
-   * Semantics:
-   *   - The revert is always against the *current* ticket state.
-   *     If the ticket moved since the event, we still rewind to the
-   *     event's `from`, but the new audit entry honestly describes
-   *     the delta that actually landed (from current → from).
-   *   - A no-op (current already equals the target) returns 200
-   *     without emitting a new event. Keeps the audit trail clean.
-   *   - Same writer gate as the mutations. Viewers can see the
-   *     button-less Activity entry; the button only renders client-
-   *     side when the role permits.
-   *   - One transaction, same pattern as PATCH.
+   * Bulk PATCH — apply the same status/priority change to up to 100
+   * tickets at once. Same audit shape as the single PATCH; events
+   * share a `batchId` so the dashboard can offer "undo this batch".
+   */
+  const bulkPatchSchema = z.object({
+    ids: z.array(z.string().uuid()).min(1).max(100),
+    patch: z
+      .object({
+        status: ticketStatusSchema.optional(),
+        priority: ticketPrioritySchema.optional(),
+      })
+      .refine((v) => v.status !== undefined || v.priority !== undefined, {
+        message: 'At least one of status or priority is required',
+      }),
+  });
+
+  api.post('/projects/:key/tickets/bulk', resolveProject, async (c) => {
+    const project = c.get('project');
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = bulkPatchSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(c, 'validation_failed', 'Invalid bulk payload', 422, {
+        issues: parsed.error.issues,
+      });
+    }
+    const { ids, patch } = parsed.data;
+
+    type Failure = { id: string; reason: 'not_found' };
+    const result = await db.transaction(async (tx) => {
+      const before = await tx
+        .select()
+        .from(schema.tickets)
+        .where(
+          and(eq(schema.tickets.projectId, project.id), inArray(schema.tickets.id, ids)),
+        );
+      const beforeById = new Map(before.map((t) => [t.id, t]));
+      const failed: Failure[] = ids
+        .filter((id) => !beforeById.has(id))
+        .map((id) => ({ id, reason: 'not_found' }));
+
+      if (before.length === 0) {
+        return { updatedCount: 0, failed, batchId: null } as const;
+      }
+
+      const updated = await tx
+        .update(schema.tickets)
+        .set({
+          ...(patch.status ? { status: patch.status } : {}),
+          ...(patch.priority ? { priority: patch.priority } : {}),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.tickets.projectId, project.id),
+            inArray(
+              schema.tickets.id,
+              before.map((t) => t.id),
+            ),
+          ),
+        )
+        .returning({ id: schema.tickets.id });
+
+      const batchId = randomUUID();
+
+      const events: Array<{
+        ticketId: string;
+        kind: 'status_changed' | 'priority_changed';
+        payload: Record<string, unknown>;
+        batchId: string;
+      }> = [];
+      for (const row of before) {
+        if (patch.status && patch.status !== row.status) {
+          events.push({
+            ticketId: row.id,
+            kind: 'status_changed',
+            payload: { from: row.status, to: patch.status },
+            batchId,
+          });
+        }
+        if (patch.priority && patch.priority !== row.priority) {
+          events.push({
+            ticketId: row.id,
+            kind: 'priority_changed',
+            payload: { from: row.priority, to: patch.priority },
+            batchId,
+          });
+        }
+      }
+      if (events.length > 0) {
+        await tx.insert(schema.adminTicketEvents).values(events);
+      }
+
+      return {
+        updatedCount: updated.length,
+        failed,
+        batchId: events.length > 0 ? batchId : null,
+      } as const;
+    });
+
+    return ok(c, {
+      updated: result.updatedCount,
+      failed: result.failed,
+      batchId: result.batchId,
+    });
+  });
+
+  /**
+   * Revert a single audit event. Rewinds the ticket field to the
+   * event's `from` value and emits a new event capturing the delta.
    */
   api.post(
     '/projects/:key/tickets/:id/events/:eventId/revert',
-    requireProjectMember,
-    requireProjectWriter,
+    resolveProject,
     async (c) => {
       const project = c.get('project');
-      const user = c.get('user');
       const ticketId = c.req.param('id');
       const eventId = c.req.param('eventId');
 
       const outcome = await db.transaction(async (tx) => {
-        // Fetch the ticket + event together, scoped to this project.
-        // The join against `tickets` by `(id, project_id)` is the
-        // IDOR guard — an event belonging to another project, or an
-        // event whose ticket was cross-routed, won't match.
         const [row] = await tx
           .select({
             ticket: schema.tickets,
@@ -1427,79 +649,26 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         const { ticket, event } = row;
         const payload = event.payload as Record<string, unknown>;
 
-        // Decide what to write, per kind.
         let nextField:
           | { column: 'status'; value: TicketStatus; currentValue: TicketStatus }
           | { column: 'priority'; value: TicketPriority; currentValue: TicketPriority }
-          | { column: 'assignedToUserId'; value: string | null; currentValue: string | null }
           | null = null;
 
         if (event.kind === 'status_changed') {
           const from = typeof payload.from === 'string' ? payload.from : null;
           if (from && isTicketStatus(from)) {
-            nextField = {
-              column: 'status',
-              value: from,
-              currentValue: ticket.status,
-            };
+            nextField = { column: 'status', value: from, currentValue: ticket.status };
           }
         } else if (event.kind === 'priority_changed') {
           const from = typeof payload.from === 'string' ? payload.from : null;
           if (from && isTicketPriority(from)) {
-            nextField = {
-              column: 'priority',
-              value: from,
-              currentValue: ticket.priority,
-            };
-          }
-        } else if (event.kind === 'assigned') {
-          // `fromUserId` can be null (assign-from-unassigned) or a uuid.
-          const from =
-            payload.fromUserId === null
-              ? null
-              : typeof payload.fromUserId === 'string'
-                ? payload.fromUserId
-                : undefined;
-          if (from !== undefined) {
-            nextField = {
-              column: 'assignedToUserId',
-              value: from,
-              currentValue: ticket.assignedToUserId,
-            };
+            nextField = { column: 'priority', value: from, currentValue: ticket.priority };
           }
         }
 
-        if (!nextField) {
-          // Comment events or malformed payloads — nothing to revert.
-          return { kind: 'unrevertable' } as const;
-        }
-
-        // No-op revert = honest silence. Audit stays clean.
+        if (!nextField) return { kind: 'unrevertable' } as const;
         if (nextField.value === nextField.currentValue) {
           return { kind: 'noop', ticket } as const;
-        }
-
-        // If we're restoring an assignee, verify they're still a
-        // member of this project. Someone removed since the original
-        // event can't be re-assigned; surface that as a 422 rather
-        // than silently unassigning.
-        if (
-          nextField.column === 'assignedToUserId' &&
-          nextField.value !== null
-        ) {
-          const [stillMember] = await tx
-            .select({ userId: schema.projectMembers.userId })
-            .from(schema.projectMembers)
-            .where(
-              and(
-                eq(schema.projectMembers.projectId, project.id),
-                eq(schema.projectMembers.userId, nextField.value),
-              ),
-            )
-            .limit(1);
-          if (!stillMember) {
-            return { kind: 'assignee_gone', userId: nextField.value } as const;
-          }
         }
 
         await tx
@@ -1507,33 +676,18 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
           .set({
             ...(nextField.column === 'status' ? { status: nextField.value } : {}),
             ...(nextField.column === 'priority' ? { priority: nextField.value } : {}),
-            ...(nextField.column === 'assignedToUserId'
-              ? { assignedToUserId: nextField.value }
-              : {}),
             updatedAt: new Date(),
           })
           .where(eq(schema.tickets.id, ticketId));
 
-        // Emit a new event describing what actually happened. Same
-        // kind as the original, payload is the true delta (current →
-        // reverted value). A reader scanning the log sees a coherent
-        // story, not an "undo" pseudo-kind.
         await tx.insert(schema.adminTicketEvents).values({
           ticketId,
-          actorUserId: user.id,
           kind: event.kind,
-          payload:
-            nextField.column === 'assignedToUserId'
-              ? {
-                  fromUserId: nextField.currentValue,
-                  toUserId: nextField.value,
-                  revertOf: event.id,
-                }
-              : {
-                  from: nextField.currentValue,
-                  to: nextField.value,
-                  revertOf: event.id,
-                },
+          payload: {
+            from: nextField.currentValue,
+            to: nextField.value,
+            revertOf: event.id,
+          },
         });
 
         return { kind: 'reverted' } as const;
@@ -1543,302 +697,159 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         return fail(c, 'not_found', 'Event not found', 404);
       }
       if (outcome.kind === 'unrevertable') {
-        return fail(
-          c,
-          'validation_failed',
-          'This event kind cannot be reverted',
-          422,
-        );
-      }
-      if (outcome.kind === 'assignee_gone') {
-        return fail(
-          c,
-          'validation_failed',
-          'The original assignee is no longer a member of this project',
-          422,
-        );
+        return fail(c, 'validation_failed', 'This event kind cannot be reverted', 422);
       }
 
-      // Re-read the full ticket with the same shape as list/PATCH.
       const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
       const [withVotes] = await db
-        .select({
-          ticket: schema.tickets,
-          voteCount: voteCountExpr,
-          assignedToEmail: schema.adminUsers.email,
-          assignedToDisplayName: schema.adminUsers.displayName,
-        })
+        .select({ ticket: schema.tickets, voteCount: voteCountExpr })
         .from(schema.tickets)
         .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
-        .leftJoin(
-          schema.adminUsers,
-          eq(schema.adminUsers.id, schema.tickets.assignedToUserId),
-        )
         .where(eq(schema.tickets.id, ticketId))
-        .groupBy(schema.tickets.id, schema.adminUsers.id);
+        .groupBy(schema.tickets.id);
 
       const row = firstOrThrow(withVotes ? [withVotes] : []);
-      return ok(c, {
-        ...row.ticket,
-        voteCount: row.voteCount,
-        assignedToEmail: row.assignedToEmail,
-        assignedToDisplayName: row.assignedToDisplayName,
-      });
+      return ok(c, { ...row.ticket, voteCount: row.voteCount });
     },
   );
 
-  /**
-   * Project-wide list of recent bulk actions. Groups audit events
-   * by `batch_id` and returns a summary row per batch so the
-   * dashboard can surface "Recent bulk actions" without forcing
-   * an operator to open individual tickets to find a batch they
-   * want to revert.
-   *
-   * Aggregates: first timestamp (the batch lands atomically, so
-   * every event shares it within a few µs), total events,
-   * distinct tickets affected, the kinds present, and the actor
-   * who triggered it. Actor is joined from `admin_users` once the
-   * group closes, not inside the aggregate, for index-only counts.
-   *
-   * Read-only; available to every project member (including
-   * viewers) — knowing what ops is doing is a read operation.
-   */
-  api.get(
-    '/projects/:key/events/batches',
-    requireProjectMember,
-    async (c) => {
-      const project = c.get('project');
+  /** Recent bulk actions for the project. Sorted newest-first. */
+  api.get('/projects/:key/events/batches', resolveProject, async (c) => {
+    const project = c.get('project');
 
-      // Straight SQL here — drizzle's agg helpers work but the query
-      // is clearer as a raw CTE and we need `array_agg(DISTINCT)`
-      // which drizzle would wrap anyway.
-      const rows = (await db.execute(sql`
-        with grouped as (
-          select
-            e.batch_id                                            as batch_id,
-            min(e.created_at)                                     as created_at,
-            min(e.actor_user_id::text)                            as actor_user_id,
-            count(*)::int                                         as event_count,
-            count(distinct e.ticket_id)::int                      as ticket_count,
-            array_agg(distinct e.kind::text)                      as kinds
-          from admin_ticket_events e
-          join tickets t on t.id = e.ticket_id
-          where e.batch_id is not null
-            and t.project_id = ${project.id}
-          group by e.batch_id
-        )
+    const rows = (await db.execute(sql`
+      with grouped as (
         select
-          g.batch_id                                              as batch_id,
-          g.created_at                                            as created_at,
-          g.actor_user_id                                         as actor_user_id,
-          g.event_count                                           as event_count,
-          g.ticket_count                                          as ticket_count,
-          g.kinds                                                 as kinds,
-          u.email                                                 as actor_email,
-          u.display_name                                          as actor_display_name
-        from grouped g
-        left join admin_users u on u.id::text = g.actor_user_id
-        order by g.created_at desc
-        limit 50
-      `)) as unknown as Array<{
-        batch_id: string;
-        created_at: Date;
-        actor_user_id: string | null;
-        event_count: number;
-        ticket_count: number;
-        kinds: string[];
-        actor_email: string | null;
-        actor_display_name: string | null;
-      }>;
+          e.batch_id                           as batch_id,
+          min(e.created_at)                    as created_at,
+          count(*)::int                        as event_count,
+          count(distinct e.ticket_id)::int     as ticket_count,
+          array_agg(distinct e.kind::text)     as kinds
+        from admin_ticket_events e
+        join tickets t on t.id = e.ticket_id
+        where e.batch_id is not null
+          and t.project_id = ${project.id}
+        group by e.batch_id
+      )
+      select batch_id, created_at, event_count, ticket_count, kinds
+      from grouped
+      order by created_at desc
+      limit 50
+    `)) as unknown as Array<{
+      batch_id: string;
+      created_at: Date;
+      event_count: number;
+      ticket_count: number;
+      kinds: string[];
+    }>;
 
-      return ok(
-        c,
-        rows.map((r) => ({
-          batchId: r.batch_id,
-          createdAt: r.created_at,
-          actorUserId: r.actor_user_id,
-          actorEmail: r.actor_email,
-          actorDisplayName: r.actor_display_name,
-          eventCount: r.event_count,
-          ticketCount: r.ticket_count,
-          kinds: r.kinds,
-        })),
-      );
-    },
-  );
+    return ok(
+      c,
+      rows.map((r) => ({
+        batchId: r.batch_id,
+        createdAt: r.created_at,
+        eventCount: r.event_count,
+        ticketCount: r.ticket_count,
+        kinds: r.kinds,
+      })),
+    );
+  });
 
-  /**
-   * Batch revert — rewind every event that shares a `batchId`, which
-   * is the tag the bulk endpoint stamps on its event batch. One
-   * transaction; partial success is possible (an assignee may have
-   * left the project since the bulk ran, a field may have drifted
-   * to a third value, etc.). The response reports per-event outcome
-   * so the dashboard can tell ops "12 reverted, 2 skipped".
-   *
-   * Read is project-scoped via the ticket.projectId join — a batch
-   * id that belongs to another project produces zero events, and
-   * the response is `reverted: 0, skipped: []` (indistinguishable
-   * from an unknown batch). Same IDOR posture as single revert.
-   */
-  api.post(
-    '/projects/:key/events/batches/:batchId/revert',
-    requireProjectMember,
-    requireProjectWriter,
-    async (c) => {
-      const project = c.get('project');
-      const user = c.get('user');
-      const batchId = c.req.param('batchId');
+  /** Revert every event sharing a `batchId`. */
+  api.post('/projects/:key/events/batches/:batchId/revert', resolveProject, async (c) => {
+    const project = c.get('project');
+    const batchId = c.req.param('batchId');
 
-      const outcome = await db.transaction(async (tx) => {
-        // Select every event in the batch, scoped to this project
-        // via an inner join on the ticket. Ordered by `created_at`
-        // descending so that if the same ticket has multiple fields
-        // in the batch (e.g. status + priority), we revert them in
-        // the same order they'd surface in the feed.
-        const events = await tx
-          .select({
-            event: schema.adminTicketEvents,
-            ticket: schema.tickets,
-          })
-          .from(schema.adminTicketEvents)
-          .innerJoin(
-            schema.tickets,
-            eq(schema.tickets.id, schema.adminTicketEvents.ticketId),
-          )
-          .where(
-            and(
-              eq(schema.adminTicketEvents.batchId, batchId),
-              eq(schema.tickets.projectId, project.id),
-            ),
-          )
-          .orderBy(desc(schema.adminTicketEvents.createdAt));
+    const outcome = await db.transaction(async (tx) => {
+      const events = await tx
+        .select({ event: schema.adminTicketEvents, ticket: schema.tickets })
+        .from(schema.adminTicketEvents)
+        .innerJoin(
+          schema.tickets,
+          eq(schema.tickets.id, schema.adminTicketEvents.ticketId),
+        )
+        .where(
+          and(
+            eq(schema.adminTicketEvents.batchId, batchId),
+            eq(schema.tickets.projectId, project.id),
+          ),
+        )
+        .orderBy(desc(schema.adminTicketEvents.createdAt));
 
-        type Skip = { eventId: string; reason: string };
-        const skipped: Skip[] = [];
-        let reverted = 0;
+      type Skip = { eventId: string; reason: string };
+      const skipped: Skip[] = [];
+      let reverted = 0;
 
-        // In-memory map of the ticket's current state per ticketId.
-        // After we revert one field on a ticket, the next event on
-        // the same ticket should see the updated value so subsequent
-        // "is this a no-op" checks are against the latest state.
-        const currentState = new Map<
-          string,
-          {
-            status: TicketStatus;
-            priority: TicketPriority;
-            assignedToUserId: string | null;
-          }
-        >();
-        for (const { ticket } of events) {
-          if (!currentState.has(ticket.id)) {
-            currentState.set(ticket.id, {
-              status: ticket.status,
-              priority: ticket.priority,
-              assignedToUserId: ticket.assignedToUserId,
-            });
-          }
-        }
-
-        for (const { event } of events) {
-          const state = currentState.get(event.ticketId)!;
-          const payload = event.payload as Record<string, unknown>;
-
-          let update:
-            | { column: 'status'; value: TicketStatus }
-            | { column: 'priority'; value: TicketPriority }
-            | { column: 'assignedToUserId'; value: string | null }
-            | null = null;
-
-          if (event.kind === 'status_changed') {
-            const from = typeof payload.from === 'string' ? payload.from : null;
-            if (from && isTicketStatus(from)) update = { column: 'status', value: from };
-          } else if (event.kind === 'priority_changed') {
-            const from = typeof payload.from === 'string' ? payload.from : null;
-            if (from && isTicketPriority(from)) update = { column: 'priority', value: from };
-          } else if (event.kind === 'assigned') {
-            const from =
-              payload.fromUserId === null
-                ? null
-                : typeof payload.fromUserId === 'string'
-                  ? payload.fromUserId
-                  : undefined;
-            if (from !== undefined) update = { column: 'assignedToUserId', value: from };
-          }
-
-          if (!update) {
-            skipped.push({ eventId: event.id, reason: 'unrevertable' });
-            continue;
-          }
-
-          const currentValue = state[update.column];
-          if (currentValue === update.value) {
-            // No-op: the field is already at the target. Skip without
-            // emitting an event — audit stays clean.
-            skipped.push({ eventId: event.id, reason: 'no_change' });
-            continue;
-          }
-
-          if (update.column === 'assignedToUserId' && update.value !== null) {
-            const [stillMember] = await tx
-              .select({ userId: schema.projectMembers.userId })
-              .from(schema.projectMembers)
-              .where(
-                and(
-                  eq(schema.projectMembers.projectId, project.id),
-                  eq(schema.projectMembers.userId, update.value),
-                ),
-              )
-              .limit(1);
-            if (!stillMember) {
-              skipped.push({ eventId: event.id, reason: 'assignee_gone' });
-              continue;
-            }
-          }
-
-          await tx
-            .update(schema.tickets)
-            .set({
-              ...(update.column === 'status' ? { status: update.value } : {}),
-              ...(update.column === 'priority' ? { priority: update.value } : {}),
-              ...(update.column === 'assignedToUserId'
-                ? { assignedToUserId: update.value }
-                : {}),
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.tickets.id, event.ticketId));
-
-          await tx.insert(schema.adminTicketEvents).values({
-            ticketId: event.ticketId,
-            actorUserId: user.id,
-            kind: event.kind,
-            payload:
-              update.column === 'assignedToUserId'
-                ? {
-                    fromUserId: currentValue,
-                    toUserId: update.value,
-                    revertOf: event.id,
-                  }
-                : {
-                    from: currentValue,
-                    to: update.value,
-                    revertOf: event.id,
-                  },
+      const currentState = new Map<
+        string,
+        { status: TicketStatus; priority: TicketPriority }
+      >();
+      for (const { ticket } of events) {
+        if (!currentState.has(ticket.id)) {
+          currentState.set(ticket.id, {
+            status: ticket.status,
+            priority: ticket.priority,
           });
+        }
+      }
 
-          // Record the new state so subsequent events on the same
-          // ticket in this same batch see the up-to-date value.
-          if (update.column === 'status') state.status = update.value;
-          else if (update.column === 'priority') state.priority = update.value;
-          else state.assignedToUserId = update.value;
-          reverted += 1;
+      for (const { event } of events) {
+        const state = currentState.get(event.ticketId)!;
+        const payload = event.payload as Record<string, unknown>;
+
+        let update:
+          | { column: 'status'; value: TicketStatus }
+          | { column: 'priority'; value: TicketPriority }
+          | null = null;
+
+        if (event.kind === 'status_changed') {
+          const from = typeof payload.from === 'string' ? payload.from : null;
+          if (from && isTicketStatus(from)) update = { column: 'status', value: from };
+        } else if (event.kind === 'priority_changed') {
+          const from = typeof payload.from === 'string' ? payload.from : null;
+          if (from && isTicketPriority(from)) update = { column: 'priority', value: from };
         }
 
-        return { reverted, skipped } as const;
-      });
+        if (!update) {
+          skipped.push({ eventId: event.id, reason: 'unrevertable' });
+          continue;
+        }
 
-      return ok(c, outcome);
-    },
-  );
+        const currentValue = state[update.column];
+        if (currentValue === update.value) {
+          skipped.push({ eventId: event.id, reason: 'no_change' });
+          continue;
+        }
+
+        await tx
+          .update(schema.tickets)
+          .set({
+            ...(update.column === 'status' ? { status: update.value } : {}),
+            ...(update.column === 'priority' ? { priority: update.value } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.tickets.id, event.ticketId));
+
+        await tx.insert(schema.adminTicketEvents).values({
+          ticketId: event.ticketId,
+          kind: event.kind,
+          payload: {
+            from: currentValue,
+            to: update.value,
+            revertOf: event.id,
+          },
+        });
+
+        if (update.column === 'status') state.status = update.value;
+        else state.priority = update.value;
+        reverted += 1;
+      }
+
+      return { reverted, skipped } as const;
+    });
+
+    return ok(c, outcome);
+  });
 
   return api;
 }

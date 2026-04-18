@@ -2,7 +2,7 @@
 
 ## Vue d'ensemble
 
-Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une API publique et un back-office React. Les fonctionnalites reellement branchees couvrent les bugs, les demandes d'evolution et le vote public. Le dashboard et le chat temps reel sont encore partiels.
+Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une API publique et un back-office React. Produit mono-admin (un fondateur gere plusieurs de ses propres SaaS) — pas de seats, pas de roles, pas d'invitations. Les fonctionnalites reellement branchees couvrent les bugs, les demandes d'evolution et le vote public. Le chat temps reel est encore partiel.
 
 ## Stack et dependances cles
 
@@ -24,7 +24,7 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 ## Structure du projet
 
 - `packages/widget` : widget React embarquable, avec build librairie ES et build IIFE autonome.
-- `packages/api` : API Hono, middlewares, schema Drizzle et acces PostgreSQL. Bundle via tsup (entrypoints `bin/serve.ts`, `bin/migrate.ts`, `bin/bootstrap.ts`).
+- `packages/api` : API Hono, middlewares, schema Drizzle et acces PostgreSQL. Bundle via tsup (entrypoints `bin/serve.ts`, `bin/migrate.ts`, `bin/bootstrap.ts`, `bin/hash-password.ts`).
 - `packages/dashboard` : shell de back-office React avec routes et pages placeholder. Embarque dans l'image Docker du serveur, servi a `/admin/` quand `ENABLE_DASHBOARD=true` (defaut).
 - `packages/shared` : types metier partages et helper `captureBrowserMetadata`.
 - `packages/api/Dockerfile` : build multi-stage publie sur `ghcr.io/wifsimster/koe-server` (bundle API + dashboard).
@@ -78,6 +78,8 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 - `packages/api/src/middleware/identity.ts` : verification HMAC des contributeurs.
 - `packages/api/src/middleware/cors.ts` : CORS dynamique par projet.
 - `packages/api/src/middleware/rateLimit.ts` : limitation de debit en memoire.
+- `packages/api/src/middleware/adminAuth.ts` : gate mono-admin via cookie signe.
+- `packages/api/src/routes/passwordAuth.ts` : login email + password contre les vars `ADMIN_EMAIL` / `ADMIN_PASSWORD_HASH`.
 - `packages/widget/src/api/client.ts` : transport widget vers API.
 - `packages/widget/src/components/Panel.tsx` : navigation entre onglets du widget.
 - `packages/widget/vite.config.ts` : double build librairie et IIFE.
@@ -86,13 +88,12 @@ Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une 
 
 ## Gotchas et points d'attention
 
-- Le dashboard est surtout un squelette UI. L'API d'administration n'est pas encore branchee.
-- Le chat temps reel n'est pas branche. Le widget affiche une conversation locale de previsualisation.
+- Le dashboard couvre l'inbox, la triage par batch, les notes internes et la creation de projets. Le chat temps reel n'est pas branche.
 - Aucun package n'est publie sur npm. Le widget se consomme via tags git `v*` ; le serveur se consomme via l'image Docker `ghcr.io/wifsimster/koe-server` (qui bundle API + dashboard). `@koe/api`, `@koe/dashboard` et `@koe/shared` restent prives au workspace.
 - `packages/api/.env.example` contient les variables indispensables. Sans `DATABASE_URL`, les routes DB renverront une erreur.
 - Toute modification de `packages/api/src/db/schema.ts` implique le workflow Drizzle.
 - L'image Docker execute les migrations au boot par defaut (`MIGRATE_ON_START=true`). Desactiver en multi-replicas et lancer `docker compose run --rm api migrate` avant le scale-up.
-- Ne supposez pas que `better-auth` est deja cable. Ce snapshot ne montre aucune dependance active. Le dashboard est donc expose sans auth a `/admin/` — `ENABLE_DASHBOARD=false` pour le couper en exposition publique.
+- L'auth admin est mono-utilisateur, sans table users : credentials dans `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` (argon2id) + cookie HMAC signe par `ADMIN_SESSION_SECRET`. Les trois vars sont obligatoires pour monter `/v1/admin/*` ; sinon l'API admin reste off (safe default). Generer le hash via `docker compose run --rm api hash-password '...'`.
 - Toute modif des deps d'un package oblige a regenerer `pnpm-lock.yaml` ; la CI `--frozen-lockfile` echoue sinon.
 
 ## Patterns a suivre

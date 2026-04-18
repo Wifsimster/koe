@@ -9,7 +9,7 @@ export default defineConfig({
     serve: 'src/bin/serve.ts',
     migrate: 'src/bin/migrate.ts',
     bootstrap: 'src/bin/bootstrap.ts',
-    'admin-user': 'src/bin/admin-user.ts',
+    'hash-password': 'src/bin/hash-password.ts',
   },
   format: ['esm'],
   target: 'node20',
@@ -26,5 +26,5 @@ export default defineConfig({
   // block. If tsup inlined one into another (e.g. migrate into serve),
   // that guard would match and the wrong CLI block would fire at boot.
   // Keep sibling bin entries resolved at runtime via relative ESM import.
-  external: ['./migrate.js', './bootstrap.js', './serve.js', './admin-user.js'],
+  external: ['./migrate.js', './bootstrap.js', './serve.js', './hash-password.js'],
 });
