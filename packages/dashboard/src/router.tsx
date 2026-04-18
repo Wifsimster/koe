@@ -84,6 +84,7 @@ export interface InboxSearch {
   /** Free-text query matched server-side against title, description,
    *  reporter email, and assignee email. Empty string ≡ unset. */
   q: string;
+  sort: 'recent' | 'votes';
 }
 
 const VALID_KINDS: ReadonlySet<string> = new Set(['all', 'bug', 'feature']);
@@ -97,6 +98,7 @@ const VALID_STATUSES: ReadonlySet<string> = new Set([
   'wont_fix',
 ]);
 const ASSIGNEE_SHORTCUTS: ReadonlySet<string> = new Set(['all', 'me', 'unassigned']);
+const VALID_SORTS: ReadonlySet<string> = new Set(['recent', 'votes']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseKind(raw: unknown): InboxSearch['kind'] {
@@ -114,8 +116,13 @@ function parseAssignee(raw: unknown): InboxSearch['assignee'] {
   if (ASSIGNEE_SHORTCUTS.has(raw)) return raw as InboxSearch['assignee'];
   return UUID_RE.test(raw) ? raw : 'all';
 }
+function parseSort(raw: unknown): InboxSearch['sort'] {
+  return typeof raw === 'string' && VALID_SORTS.has(raw)
+    ? (raw as InboxSearch['sort'])
+    : 'recent';
+}
 
-const inboxRoute = createRoute({
+export const inboxRoute = createRoute({
   getParentRoute: () => authenticatedLayoutRoute,
   path: '/',
   component: InboxPage,
@@ -124,6 +131,7 @@ const inboxRoute = createRoute({
     status: parseStatus(raw.status),
     assignee: parseAssignee(raw.assignee),
     q: typeof raw.q === 'string' ? raw.q.slice(0, 200) : '',
+    sort: parseSort(raw.sort),
   }),
 });
 
@@ -294,6 +302,7 @@ export const INBOX_DEFAULT_SEARCH: InboxSearch = {
   status: 'open',
   assignee: 'all',
   q: '',
+  sort: 'recent',
 };
 
 function LoadingScreen(): ReactNode {

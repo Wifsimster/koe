@@ -5,6 +5,7 @@ import {
   AdminApiError,
   type ProjectMember,
 } from '../api/client';
+import { INBOX_DEFAULT_SEARCH } from '../router';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -194,7 +195,7 @@ export function MembersPage() {
       {!canManage && (
         <p className="text-[11px] text-muted-foreground">
           Only owners can invite or remove members.{' '}
-          <Link to="/" search={{ kind: 'all', status: 'open', assignee: 'all', q: '' }} className="underline">
+          <Link to="/" search={INBOX_DEFAULT_SEARCH} className="underline">
             Back to inbox
           </Link>
         </p>

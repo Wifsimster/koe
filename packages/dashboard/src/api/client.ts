@@ -200,6 +200,12 @@ export interface TicketListQuery {
    * `?assignee=` query param so URLs stay shareable.
    */
   assignee?: AssigneeFilter;
+  /**
+   * Sort order. `recent` (default) orders by `updated_at` desc.
+   * `votes` orders by vote count desc and is incompatible with
+   * `cursor` (server returns 422).
+   */
+  sort?: 'recent' | 'votes';
   limit?: number;
   cursor?: string;
 }
@@ -214,22 +220,6 @@ export interface TicketListPage {
 }
 
 /**
- * Overview counters for the project landing page. Mirrors the shape
- * returned by `GET /v1/admin/projects/:key/overview` — the aggregate
- * query lives server-side so the dashboard only pays a single round
- * trip on load.
- */
-export interface ProjectOverview {
-  openBugs: number;
-  openFeatures: number;
-  criticalOpenBugs: number;
-  resolvedLast14d: number;
-  openedLast14d: number;
-  topVotedThisWeek: AdminTicket[];
-  recent: AdminTicket[];
-}
-
-/**
  * KPI tile for one project on the cross-project overview. All
  * counters are pre-aggregated server-side; the dashboard just
  * renders them.
@@ -238,10 +228,6 @@ export interface WorkspaceProjectKpis {
   openBugs: number;
   openFeatures: number;
   openFeatureVotes: number;
-  /** Tickets whose `updated_at` falls in the last 7 days. */
-  activityLast7d: number;
-  /** Same window offset by 7 days, for the delta arrow. */
-  activityPrev7d: number;
 }
 
 export interface WorkspaceProjectSummary {
@@ -333,21 +319,13 @@ export class AdminApiClient {
     if (query.verified !== undefined) params.set('verified', String(query.verified));
     if (query.search) params.set('search', query.search);
     if (query.assignee) params.set('assignee', query.assignee);
+    if (query.sort && query.sort !== 'recent') params.set('sort', query.sort);
     if (query.limit) params.set('limit', String(query.limit));
     if (query.cursor) params.set('cursor', query.cursor);
     const qs = params.toString();
     return this.get<TicketListPage>(
       `/projects/${encodeURIComponent(projectKey)}/tickets${qs ? `?${qs}` : ''}`,
     );
-  }
-
-  /**
-   * One-call snapshot for the project home page: open counts, 14-day
-   * throughput, top-voted features this week, and the most recent
-   * tickets. All scoped to the caller's membership.
-   */
-  overview(projectKey: string): Promise<ProjectOverview> {
-    return this.get<ProjectOverview>(`/projects/${encodeURIComponent(projectKey)}/overview`);
   }
 
   /**
