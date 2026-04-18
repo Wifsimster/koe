@@ -45,6 +45,14 @@ export interface WidgetConfig {
     bugs?: boolean;
     features?: boolean;
     chat?: boolean;
+    /**
+     * When true, surfaces a "browse & vote on ideas" screen alongside
+     * the submission forms. Defaults to true. The vote action itself
+     * additionally requires the host to pass an identified user — the
+     * browse list still renders for anonymous visitors in read-only
+     * mode so they aren't blocked from seeing existing requests.
+     */
+    vote?: boolean;
   };
   /** Localization strings. */
   locale?: Partial<WidgetLocale>;
@@ -65,6 +73,20 @@ export interface WidgetLocale {
     bugHint: string;
     feature: string;
     featureHint: string;
+    vote?: string;
+    voteHint?: string;
+  };
+  /** Strings for the browse-and-vote screen. */
+  browse?: {
+    title: string;
+    loading: string;
+    empty: string;
+    error: string;
+    retry: string;
+    voteAriaLabel: string;
+    unvoteAriaLabel: string;
+    /** Shown inline when the host hasn't identified the reporter. */
+    signInToVote: string;
   };
   /** Label for the back button that returns to the intent picker. */
   back?: string;
@@ -138,6 +160,18 @@ export const DEFAULT_LOCALE: WidgetLocale = {
     bugHint: 'Something broken or confusing',
     feature: 'Suggest an idea',
     featureHint: 'New features, improvements',
+    vote: 'Browse ideas',
+    voteHint: 'Upvote requests from other users',
+  },
+  browse: {
+    title: 'Ideas',
+    loading: 'Loading ideas…',
+    empty: 'No ideas yet — be the first to suggest one.',
+    error: "Couldn't load ideas.",
+    retry: 'Try again',
+    voteAriaLabel: 'Upvote',
+    unvoteAriaLabel: 'Remove upvote',
+    signInToVote: 'Sign in to vote',
   },
   back: 'Back',
   tabs: {

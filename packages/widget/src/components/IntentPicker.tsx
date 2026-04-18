@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import { useKoe } from '../context/KoeContext';
 
-export type Intent = 'bug' | 'feature';
+export type Intent = 'bug' | 'feature' | 'vote';
 
 export interface IntentPickerProps {
   onPick: (intent: Intent) => void;
@@ -12,29 +12,34 @@ export interface IntentPickerProps {
  *
  * Why a picker instead of tabs: on a 360px phone viewport the horizontal
  * tab strip ate ~40% of the header before the user had declared intent.
- * Asking "what's on your mind?" up front, with one tap to commit, is
- * faster one-handed and respects how people actually hold phones.
+ * Asking up front, with one tap to commit, is faster one-handed and
+ * respects how people actually hold phones.
  *
  * Cards are intentionally 64px+ tall and full-width — thumb-reachable
- * without aiming, and WCAG 2.5.5 Large Target compliant.
+ * without aiming, and WCAG 2.5.5 Large Target compliant. The prompt is
+ * kept visually hidden (sr-only) because the card titles already declare
+ * intent; screen readers still get the group labelling.
  */
 export function IntentPicker({ onPick }: IntentPickerProps) {
   const { locale, config } = useKoe();
-  const features = config.features ?? { bugs: true, features: true };
+  const features = config.features ?? {};
   const picker = locale.picker ?? {
     prompt: "What's on your mind?",
     bug: 'Report a bug',
     bugHint: 'Something broken or confusing',
     feature: 'Suggest an idea',
     featureHint: 'New features, improvements',
+    vote: 'Browse ideas',
+    voteHint: 'Upvote requests from other users',
   };
 
   const showBugs = features.bugs !== false;
   const showFeatures = features.features !== false;
+  const showVote = features.vote !== false;
 
   return (
     <div className="koe-flex koe-flex-col koe-gap-3">
-      <p id="koe-picker-prompt" className="koe-label koe-m-0">
+      <p id="koe-picker-prompt" className="koe-sr-only">
         {picker.prompt}
       </p>
       <div
@@ -56,6 +61,14 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
             title={picker.feature}
             hint={picker.featureHint}
             onClick={() => onPick('feature')}
+          />
+        )}
+        {showVote && (
+          <IntentCard
+            emoji="⬆"
+            title={picker.vote ?? 'Browse ideas'}
+            hint={picker.voteHint ?? 'Upvote requests from other users'}
+            onClick={() => onPick('vote')}
           />
         )}
       </div>
