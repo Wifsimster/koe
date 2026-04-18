@@ -33,13 +33,36 @@ L'application hote embarque le widget. Le widget appelle l'API publique. L'API v
 
 ## Endpoints disponibles
 
-| Methode | Route                          | Usage                              | Point cle                                  |
-| ------- | ------------------------------ | ---------------------------------- | ------------------------------------------ |
-| `GET`   | `/health`                      | Verifier la disponibilite de l'API | Retourne `status: ok`.                     |
-| `POST`  | `/v1/widget/bugs`              | Creer un signalement de bug        | Attend le contexte navigateur.             |
-| `POST`  | `/v1/widget/features`          | Creer une demande d'evolution      | Cree aussi un compteur de vote a `0`.      |
-| `GET`   | `/v1/widget/features`          | Lister la roadmap publique         | Accepte `userId` pour calculer `hasVoted`. |
-| `POST`  | `/v1/widget/features/:id/vote` | Ajouter ou retirer un vote         | Le second appel retire le vote.            |
+| Methode | Route                                  | Usage                                         | Point cle                                  |
+| ------- | -------------------------------------- | --------------------------------------------- | ------------------------------------------ |
+| `GET`   | `/health`                              | Verifier la disponibilite de l'API            | Retourne `status: ok`.                     |
+| `POST`  | `/v1/widget/bugs`                      | Creer un signalement de bug                   | Attend le contexte navigateur.             |
+| `POST`  | `/v1/widget/features`                  | Creer une demande d'evolution                 | Cree aussi un compteur de vote a `0`.      |
+| `GET`   | `/v1/widget/features`                  | Lister la roadmap publique                    | Accepte `userId` pour calculer `hasVoted`. |
+| `POST`  | `/v1/widget/features/:id/vote`         | Ajouter ou retirer un vote                    | Le second appel retire le vote.            |
+| `GET`   | `/v1/widget/my-requests`               | Lister les tickets envoyes par l'appelant     | Scope par `reporterId = userId`.           |
+| `GET`   | `/r/:projectKey`                       | Page HTML publique de la roadmap curatee      | SSR, balises OpenGraph, sans JavaScript.   |
+| `GET`   | `/v1/public/:projectKey/roadmap`       | JSON de la roadmap curatee                    | `Access-Control-Allow-Origin: *`.          |
+
+### `/v1/widget/my-requests`
+
+Liste les tickets dont `reporterId` correspond a l'appelant. Alimente l'onglet « My requests » du widget.
+
+- Parametres requete : `userId` (obligatoire), `limit` (optionnel, max `100`, defaut `50`).
+- Le middleware `attachVerifier` s'applique. Si `requireIdentityVerification=true`, un appel sans `X-Koe-Identity-Token` / `X-Koe-User-Hash` valide renvoie `401`.
+- Payload minimal volontairement : `id`, `kind`, `title`, `status`, `createdAt`, `updatedAt`, `isPublicRoadmap`, `voteCount`. Pas d'email, metadata, screenshot ni notes — ces champs restent cote admin.
+
+### `/r/:projectKey` et `/v1/public/:projectKey/roadmap`
+
+Surface publique non authentifiee, montee sans dependre de `ADMIN_AUTH_MODE` — activable meme sur une instance qui n'expose pas l'API admin.
+
+- Seuls les tickets ou `is_public_roadmap = true` sont inclus, et uniquement dans les statuts `planned`, `in_progress`, `resolved`.
+- L'admin opte-in ticket par ticket via le dashboard (switch « Public roadmap »). Defaut : masque.
+- Les champs `reporterEmail`, `reporterName`, `screenshotUrl`, `metadata` et `notes` ne sont jamais exposes — la projection SQL les exclut explicitement.
+- `description` est tronquee a 280 caracteres pour rester lisible et limiter la surface.
+- Rate limit dedie (60 requetes/min par projet+IP) pour absorber un pic d'unfurl social sans trainer le limiter des mutations widget.
+- La route HTML renvoie `200` avec un etat vide « Nothing published yet » quand aucun ticket n'est publie (eviter de leaker la validite d'un `projectKey` via un `404` conditionnel).
+- Utile pour brancher une future tuile « Browse roadmap » cote widget sans scraper le HTML — le JSON renvoie la meme projection cote serveur.
 
 ## Format des reponses
 

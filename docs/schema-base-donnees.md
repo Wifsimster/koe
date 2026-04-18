@@ -36,7 +36,7 @@ Un projet regroupe tickets, conversations, secrets d'identite et membres admin. 
 | ---------------------------- | ------------------------------------------------------- | ------------------------------------------------------------- |
 | `projects`                   | Definit un projet SaaS                                  | `key`, `allowedOrigins`, `identitySecret`, `lastPingAt`       |
 | `project_identity_secrets`   | Secrets HMAC versionnes par `kid` pour la rotation      | `(projectId, kid)`, `status: active / retiring / revoked`     |
-| `tickets`                    | Bugs et demandes d'evolution                            | `kind`, `status`, `priority`, `assignedToUserId`, `metadata`  |
+| `tickets`                    | Bugs et demandes d'evolution                            | `kind`, `status`, `priority`, `isPublicRoadmap`, `metadata`   |
 | `ticket_votes`               | Vote public sur les demandes d'evolution                | Cle primaire `(ticketId, userId)` — pas de double-vote        |
 | `conversations` / `messages` | Infrastructure du chat (non actif)                      | `lastMessageAt`, `authorKind`, `readAt`                       |
 
@@ -55,7 +55,8 @@ Un projet regroupe tickets, conversations, secrets d'identite et membres admin. 
 - **Bugs et demandes** partagent la table `tickets`.
 - **Votes** : chaque vote est une ligne distincte ; la cle composite empeche le double vote.
 - **Rotation des secrets** : plusieurs `kid` peuvent etre actifs en parallele. Le verifier essaye chacun pendant la fenetre de rotation.
-- **Audit transactionnel** : un `PATCH /tickets/:id` ecrit l'update et l'evenement d'audit dans la meme transaction.
+- **Audit transactionnel** : un `PATCH /tickets/:id` ecrit l'update et l'evenement d'audit dans la meme transaction. Les valeurs possibles de `ticket_event_kind` sont `status_changed`, `priority_changed` et `roadmap_toggled` — cette derniere est emise quand un admin bascule `is_public_roadmap` et reste reversible depuis la timeline comme les deux autres.
+- **Roadmap publique opt-in** : `tickets.is_public_roadmap` (defaut `false`) controle la visibilite sur `/r/:projectKey`. Un index partiel `tickets_project_public_roadmap_idx` sur `(project_id, status) WHERE is_public_roadmap = true` garde la page rapide meme quand la table grossit.
 - **Correlation des actions en lot** : tous les evenements issus d'un meme bulk partagent le meme `batchId`. Un revert s'effectue par `batchId`.
 - **Suppression d'un admin** : `ON DELETE SET NULL` sur `assignedToUserId`, `actorUserId` et `authorUserId`. L'historique survit au depart d'une personne.
 - **Screenshots** : seule une URL est stockee, jamais l'image binaire.
