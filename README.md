@@ -32,6 +32,7 @@ graph LR
   - [Démarrage rapide avec Docker Compose](#démarrage-rapide-avec-docker-compose)
   - [Image Docker](#image-docker)
   - [Variables d'environnement](#variables-denvironnement)
+  - [Dashboard admin](#dashboard-admin)
   - [Créer un projet](#créer-un-projet)
   - [Exécution sans Docker](#exécution-sans-docker)
 - [Partie 2 — Intégrer le widget Koe](#partie-2--intégrer-le-widget-koe)
@@ -111,25 +112,43 @@ docker run --rm -p 8787:8787 \
 
 ### Variables d'environnement
 
-| Variable             | Obligatoire | Description                                                                    |
-| -------------------- | ----------- | ------------------------------------------------------------------------------ |
-| `DATABASE_URL`       | Oui         | Chaîne de connexion PostgreSQL. Sans elle, l'API refuse de démarrer.           |
-| `PORT`               | Non         | Port d'écoute HTTP. Par défaut `8787`.                                         |
-| `HOST`               | Non         | Interface d'écoute. Par défaut `0.0.0.0`.                                      |
-| `MIGRATE_ON_START`   | Non         | `true` (défaut) applique les migrations au boot. `false` en multi-réplicas.    |
-| `ENABLE_DASHBOARD`   | Non         | `false` (défaut) : le dashboard admin n'est pas servi. Passer à `true` uniquement derrière votre reverse-proxy + auth (pas d'auth intégrée tant que `better-auth` n'est pas câblé). |
-| `BETTER_AUTH_SECRET` | Réservée    | Prévue pour l'intégration future de `better-auth`. Non utilisée aujourd'hui.   |
-| `BETTER_AUTH_URL`    | Réservée    | Prévue pour l'intégration future de `better-auth`. Non utilisée aujourd'hui.   |
+| Variable                 | Obligatoire | Description                                                                                                                              |
+| ------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`           | Oui         | Chaîne de connexion PostgreSQL. Sans elle, l'API refuse de démarrer.                                                                     |
+| `PORT`                   | Non         | Port d'écoute HTTP. Par défaut `8787`.                                                                                                   |
+| `HOST`                   | Non         | Interface d'écoute. Par défaut `0.0.0.0`.                                                                                                |
+| `MIGRATE_ON_START`       | Non         | `true` (défaut) applique les migrations au boot. `false` en multi-réplicas.                                                              |
+| `ENABLE_DASHBOARD`       | Non         | `false` (défaut). Passer à `true` pour servir la SPA d'administration sur `/admin/`.                                                     |
+| `ADMIN_AUTH_MODE`        | Non         | Monte l'API admin `/v1/admin/*`. Valeurs : `password`, `oidc`, `dev-session`. Non défini : pas d'API admin (défaut sûr).                 |
+| `ADMIN_DASHBOARD_ORIGIN` | Non         | Origine CORS de la SPA admin. À laisser vide en déploiement mono-origine (dashboard servi par la même API).                              |
+| `OIDC_*`                 | En mode OIDC | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `OIDC_DASHBOARD_URL`, `OIDC_COOKIE_SECRET`, `OIDC_SCOPES`. |
+| `ADMIN_SESSION_COOKIE`   | Non         | Nom du cookie de session admin. Par défaut `koe_admin`.                                                                                  |
+| `ADMIN_SESSION_TTL_DAYS` | Non         | Durée de vie du cookie en jours. Par défaut `30`.                                                                                        |
+| `ADMIN_COOKIES_SECURE`   | Non         | `true` (défaut). Passer à `false` uniquement en développement HTTP local.                                                                |
+| `KOE_SECRET_KEYS`        | Non         | Active le chiffrement au repos des secrets d'identité (AES-256-GCM enveloppé). Format `kid:base64,kid2:base64`.                          |
+| `KOE_SECRET_ACTIVE_KID`  | Si `KOE_SECRET_KEYS` | `kid` utilisé pour chiffrer les nouveaux secrets. Les autres `kid` restent acceptés pour le déchiffrement pendant la rotation. |
+| `REDIS_URL`              | Multi-réplicas | Rate limiter et cache anti-rejeu des tokens. Indispensable dès qu'il y a plus d'un réplica API.                                       |
 
 ### Dashboard admin
 
-Le dashboard est **embarqué dans l'image mais désactivé par défaut**. Pour l'activer, mettez `ENABLE_DASHBOARD=true` dans votre `.env`, redémarrez l'API, puis ouvrez `http://localhost:8787/admin/`.
+Le dashboard est **embarqué dans l'image mais désactivé par défaut**. Pour un déploiement complet avec administration, il faut activer deux flags distincts :
+
+| Flag                                    | Rôle                                                              |
+| --------------------------------------- | ----------------------------------------------------------------- |
+| `ENABLE_DASHBOARD=true`                 | Sert la SPA à `/admin/`.                                          |
+| `ADMIN_AUTH_MODE=password` ou `oidc`    | Monte l'API JSON d'administration à `/v1/admin/*` avec auth.      |
+
+Trois modes d'authentification sont disponibles :
+
+- **`password`** : email + mot de passe (argon2id). Les utilisateurs sont créés via le CLI `docker compose run --rm api admin-user --email … --project-key …`.
+- **`oidc`** : login via n'importe quel fournisseur OpenID Connect (Auth0, Clerk, Keycloak, Google, WorkOS, etc.). Configure les variables `OIDC_*`.
+- **`dev-session`** : tokens bearer mintés via le CLI `admin-session`. Refusé en production. Pratique pour le local et le staging.
 
 Points d'attention :
 
-- Le dashboard est encore **un squelette** : la navigation fonctionne, mais les pages affichent des placeholders tant que l'API d'administration n'est pas branchée.
-- Il n'y a **pas encore d'authentification** native (`better-auth` est prévu mais non câblé). Tant que ce n'est pas le cas, n'activez `/admin/*` que derrière votre propre reverse-proxy avec auth — ou sur un réseau privé.
-- Désactiver le flag (ou le laisser sur son défaut) retire toutes les routes `/admin/*` (elles répondent `404` dans l'enveloppe JSON commune).
+- Sans `ADMIN_AUTH_MODE`, l'API admin n'est pas montée : c'est le défaut sûr. Aucune route `/v1/admin/*` n'existe.
+- Sans `ENABLE_DASHBOARD`, la SPA n'est pas servie : vous pouvez utiliser l'API admin depuis un front hébergé ailleurs en renseignant `ADMIN_DASHBOARD_ORIGIN`.
+- Les sessions sont stockées en base (`admin_sessions`) sous forme de hash SHA-256 ; un dump DB ne fuite pas de credentials actifs.
 
 ### Créer un projet
 
@@ -298,8 +317,9 @@ const userHash = createHmac('sha256', process.env.KOE_IDENTITY_SECRET)
 - **Demandes d'évolution** : fonctionnelles.
 - **Votes** : fonctionnels sur la roadmap publique.
 - **Chat** : onglet visible, mais conversation encore locale et sans temps réel.
-- **Dashboard** : navigation présente, mais pages encore placeholder. L'API d'administration n'est pas branchée. Servi à `/admin/` par défaut dans l'image Docker (sans auth — couvrir d'un reverse-proxy ou désactiver pour une exposition publique).
-- **`better-auth`** : prévu mais non câblé aujourd'hui.
+- **Dashboard admin** : inbox des tickets, détail, modifications de statut/priorité, assignation, commentaires internes, actions en lot (bulk) et revert par `batchId`. Trois modes d'authentification branchés : `password`, `oidc`, `dev-session`. Invitation de membres par projet (`owner` / `member` / `viewer`).
+- **Rotation des secrets d'identité** : CLI `rotate-secrets` avec schéma v2 (signature liée à `iat`, `nonce`, `kid`). Permet un renouvellement sans casser les intégrations existantes.
+- **Chiffrement des secrets au repos** : AES-256-GCM enveloppé, activable via `KOE_SECRET_KEYS`.
 
 ## Développer ce dépôt
 
@@ -321,7 +341,8 @@ Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour l
 ## Stack technique
 
 - **Widget** : React 19, TypeScript, Vite, Tailwind CSS.
-- **Service Koe (API)** : Hono, Zod, Drizzle ORM, PostgreSQL. Bundlé avec tsup et publié en image Docker multi-arch.
+- **Service Koe (API)** : Hono, Zod, Drizzle ORM, PostgreSQL. Auth admin via `openid-client` (OIDC) et argon2id (`@node-rs/argon2`). Redis optionnel (ioredis) pour rate limiting et anti-rejeu. Bundlé avec tsup et publié en image Docker multi-arch.
+- **Dashboard** : React 19, TanStack Router, shadcn/ui sur Tailwind CSS.
 - **Monorepo** : `pnpm` workspaces et Turborepo.
 - **Release** : deux pistes indépendantes sur `main`. Widget via `semantic-release` (tags `v*` + GitHub Releases). Image serveur via workflow `Server image` (tags roulants `:edge` + `:sha-*` à chaque push, tags stables `:latest` + `:x.y.z` sur push d'un tag git `server-v*`).
 

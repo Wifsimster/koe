@@ -24,11 +24,12 @@ L'application hote embarque le widget. Le widget appelle l'API publique. L'API v
 
 ## Headers obligatoires
 
-| Header                           | Quand                         | Role                                  |
-| -------------------------------- | ----------------------------- | ------------------------------------- |
-| `X-Koe-Project-Key`              | Toutes les routes widget      | Rattache la requete au bon projet.    |
-| `Content-Type: application/json` | Requetes `POST`               | Transporte les formulaires du widget. |
-| `X-Koe-User-Hash`                | Si la verification est active | Prouve l'identite du contributeur.    |
+| Header                           | Quand                                | Role                                        |
+| -------------------------------- | ------------------------------------ | ------------------------------------------- |
+| `X-Koe-Project-Key`              | Toutes les routes widget             | Rattache la requete au bon projet.          |
+| `Content-Type: application/json` | Requetes `POST`                      | Transporte les formulaires du widget.       |
+| `X-Koe-User-Hash`                | Schema v1 si verification active     | HMAC du `reporter.id`. Retro-compatible.    |
+| `X-Koe-Identity-Token`           | Schema v2 si verification active     | Token signe avec `iat`, `nonce` et `kid`.   |
 
 ## Endpoints disponibles
 
@@ -73,8 +74,7 @@ Les reponses suivent une enveloppe JSON commune. Cela simplifie le traitement co
 > **Detail technique**
 > La limite actuelle est de 10 requetes par minute, avec un burst de 30 requetes.
 
-## Hors perimetre actuel
+## Hors perimetre de cette API
 
-- L'API d'administration n'est pas encore branchee.
-- Le chat temps reel n'est pas expose.
-- Le dashboard ne consomme pas encore cette API.
+- L'**API d'administration** vit sur un autre prefixe (`/v1/admin/*`). Voir le document dedie.
+- Le **chat temps reel** n'est pas expose : l'onglet widget affiche une conversation locale.
