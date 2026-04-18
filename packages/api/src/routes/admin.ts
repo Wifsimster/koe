@@ -14,8 +14,10 @@ import { dirname, resolve } from 'node:path';
  * inside the SPA would return a 404.
  *
  * The route tree is intentionally mounted only when the operator
- * opts in with `ENABLE_DASHBOARD=true`. The dashboard is still a
- * placeholder and has no auth wired up.
+ * opts in with `ENABLE_DASHBOARD=true`. The static SPA itself is
+ * public — auth is enforced by the JSON admin API at `/v1/admin/*`
+ * (cookie-signed session via `requireAdmin`), which the SPA calls
+ * after the operator logs in.
  */
 export function createAdminRoutes(): Hono {
   const here = dirname(fileURLToPath(import.meta.url));
