@@ -73,7 +73,13 @@ export default defineConfig(() => {
         cssFileName: 'style',
       },
       rollupOptions: {
-        external: ['react', 'react-dom', 'react/jsx-runtime'],
+        // Match bare specifiers AND subpaths (`react-dom/client`,
+        // `react/jsx-runtime`, etc.). A plain string list only matches
+        // exact IDs, so `react-dom/client` — pulled in by `standalone.ts`
+        // for `createRoot` — would otherwise be bundled along with its
+        // internal React references, yanking a second React copy into
+        // the host app and triggering React error #527.
+        external: (id) => /^react($|\/)|^react-dom($|\/)/.test(id),
       },
       sourcemap: true,
     },
