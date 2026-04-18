@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Bug, Heart, Lightbulb, Minus, TrendingDown, TrendingUp } from 'lucide-react';
+import { Bug, Heart, Lightbulb } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import type { WorkspaceProjectSummary } from '../api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -73,18 +73,18 @@ function ProjectTile({
   onPick: (key: string) => void;
 }) {
   const { kpis } = project;
-  const delta = kpis.activityLast7d - kpis.activityPrev7d;
+  const pick = () => onPick(project.key);
 
   return (
-    <Link
-      to="/"
-      search={INBOX_DEFAULT_SEARCH}
-      onClick={() => onPick(project.key)}
-      className="group outline-none"
-    >
-      <Card className="h-full transition-colors group-hover:ring-foreground/25 group-focus-visible:ring-2 group-focus-visible:ring-ring">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+    <Card className="h-full">
+      <CardHeader>
+        <Link
+          to="/"
+          search={INBOX_DEFAULT_SEARCH}
+          onClick={pick}
+          className="group block outline-none"
+        >
+          <CardTitle className="flex items-center gap-2 group-hover:underline">
             <span
               aria-hidden
               className="inline-block h-2 w-2 rounded-full"
@@ -93,84 +93,71 @@ function ProjectTile({
             <span className="truncate">{project.name}</span>
           </CardTitle>
           <CardDescription className="font-mono">{project.key}</CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-3">
-          <KpiRow
-            icon={<Bug className="h-3.5 w-3.5" />}
-            label="Open bugs"
-            value={kpis.openBugs}
-          />
-          <KpiRow
-            icon={<Lightbulb className="h-3.5 w-3.5" />}
-            label="Open features"
-            value={kpis.openFeatures}
-          />
-          <KpiRow
-            icon={<Heart className="h-3.5 w-3.5" />}
-            label="Feature votes"
-            value={kpis.openFeatureVotes}
-          />
-          <KpiRow
-            icon={<DeltaIcon delta={delta} />}
-            label="7-day activity"
-            value={kpis.activityLast7d}
-            suffix={<DeltaBadge delta={delta} />}
-          />
-        </CardContent>
-      </Card>
-    </Link>
+        </Link>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <KpiLink
+          to="/"
+          search={{ ...INBOX_DEFAULT_SEARCH, kind: 'bug', status: 'open' }}
+          onClick={pick}
+          icon={<Bug className="h-3.5 w-3.5" />}
+          label="Open bugs"
+          value={kpis.openBugs}
+        />
+        <KpiLink
+          to="/"
+          search={{ ...INBOX_DEFAULT_SEARCH, kind: 'feature', status: 'open' }}
+          onClick={pick}
+          icon={<Lightbulb className="h-3.5 w-3.5" />}
+          label="Open ideas"
+          value={kpis.openFeatures}
+        />
+        <KpiLink
+          to="/"
+          search={{ ...INBOX_DEFAULT_SEARCH, kind: 'feature', status: 'open', sort: 'votes' }}
+          onClick={pick}
+          icon={<Heart className="h-3.5 w-3.5" />}
+          label="Idea votes"
+          value={kpis.openFeatureVotes}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
-function KpiRow({
+function KpiLink({
+  to,
+  search,
+  onClick,
   icon,
   label,
   value,
-  suffix,
 }: {
+  to: string;
+  search: Record<string, unknown>;
+  onClick: () => void;
   icon: React.ReactNode;
   label: string;
   value: number;
-  suffix?: React.ReactNode;
 }) {
   const muted = value === 0;
   return (
-    <div className="flex flex-col gap-0.5">
+    <Link
+      to={to}
+      search={search}
+      onClick={onClick}
+      className="group flex items-center justify-between gap-3 rounded-sm px-1 py-1 outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
+    >
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
         {icon}
         <span>{label}</span>
       </div>
-      <div className="flex items-baseline gap-1.5">
-        <span
-          className={cn('font-heading text-xl tabular-nums', muted && 'text-muted-foreground')}
-        >
-          {value}
-        </span>
-        {suffix}
-      </div>
-    </div>
-  );
-}
-
-function DeltaIcon({ delta }: { delta: number }) {
-  if (delta > 0) return <TrendingUp className="h-3.5 w-3.5" />;
-  if (delta < 0) return <TrendingDown className="h-3.5 w-3.5" />;
-  return <Minus className="h-3.5 w-3.5" />;
-}
-
-function DeltaBadge({ delta }: { delta: number }) {
-  if (delta === 0) return null;
-  const positive = delta > 0;
-  return (
-    <span
-      className={cn(
-        'text-[10px] tabular-nums',
-        positive ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400',
-      )}
-    >
-      {positive ? '+' : ''}
-      {delta}
-    </span>
+      <span
+        className={cn('font-heading text-xl tabular-nums', muted && 'text-muted-foreground')}
+      >
+        {value}
+      </span>
+    </Link>
   );
 }
 
@@ -183,9 +170,9 @@ function OverviewSkeleton() {
             <Skeleton className="h-4 w-32" />
             <Skeleton className="h-3 w-16" />
           </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-3">
-            {Array.from({ length: 4 }).map((_, j) => (
-              <div key={j} className="flex flex-col gap-1">
+          <CardContent className="grid gap-3">
+            {Array.from({ length: 3 }).map((_, j) => (
+              <div key={j} className="flex items-center justify-between gap-3">
                 <Skeleton className="h-2.5 w-20" />
                 <Skeleton className="h-5 w-10" />
               </div>

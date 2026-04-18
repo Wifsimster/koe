@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { and, count, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
@@ -101,31 +101,13 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
 
   /**
    * Cross-project KPI landing for admins who belong to more than one
-   * project. One SQL round-trip: `project_members` → `projects` left-
-   * joined to `tickets` and `ticket_votes`, with FILTER-aggregated
-   * counters per project.
-   *
-   * Why `count(DISTINCT tickets.id) FILTER (…)` for ticket counts:
-   * the left-join on `ticket_votes` multiplies each voted ticket row
-   * by its vote count, which would inflate every plain `count(*)`.
-   * `DISTINCT tickets.id` collapses the multiplied rows back to one
-   * per ticket. The vote counter itself uses `count(ticket_votes.
-   * ticket_id)` (no DISTINCT) because we want the row count, not the
-   * ticket count.
-   *
-   * Scoping: filtered by `project_members.user_id`. The session check
-   * already forbids unauthenticated callers; this forbids cross-
-   * tenant leaks from authenticated ones.
+   * project. Left-joining `ticket_votes` multiplies voted-ticket rows,
+   * so ticket counters use `count(DISTINCT tickets.id) FILTER (…)` to
+   * collapse duplicates; the vote counter itself wants the row count
+   * and so skips DISTINCT.
    */
   api.get('/overview', async (c) => {
     const user = c.get('user');
-
-    // ISO strings, not Date objects — the `postgres` driver rejects
-    // Date in raw `sql` template bindings (drizzle's typed helpers
-    // like `gte()` coerce for you, but FILTER clauses require raw
-    // sql so we coerce manually).
-    const sevenDaysAgo = daysAgo(7).toISOString();
-    const fourteenDaysAgo = daysAgo(14).toISOString();
 
     const rows = await db
       .select({
@@ -136,8 +118,6 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         openBugs: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.kind} = 'bug' and ${schema.tickets.status} = 'open')::int`,
         openFeatures: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.kind} = 'feature' and ${schema.tickets.status} = 'open')::int`,
         openFeatureVotes: sql<number>`count(${schema.ticketVotes.ticketId}) filter (where ${schema.tickets.kind} = 'feature' and ${schema.tickets.status} = 'open')::int`,
-        activityLast7d: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.updatedAt} >= ${sevenDaysAgo}::timestamptz)::int`,
-        activityPrev7d: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.updatedAt} >= ${fourteenDaysAgo}::timestamptz and ${schema.tickets.updatedAt} < ${sevenDaysAgo}::timestamptz)::int`,
       })
       .from(schema.projectMembers)
       .innerJoin(schema.projects, eq(schema.projects.id, schema.projectMembers.projectId))
@@ -157,8 +137,6 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
           openBugs: r.openBugs,
           openFeatures: r.openFeatures,
           openFeatureVotes: r.openFeatureVotes,
-          activityLast7d: r.activityLast7d,
-          activityPrev7d: r.activityPrev7d,
         },
       })),
     });
@@ -286,6 +264,7 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       .optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
     cursor: z.string().max(200).optional(),
+    sort: z.enum(['recent', 'votes']).default('recent').optional(),
   });
 
   /**
@@ -335,14 +314,21 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       assignee: c.req.query('assignee'),
       limit: c.req.query('limit'),
       cursor: c.req.query('cursor'),
+      sort: c.req.query('sort'),
     });
     if (!queryResult.success) {
       return fail(c, 'validation_failed', 'Invalid query parameters', 422, {
         issues: queryResult.error.issues,
       });
     }
-    const { kind, status, priority, verified, search, assignee, limit, cursor } =
+    const { kind, status, priority, verified, search, assignee, limit, cursor, sort } =
       queryResult.data;
+
+    // Features tab fits on one page at operator scale; skip the extra
+    // work of a votes-aware cursor predicate.
+    if (sort === 'votes' && cursor) {
+      return fail(c, 'validation_failed', 'cursor not supported with sort=votes', 422);
+    }
 
     const conditions = [eq(schema.tickets.projectId, project.id)];
     if (kind) conditions.push(eq(schema.tickets.kind, kind));
@@ -422,7 +408,11 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
       )
       .where(and(...conditions))
       .groupBy(schema.tickets.id, schema.adminUsers.id)
-      .orderBy(desc(schema.tickets.createdAt), desc(schema.tickets.id))
+      .orderBy(
+        ...(sort === 'votes'
+          ? [desc(voteCountExpr), desc(schema.tickets.createdAt), desc(schema.tickets.id)]
+          : [desc(schema.tickets.createdAt), desc(schema.tickets.id)]),
+      )
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
@@ -439,111 +429,6 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
         assignedToDisplayName: r.assignedToDisplayName,
       })),
       pageInfo: { nextCursor, hasMore, limit },
-    });
-  });
-
-  /**
-   * Project-level overview counters the dashboard landing page needs.
-   * One endpoint, several aggregate queries fanned out in parallel —
-   * cheap enough at operator scale that we don't bother with a single
-   * `count() FILTER (...)` query. If this becomes hot, rewrite as one
-   * aggregate.
-   */
-  api.get('/projects/:key/overview', requireProjectMember, async (c) => {
-    const project = c.get('project');
-
-    const [
-      openBugs,
-      openFeatures,
-      criticalOpenBugs,
-      resolvedLast14d,
-      openedLast14d,
-      topVoted,
-      recent,
-    ] = await Promise.all([
-      db
-        .select({ c: count() })
-        .from(schema.tickets)
-        .where(
-          and(
-            eq(schema.tickets.projectId, project.id),
-            eq(schema.tickets.kind, 'bug'),
-            eq(schema.tickets.status, 'open'),
-          ),
-        ),
-      db
-        .select({ c: count() })
-        .from(schema.tickets)
-        .where(
-          and(
-            eq(schema.tickets.projectId, project.id),
-            eq(schema.tickets.kind, 'feature'),
-            eq(schema.tickets.status, 'open'),
-          ),
-        ),
-      db
-        .select({ c: count() })
-        .from(schema.tickets)
-        .where(
-          and(
-            eq(schema.tickets.projectId, project.id),
-            eq(schema.tickets.kind, 'bug'),
-            eq(schema.tickets.status, 'open'),
-            eq(schema.tickets.priority, 'critical'),
-          ),
-        ),
-      db
-        .select({ c: count() })
-        .from(schema.tickets)
-        .where(
-          and(
-            eq(schema.tickets.projectId, project.id),
-            eq(schema.tickets.status, 'resolved'),
-            gte(schema.tickets.updatedAt, daysAgo(14)),
-          ),
-        ),
-      db
-        .select({ c: count() })
-        .from(schema.tickets)
-        .where(
-          and(
-            eq(schema.tickets.projectId, project.id),
-            gte(schema.tickets.createdAt, daysAgo(14)),
-          ),
-        ),
-      db
-        .select({
-          ticket: schema.tickets,
-          voteCount: sql<number>`count(${schema.ticketVotes.ticketId})::int`,
-        })
-        .from(schema.tickets)
-        .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
-        .where(
-          and(
-            eq(schema.tickets.projectId, project.id),
-            eq(schema.tickets.kind, 'feature'),
-            gte(schema.tickets.createdAt, daysAgo(7)),
-          ),
-        )
-        .groupBy(schema.tickets.id)
-        .orderBy(desc(sql`count(${schema.ticketVotes.ticketId})`))
-        .limit(5),
-      db
-        .select()
-        .from(schema.tickets)
-        .where(eq(schema.tickets.projectId, project.id))
-        .orderBy(desc(schema.tickets.createdAt))
-        .limit(10),
-    ]);
-
-    return ok(c, {
-      openBugs: openBugs[0]?.c ?? 0,
-      openFeatures: openFeatures[0]?.c ?? 0,
-      criticalOpenBugs: criticalOpenBugs[0]?.c ?? 0,
-      resolvedLast14d: resolvedLast14d[0]?.c ?? 0,
-      openedLast14d: openedLast14d[0]?.c ?? 0,
-      topVotedThisWeek: topVoted.map((r) => ({ ...r.ticket, voteCount: r.voteCount })),
-      recent,
     });
   });
 
@@ -1971,10 +1856,4 @@ function isTicketStatus(v: string): v is TicketStatus {
 
 function isTicketPriority(v: string): v is TicketPriority {
   return v === 'low' || v === 'medium' || v === 'high' || v === 'critical';
-}
-
-function daysAgo(days: number): Date {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - days);
-  return d;
 }
