@@ -88,3 +88,51 @@ export const requireAdmin: MiddlewareHandler<{ Variables: AdminContext }> = asyn
   c.set('admin', { email });
   await next();
 };
+
+/**
+ * CSRF defence for admin mutations. `SameSite=Lax` on the session
+ * cookie only blocks the most obvious cross-site POST — a sibling app
+ * on the same registrable domain, or a browser that doesn't respect
+ * Lax, still sends the cookie on cross-site fetches with
+ * `credentials: 'include'`. This middleware closes that gap.
+ *
+ * Strategy: skip safe methods; on mutating methods, accept the
+ * request only when `Sec-Fetch-Site` says same-origin/same-site/none
+ * (modern browsers, always set), or — for clients that don't send the
+ * Fetch Metadata header — when `Origin` matches `Host`. Rejects with
+ * 403 otherwise. Same-origin deploys (dashboard at /admin on the same
+ * Hono process) pass trivially; split deploys need to live on the
+ * same registrable domain or add a reverse-proxy header rewrite.
+ */
+export const requireSameOrigin: MiddlewareHandler = async (c, next) => {
+  const method = c.req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+
+  const fetchSite = c.req.header('Sec-Fetch-Site');
+  if (fetchSite) {
+    if (fetchSite === 'same-origin' || fetchSite === 'same-site' || fetchSite === 'none') {
+      return next();
+    }
+    return fail(c, 'forbidden', 'Cross-site request denied', 403);
+  }
+
+  // Older browsers / non-browser clients: fall back to an Origin/Host
+  // comparison. A missing Origin on a POST is treated as hostile —
+  // every real browser attaches it to cross-origin fetches, and the
+  // admin API has no legitimate no-Origin POST client.
+  const origin = c.req.header('Origin');
+  const host = c.req.header('Host');
+  if (!origin || !host) {
+    return fail(c, 'forbidden', 'Missing Origin on mutating request', 403);
+  }
+  try {
+    if (new URL(origin).host !== host) {
+      return fail(c, 'forbidden', 'Cross-origin request denied', 403);
+    }
+  } catch {
+    return fail(c, 'forbidden', 'Malformed Origin header', 403);
+  }
+  return next();
+};

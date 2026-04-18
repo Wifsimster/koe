@@ -92,8 +92,9 @@ export function LoginPage() {
         </Button>
         <Hint>
           Credentials live in <Code>ADMIN_EMAIL</Code> and <Code>ADMIN_PASSWORD_HASH</Code> on
-          the server. Generate a hash with{' '}
-          <Code>docker compose run --rm api hash-password 'your-password'</Code>.
+          the server. Generate a hash interactively with{' '}
+          <Code>docker compose run --rm api hash-password</Code>. Forgot the password? Run the
+          same command, replace the hash in <Code>.env</Code>, and restart the container.
         </Hint>
       </form>
     </Shell>
