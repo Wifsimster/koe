@@ -215,7 +215,9 @@ export const projectMembers = pgTable(
     projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
-    userId: text('user_id').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: 'cascade' }),
     role: projectMemberRoleEnum('role').notNull().default('owner'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

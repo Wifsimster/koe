@@ -50,6 +50,13 @@
       "when": 1776458922748,
       "tag": "0006_admin_password_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776471757991,
+      "tag": "0007_worried_nighthawk",
+      "breakpoints": true
     }
   ]
 }
