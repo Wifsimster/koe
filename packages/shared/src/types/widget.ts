@@ -75,6 +75,10 @@ export interface WidgetLocale {
     featureHint: string;
     vote?: string;
     voteHint?: string;
+    /** Label for the "My requests" card. */
+    myRequests?: string;
+    /** Hint shown under the "My requests" card. */
+    myRequestsHint?: string;
   };
   /** Strings for the browse-and-vote screen. */
   browse?: {
@@ -87,6 +91,25 @@ export interface WidgetLocale {
     unvoteAriaLabel: string;
     /** Shown inline when the host hasn't identified the reporter. */
     signInToVote: string;
+  };
+  /** Strings for the "My requests" screen. */
+  myRequests?: {
+    title: string;
+    loading: string;
+    empty: string;
+    error: string;
+    retry: string;
+    /** CTA on a card linking to the public roadmap at `/r/:projectKey`. */
+    viewOnRoadmap: string;
+    /** Per-status labels shown as a small badge on each row. */
+    status: {
+      open: string;
+      in_progress: string;
+      planned: string;
+      resolved: string;
+      closed: string;
+      wont_fix: string;
+    };
   };
   /** Label for the back button that returns to the intent picker. */
   back?: string;
@@ -162,6 +185,8 @@ export const DEFAULT_LOCALE: WidgetLocale = {
     featureHint: 'New features, improvements',
     vote: 'Browse ideas',
     voteHint: 'Upvote requests from other users',
+    myRequests: 'My requests',
+    myRequestsHint: 'Follow the status of what you submitted',
   },
   browse: {
     title: 'Ideas',
@@ -172,6 +197,22 @@ export const DEFAULT_LOCALE: WidgetLocale = {
     voteAriaLabel: 'Upvote',
     unvoteAriaLabel: 'Remove upvote',
     signInToVote: 'Sign in to vote',
+  },
+  myRequests: {
+    title: 'My requests',
+    loading: 'Loading your requests…',
+    empty: "You haven't submitted anything yet.",
+    error: "Couldn't load your requests.",
+    retry: 'Try again',
+    viewOnRoadmap: 'View on roadmap',
+    status: {
+      open: 'Open',
+      in_progress: 'In progress',
+      planned: 'Planned',
+      resolved: 'Shipped',
+      closed: 'Closed',
+      wont_fix: "Won't fix",
+    },
   },
   back: 'Back',
   tabs: {

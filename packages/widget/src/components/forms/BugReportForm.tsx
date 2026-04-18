@@ -24,7 +24,18 @@ const EMPTY: FormState = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const isValidEmail = (value: string) => EMAIL_RE.test(value);
 
-export function BugReportForm() {
+export interface BugReportFormProps {
+  /**
+   * Optional callback that switches the widget to the "my requests"
+   * screen. When provided, the success state exposes a secondary CTA
+   * so the reporter can immediately see their just-submitted ticket
+   * in context. Gated in the Panel on a verified user identity — we
+   * never surface this for anonymous sessions.
+   */
+  onViewMyRequests?: () => void;
+}
+
+export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
   const { locale, api, config } = useKoe();
   const [state, setState] = useState<FormState>(EMPTY);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
@@ -52,6 +63,8 @@ export function BugReportForm() {
           setState(EMPTY);
           setErrors({});
         }}
+        onViewMyRequests={onViewMyRequests}
+        viewMyRequestsLabel={locale.myRequests?.title ?? 'My requests'}
       />
     );
   }
@@ -189,14 +202,31 @@ function FormFooter({ children }: { children: React.ReactNode }) {
   return <div className="koe-panel-form-footer">{children}</div>;
 }
 
-function SuccessMessage({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+function SuccessMessage({
+  message,
+  onDismiss,
+  onViewMyRequests,
+  viewMyRequestsLabel,
+}: {
+  message: string;
+  onDismiss: () => void;
+  onViewMyRequests?: () => void;
+  viewMyRequestsLabel: string;
+}) {
   return (
     <div className="koe-text-center koe-py-6">
       <div className="koe-mb-3 koe-text-2xl">✓</div>
       <p className="koe-text-sm koe-mb-4">{message}</p>
-      <Button variant="ghost" type="button" onClick={onDismiss}>
-        Submit another
-      </Button>
+      <div className="koe-flex koe-flex-col koe-items-center koe-gap-2">
+        <Button variant="ghost" type="button" onClick={onDismiss}>
+          Submit another
+        </Button>
+        {onViewMyRequests && (
+          <Button variant="outline" type="button" onClick={onViewMyRequests}>
+            {viewMyRequestsLabel}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

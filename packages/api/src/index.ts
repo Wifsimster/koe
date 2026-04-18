@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { widgetRoutes } from './routes/widget';
+import { publicRoadmapRoutes } from './routes/public';
 import { healthRoutes } from './routes/health';
 import { createAdminRoutes } from './routes/admin';
 import { createAdminApiRoutes } from './routes/adminApi';
@@ -14,6 +15,13 @@ app.use('*', logger());
 
 app.route('/health', healthRoutes);
 app.route('/v1/widget', widgetRoutes);
+
+// Public roadmap surface — unauthenticated, mounted unconditionally so
+// an operator can share `/r/:projectKey` regardless of whether the
+// admin API is wired up. Internal routes are registered at the app root
+// (`/r/:projectKey` HTML + `/v1/public/:projectKey/roadmap` JSON) so a
+// single Hono instance owns both paths.
+app.route('/', publicRoadmapRoutes);
 
 // Admin JSON API. Single-admin product — credentials live in env vars
 // (ADMIN_EMAIL + ADMIN_PASSWORD_HASH) and the session is a signed

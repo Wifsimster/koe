@@ -94,6 +94,16 @@ function mergeLocale(override?: Partial<WidgetLocale>): WidgetLocale {
     browse: override.browse
       ? { ...(DEFAULT_LOCALE.browse as NonNullable<WidgetLocale['browse']>), ...override.browse }
       : DEFAULT_LOCALE.browse,
+    myRequests: override.myRequests
+      ? {
+          ...(DEFAULT_LOCALE.myRequests as NonNullable<WidgetLocale['myRequests']>),
+          ...override.myRequests,
+          status: {
+            ...(DEFAULT_LOCALE.myRequests as NonNullable<WidgetLocale['myRequests']>).status,
+            ...(override.myRequests.status ?? {}),
+          },
+        }
+      : DEFAULT_LOCALE.myRequests,
     tabs: { ...DEFAULT_LOCALE.tabs, ...(override.tabs ?? {}) },
     bugForm: { ...DEFAULT_LOCALE.bugForm, ...(override.bugForm ?? {}) },
     featureForm: { ...DEFAULT_LOCALE.featureForm, ...(override.featureForm ?? {}) },

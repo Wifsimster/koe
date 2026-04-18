@@ -7,8 +7,9 @@ import {
   uuid,
   pgEnum,
   primaryKey,
+  index,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 export const ticketKindEnum = pgEnum('ticket_kind', ['bug', 'feature']);
 export const ticketStatusEnum = pgEnum('ticket_status', [
@@ -40,6 +41,7 @@ export const identitySecretStatusEnum = pgEnum('identity_secret_status', [
 export const ticketEventKindEnum = pgEnum('ticket_event_kind', [
   'status_changed',
   'priority_changed',
+  'roadmap_toggled',
 ]);
 
 export const projects = pgTable('projects', {
@@ -79,42 +81,56 @@ export const projects = pgTable('projects', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const tickets = pgTable('tickets', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  projectId: uuid('project_id')
-    .notNull()
-    .references(() => projects.id, { onDelete: 'cascade' }),
-  kind: ticketKindEnum('kind').notNull(),
-  title: text('title').notNull(),
-  description: text('description').notNull(),
-  status: ticketStatusEnum('status').notNull().default('open'),
-  priority: ticketPriorityEnum('priority').notNull().default('medium'),
-  reporterId: text('reporter_id').notNull(),
-  reporterName: text('reporter_name'),
-  reporterEmail: text('reporter_email'),
-  /**
-   * True when the reporter was validated via HMAC at submission time.
-   * Lets the admin UI distinguish verified vs. self-asserted identities.
-   */
-  reporterVerified: boolean('reporter_verified').notNull().default(false),
-  // Bug-only fields.
-  stepsToReproduce: text('steps_to_reproduce'),
-  expectedBehavior: text('expected_behavior'),
-  actualBehavior: text('actual_behavior'),
-  // Captured environment.
-  metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-  /** URL to screenshot stored on object storage — never base64 inline. */
-  screenshotUrl: text('screenshot_url'),
-  /**
-   * Private admin notes. Single-admin product, so this is a plain
-   * free-text field rather than a joined comments table — one stream
-   * of notes per ticket, no threading, no authorship to track.
-   * Never shown to the widget reporter.
-   */
-  notes: text('notes'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const tickets = pgTable(
+  'tickets',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    kind: ticketKindEnum('kind').notNull(),
+    title: text('title').notNull(),
+    description: text('description').notNull(),
+    status: ticketStatusEnum('status').notNull().default('open'),
+    priority: ticketPriorityEnum('priority').notNull().default('medium'),
+    reporterId: text('reporter_id').notNull(),
+    reporterName: text('reporter_name'),
+    reporterEmail: text('reporter_email'),
+    /**
+     * True when the reporter was validated via HMAC at submission time.
+     * Lets the admin UI distinguish verified vs. self-asserted identities.
+     */
+    reporterVerified: boolean('reporter_verified').notNull().default(false),
+    // Bug-only fields.
+    stepsToReproduce: text('steps_to_reproduce'),
+    expectedBehavior: text('expected_behavior'),
+    actualBehavior: text('actual_behavior'),
+    // Captured environment.
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    /** URL to screenshot stored on object storage — never base64 inline. */
+    screenshotUrl: text('screenshot_url'),
+    /**
+     * Private admin notes. Single-admin product, so this is a plain
+     * free-text field rather than a joined comments table — one stream
+     * of notes per ticket, no threading, no authorship to track.
+     * Never shown to the widget reporter.
+     */
+    notes: text('notes'),
+    /**
+     * Whether this ticket is published on the public product roadmap at
+     * `/r/:projectKey`. Default false — admins opt in per ticket so the
+     * public page is curated, not a raw dump of every submission.
+     */
+    isPublicRoadmap: boolean('is_public_roadmap').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    publicRoadmapIdx: index('tickets_project_public_roadmap_idx')
+      .on(t.projectId, t.status)
+      .where(sql`${t.isPublicRoadmap} = true`),
+  }),
+);
 
 /**
  * Each row is one user's vote on one feature request. Composite PK on

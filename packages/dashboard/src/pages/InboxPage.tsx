@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Bug, Heart, Lightbulb, Search as SearchIcon, ShieldAlert } from 'lucide-react';
+import { Bug, Globe, Heart, Lightbulb, Search as SearchIcon, ShieldAlert } from 'lucide-react';
 import { inboxRoute, type InboxSearch } from '../router';
 import type { TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
@@ -410,6 +410,11 @@ function TicketRow({
                 {ticket.title}
               </h3>
               <StatusTag status={ticket.status} />
+              {ticket.isPublicRoadmap && (
+                <Badge variant="ghost" className="gap-1 text-muted-foreground">
+                  <Globe className="size-3" /> On roadmap
+                </Badge>
+              )}
               {!ticket.reporterVerified && (
                 <Badge variant="ghost" className="gap-1 text-muted-foreground">
                   <ShieldAlert className="size-3" /> unverified

@@ -5,6 +5,7 @@ import { BugReportForm } from './forms/BugReportForm';
 import { FeatureRequestForm } from './forms/FeatureRequestForm';
 import { IntentPicker, type Intent } from './IntentPicker';
 import { BrowseList } from './BrowseList';
+import { MyRequestsList } from './MyRequestsList';
 
 export interface PanelProps {
   onClose: () => void;
@@ -31,6 +32,13 @@ export function Panel({ onClose }: PanelProps) {
   // on that screen — one less tap for a single-purpose deployment.
   const initialIntent = soloEnabledIntent(features);
   const [screen, setScreen] = useState<Intent | null>(initialIntent);
+
+  // Only non-anonymous identified sessions can "see their requests" —
+  // matches the gating in IntentPicker so success-state CTAs don't
+  // offer a tab that doesn't exist for the caller.
+  const userId = config.user?.id;
+  const canSeeMyRequests = Boolean(userId && userId !== 'anonymous');
+  const goToMyRequests = canSeeMyRequests ? () => setScreen('my-requests') : undefined;
 
   // Track visual viewport so the panel body follows the keyboard on
   // mobile. Writes a CSS variable; no React re-render per resize.
@@ -90,9 +98,10 @@ export function Panel({ onClose }: PanelProps) {
 
       <div className="koe-panel-body koe-p-4">
         {screen === null && <IntentPicker onPick={setScreen} />}
-        {screen === 'bug' && <BugReportForm />}
-        {screen === 'feature' && <FeatureRequestForm />}
+        {screen === 'bug' && <BugReportForm onViewMyRequests={goToMyRequests} />}
+        {screen === 'feature' && <FeatureRequestForm onViewMyRequests={goToMyRequests} />}
         {screen === 'vote' && <BrowseList />}
+        {screen === 'my-requests' && <MyRequestsList />}
       </div>
     </div>
   );
@@ -110,6 +119,7 @@ function headerTitle(screen: Intent | null, locale: ReturnType<typeof useKoe>['l
   if (screen === 'bug') return locale.picker?.bug ?? 'Report a bug';
   if (screen === 'feature') return locale.picker?.feature ?? 'Suggest an idea';
   if (screen === 'vote') return locale.browse?.title ?? 'Ideas';
+  if (screen === 'my-requests') return locale.myRequests?.title ?? 'My requests';
   return locale.title;
 }
 
