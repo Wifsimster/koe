@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
 import { INBOX_DEFAULT_SEARCH } from '../router';
@@ -14,6 +14,28 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+
+  // Post-login navigation is driven by an effect, not by a direct
+  // `navigate()` call after `await login()`. The auth transition from
+  // 'unauthenticated' → 'loading' → 'authenticated' settles across
+  // multiple render ticks, and `<RouterProvider context={{ auth }}>`
+  // only sees the new auth state on its next commit. Calling navigate
+  // synchronously after login races that commit: the `_authenticated`
+  // beforeLoad reads the stale 'unauthenticated' context and bounces
+  // straight back to /login with `redirectTo=/` — leaving the user
+  // stranded on the sign-in form even though the cookie is set.
+  //
+  // Watching `state.status` inside an effect sidesteps the race: the
+  // effect runs AFTER React commits, so the router context is
+  // guaranteed to reflect the authenticated state by the time we
+  // navigate.
+  const pendingNavRef = useRef(false);
+  useEffect(() => {
+    if (pendingNavRef.current && state.status === 'authenticated') {
+      pendingNavRef.current = false;
+      void navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
+    }
+  }, [state.status, navigate]);
 
   if (mode === 'oidc') {
     return (
@@ -47,7 +69,7 @@ export function LoginPage() {
       setSubmitting(true);
       try {
         await login(undefined, { email: email.trim(), password });
-        await navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
+        pendingNavRef.current = true;
       } catch (err) {
         setError(
           err instanceof Error && err.message
@@ -121,7 +143,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(trimmed);
-      await navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
+      pendingNavRef.current = true;
     } finally {
       setSubmitting(false);
     }
