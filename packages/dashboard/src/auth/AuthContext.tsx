@@ -4,181 +4,93 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
-import { AdminApiClient, AdminApiError, type Me, type Membership } from '../api/client';
+import {
+  AdminApiClient,
+  AdminApiError,
+  type AdminProject,
+  type Me,
+} from '../api/client';
 
-const TOKEN_KEY = 'koe.adminToken';
 const ACTIVE_PROJECT_KEY = 'koe.activeProjectKey';
-
-export type AuthMode = 'oidc' | 'dev-session' | 'password';
 
 type AuthState =
   | { status: 'loading' }
   | { status: 'unauthenticated' }
-  | { status: 'authenticated'; me: Me; activeProjectKey: string | null };
+  | {
+      status: 'authenticated';
+      me: Me;
+      projects: AdminProject[];
+      activeProjectKey: string | null;
+    };
 
 export interface AuthContextValue {
-  mode: AuthMode;
   state: AuthState;
   api: AdminApiClient;
-  /**
-   * Transport-dependent:
-   *   - `oidc`        → triggers a full-page redirect to the provider.
-   *                     Args are ignored.
-   *   - `dev-session` → caller passes the raw CLI-minted token as `token`.
-   *   - `password`    → caller passes `{ email, password }` via the
-   *                     second arg. On success the server sets a
-   *                     session cookie same-origin.
-   */
-  login: (
-    token?: string,
-    credentials?: { email: string; password: string },
-  ) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   setActiveProject: (key: string) => void;
-  /**
-   * Re-fetch `/me` and update `state.memberships` in place. Used after
-   * actions that change membership (creating a project, inviting or
-   * removing a member) so the switcher / onboarding gate reflect the
-   * new state without a full page reload. On 401 the user is kicked to
-   * the login screen — same behaviour as the initial load.
-   */
-  refreshMe: () => Promise<void>;
+  /** Re-fetch /me + /projects. Used after creating a project. */
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export interface AuthProviderProps {
   baseUrl: string;
-  /** Auth transport — picked by the API deployment, surfaced via
-   *  `VITE_ADMIN_AUTH_MODE`. Default is `oidc`. */
-  mode?: AuthMode;
-  /** Kick-off URL for the OIDC dance, passed through to the API
-   *  client so 401s can redirect. Ignored in dev-session mode. */
-  loginUrl?: string;
-  /** Server-side logout endpoint that clears the session cookie. */
-  logoutUrl?: string;
   children: ReactNode;
 }
 
 /**
- * Holds the current user + memberships + active project.
- *
- * Two transports, one shape:
- *   - `oidc`        → session travels in a same-origin cookie set by
- *                     the `/v1/admin/auth/callback` handler. We never
- *                     see the token; `/me` validates the cookie on
- *                     each call.
- *   - `dev-session` → the CLI-issued bearer token lives in
- *                     localStorage. Clunky, interim, explicitly
- *                     dev-only. Preserved so local contributors
- *                     working without an OIDC provider can still use
- *                     the dashboard.
+ * Single-admin auth. The server holds the credentials in env vars and
+ * the session is a same-origin signed cookie — the dashboard never
+ * sees a token. We start in `loading` because the browser may carry a
+ * cookie from a prior session, and only `/me` can tell us if it's
+ * still valid.
  */
-export function AuthProvider({ baseUrl, mode = 'oidc', loginUrl, logoutUrl, children }: AuthProviderProps) {
-  const tokenRef = useRef<string | null>(
-    mode === 'dev-session' ? readStoredToken() : null,
-  );
+export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
+  const [state, setState] = useState<AuthState>({ status: 'loading' });
 
-  // Cookie-based modes (oidc, password) always start in `loading` —
-  // the browser might carry a valid cookie from a previous session and
-  // we need to call /me to find out. In dev-session mode we only go
-  // to `loading` if we already have a token on disk.
-  const initialState: AuthState =
-    mode === 'oidc' || mode === 'password' || tokenRef.current
-      ? { status: 'loading' }
-      : { status: 'unauthenticated' };
-  const [state, setState] = useState<AuthState>(initialState);
+  const api = useMemo(() => new AdminApiClient({ baseUrl }), [baseUrl]);
 
-  const api = useMemo(
-    () =>
-      new AdminApiClient({
-        baseUrl,
-        getToken: mode === 'dev-session' ? () => tokenRef.current : undefined,
-        loginUrl,
-        logoutUrl,
-      }),
-    [baseUrl, mode, loginUrl, logoutUrl],
-  );
-
-  const clearAuth = useCallback(() => {
-    tokenRef.current = null;
+  const refresh = useCallback(async () => {
     try {
-      localStorage.removeItem(TOKEN_KEY);
-    } catch {
-      // Private-mode Safari throws on localStorage — token was
-      // in-memory only, nothing to clean up.
-    }
-    setState({ status: 'unauthenticated' });
-  }, []);
-
-  const fetchMe = useCallback(async () => {
-    try {
-      const me = await api.me();
+      const [me, projects] = await Promise.all([api.me(), api.listProjects()]);
       setState({
         status: 'authenticated',
         me,
-        activeProjectKey: pickActiveProject(me.memberships),
+        projects,
+        activeProjectKey: pickActiveProject(projects),
       });
     } catch (err) {
       if (err instanceof AdminApiError && err.status === 401) {
-        clearAuth();
+        setState({ status: 'unauthenticated' });
         return;
       }
-      // Transient network / server error: stay unauthenticated
-      // rather than leave the app in a half-loaded state. The login
-      // screen will show and the user can retry.
-      console.warn('[koe/dashboard] /me failed', err);
-      clearAuth();
+      console.warn('[koe/dashboard] auth refresh failed', err);
+      setState({ status: 'unauthenticated' });
     }
-  }, [api, clearAuth]);
+  }, [api]);
 
   useEffect(() => {
-    if (state.status === 'loading') void fetchMe();
-    // fetchMe is stable; we only want this to re-run when we move
-    // back into 'loading' (after a successful login or on mount).
+    if (state.status === 'loading') void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status]);
 
   const login = useCallback<AuthContextValue['login']>(
-    async (token, credentials) => {
-      if (mode === 'oidc') {
-        // Full-page redirect to the provider. Carries where we'd like
-        // to land after the callback.
-        api.redirectToLogin(window.location.pathname);
-        return;
-      }
-      if (mode === 'password') {
-        if (!credentials) throw new Error('password login requires credentials');
-        // Server sets the session cookie on success — we don't see
-        // the raw token. Then flip to `loading` so the effect refetches
-        // /me and lands us in `authenticated`.
-        await api.loginWithPassword(credentials.email, credentials.password);
-        setState({ status: 'loading' });
-        return;
-      }
-      // dev-session mode — caller passed the raw token.
-      if (!token) throw new Error('dev-session login requires a token');
-      tokenRef.current = token;
-      try {
-        localStorage.setItem(TOKEN_KEY, token);
-      } catch {
-        // see clearAuth
-      }
+    async (email, password) => {
+      await api.loginWithPassword(email, password);
       setState({ status: 'loading' });
     },
-    [api, mode],
+    [api],
   );
 
   const logout = useCallback<AuthContextValue['logout']>(async () => {
-    if (mode === 'oidc' || mode === 'password') {
-      await api.logout();
-    }
-    clearAuth();
-  }, [api, clearAuth, mode]);
+    await api.logout();
+    setState({ status: 'unauthenticated' });
+  }, [api]);
 
   const setActiveProject = useCallback<AuthContextValue['setActiveProject']>((key) => {
     setState((prev) => {
@@ -186,15 +98,15 @@ export function AuthProvider({ baseUrl, mode = 'oidc', loginUrl, logoutUrl, chil
       try {
         localStorage.setItem(ACTIVE_PROJECT_KEY, key);
       } catch {
-        // ignored — same localStorage caveat
+        // Private-mode Safari throws — ignore.
       }
       return { ...prev, activeProjectKey: key };
     });
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ mode, state, api, login, logout, setActiveProject, refreshMe: fetchMe }),
-    [mode, state, api, login, logout, setActiveProject, fetchMe],
+    () => ({ state, api, login, logout, setActiveProject, refresh }),
+    [state, api, login, logout, setActiveProject, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -206,14 +118,6 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
-function readStoredToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
 function readStoredActiveProject(): string | null {
   try {
     return localStorage.getItem(ACTIVE_PROJECT_KEY);
@@ -222,9 +126,9 @@ function readStoredActiveProject(): string | null {
   }
 }
 
-function pickActiveProject(memberships: Membership[]): string | null {
-  if (memberships.length === 0) return null;
+function pickActiveProject(projects: AdminProject[]): string | null {
+  if (projects.length === 0) return null;
   const stored = readStoredActiveProject();
-  if (stored && memberships.some((m) => m.projectKey === stored)) return stored;
-  return memberships[0]!.projectKey;
+  if (stored && projects.some((p) => p.key === stored)) return stored;
+  return projects[0]!.key;
 }

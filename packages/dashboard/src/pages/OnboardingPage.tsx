@@ -11,15 +11,14 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Textarea } from '../components/ui/textarea';
 
 /**
- * First-project onboarding. Shown when an authenticated admin has zero
- * memberships — replaces the CLI `bootstrap` flow with an in-dashboard
- * form. After a successful create the result screen displays the
- * plaintext `identitySecret` exactly once: the server encrypts it at
- * rest and never returns it again, so copying it here is the operator's
- * only chance.
+ * Project creation surface. Used both for the empty-state landing
+ * (no projects yet) and for adding additional projects via the
+ * sidebar's "+ Create project" entry. After a successful create the
+ * result screen displays the plaintext `identitySecret` exactly once:
+ * the server encrypts it at rest and never returns it again.
  */
 export function OnboardingPage() {
-  const { api, state, refreshMe, setActiveProject } = useAuth();
+  const { api, state, refresh, setActiveProject } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
@@ -67,11 +66,11 @@ export function OnboardingPage() {
         allowedOrigins: allowedOrigins.length ? allowedOrigins : undefined,
         requireIdentityVerification: requireVerification || undefined,
       });
-      // Refresh /me so the switcher and any other UI picks up the new
-      // membership. Do it before we show the secret — if the refresh
+      // Refresh the projects list so the switcher picks up the new
+      // project. Do it before we show the secret — if the refresh
       // 401s the auth layer kicks to /login, which is less jarring
       // than showing a secret that the rest of the UI can't see.
-      await refreshMe();
+      await refresh();
       setActiveProject(result.project.key);
       setCreated(result);
     } catch (err) {
@@ -146,7 +145,7 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
     );
   }
 
-  const hasExistingProjects = state.me.memberships.length > 0;
+  const hasExistingProjects = state.projects.length > 0;
 
   return (
     <Shell

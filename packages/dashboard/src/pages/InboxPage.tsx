@@ -4,12 +4,7 @@ import { Bug, Lightbulb, Search as SearchIcon, ShieldAlert } from 'lucide-react'
 import type { InboxSearch } from '../router';
 import type { TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type {
-  AdminProject,
-  AdminTicket,
-  AssigneeFilter,
-  ProjectMember,
-} from '../api/client';
+import type { AdminProject, AdminTicket } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { HeartbeatBadge } from '../components/HeartbeatBadge';
 import { Badge } from '../components/ui/badge';
@@ -33,7 +28,7 @@ export function InboxPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { kind, status, assignee, q } = useSearch({
+  const { kind, status, q } = useSearch({
     from: '/_authenticated/',
   }) as unknown as InboxSearch;
   const navigate = useNavigate();
@@ -53,14 +48,6 @@ export function InboxPage() {
       }),
     [navigate],
   );
-  const setAssignee = useCallback(
-    (v: AssigneeFilter | 'all') =>
-      void navigate({
-        to: '/',
-        search: (prev) => ({ ...(prev as unknown as InboxSearch), assignee: v }),
-      }),
-    [navigate],
-  );
   const setQ = useCallback(
     (v: string) =>
       void navigate({
@@ -71,7 +58,6 @@ export function InboxPage() {
     [navigate],
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [members, setMembers] = useState<ProjectMember[] | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [pendingBulk, setPendingBulk] = useState<{ status: TicketStatus; count: number } | null>(
@@ -80,32 +66,13 @@ export function InboxPage() {
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
-  const role =
-    state.status === 'authenticated'
-      ? state.me.memberships.find((m) => m.projectKey === activeKey)?.role ?? 'viewer'
-      : 'viewer';
-  const canWrite = role === 'owner' || role === 'member';
-
   useEffect(() => {
-    if (!activeKey) {
+    if (!activeKey || state.status !== 'authenticated') {
       setProject(null);
       return;
     }
-    let alive = true;
-    api
-      .listProjects()
-      .then((rows) => {
-        if (!alive) return;
-        setProject(rows.find((p) => p.key === activeKey) ?? null);
-      })
-      .catch((err) => {
-        if (!alive) return;
-        console.warn('[koe/dashboard] listProjects failed', err);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [activeKey, api]);
+    setProject(state.projects.find((p) => p.key === activeKey) ?? null);
+  }, [activeKey, state]);
 
   const loadTickets = useCallback(async () => {
     if (!activeKey) return;
@@ -115,7 +82,6 @@ export function InboxPage() {
       const page = await api.listTickets(activeKey, {
         kind: kind === 'all' ? undefined : kind,
         status: status === 'all' ? undefined : status,
-        assignee: assignee === 'all' ? undefined : assignee,
         search: q ? q : undefined,
       });
       setTickets(page.items);
@@ -124,39 +90,19 @@ export function InboxPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeKey, api, kind, status, assignee, q]);
+  }, [activeKey, api, kind, status, q]);
 
   useEffect(() => {
     void loadTickets();
   }, [loadTickets]);
 
   useEffect(() => {
-    if (!activeKey || !canWrite) return;
-    let alive = true;
-    api
-      .listProjectMembers(activeKey)
-      .then((rows) => {
-        if (alive) setMembers(rows);
-      })
-      .catch((err) => {
-        console.warn('[koe/dashboard] listProjectMembers failed', err);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [activeKey, api, canWrite]);
-
-  useEffect(() => {
     setSelected(new Set());
     setBulkError(null);
-  }, [activeKey, kind, status, assignee, q]);
+  }, [activeKey, kind, status, q]);
 
   const applyBulk = useCallback(
-    async (patch: {
-      status?: TicketStatus;
-      priority?: TicketPriority;
-      assignedToUserId?: string | null;
-    }) => {
+    async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
       if (!activeKey || selected.size === 0) return;
       setBulkError(null);
       setBulkSubmitting(true);
@@ -205,8 +151,7 @@ export function InboxPage() {
   if (!activeKey) {
     return (
       <div className="border border-dashed border-border bg-muted/30 p-8 text-sm text-muted-foreground">
-        You don't have access to any project yet. An owner has to invite you before you can triage
-        tickets.
+        Pick a project from the sidebar, or create one to start collecting tickets.
       </div>
     );
   }
@@ -249,26 +194,18 @@ export function InboxPage() {
           <StatusSelect value={status} onChange={setStatus} />
         </div>
 
-        <FilterChips
-          kind={kind}
-          onKindChange={setKind}
-          assignee={assignee}
-          onAssigneeChange={setAssignee}
-          counts={counts}
-        />
+        <FilterChips kind={kind} onKindChange={setKind} counts={counts} />
       </section>
 
       {error && <ErrorLine>{error}</ErrorLine>}
 
-      {canWrite && selected.size > 0 && (
+      {selected.size > 0 && (
         <BulkToolbar
           count={selected.size}
-          members={members}
           submitting={bulkSubmitting}
           error={bulkError}
           onStatus={requestBulkStatus}
           onPriority={(p) => void applyBulk({ priority: p })}
-          onAssignee={(a) => void applyBulk({ assignedToUserId: a })}
           onClear={clearSelection}
         />
       )}
@@ -294,7 +231,7 @@ export function InboxPage() {
         <EmptyTickets project={project} />
       ) : (
         <section>
-          {canWrite && tickets && tickets.length > 0 && (
+          {tickets && tickets.length > 0 && (
             <div className="flex items-center gap-3 border-y py-3 text-[11px] tracking-[0.15em] uppercase text-muted-foreground">
               <Checkbox
                 checked={
@@ -322,7 +259,6 @@ export function InboxPage() {
               <TicketRow
                 key={t.id}
                 ticket={t}
-                selectable={canWrite}
                 selected={selected.has(t.id)}
                 onToggleSelect={() => toggleSelected(t.id)}
               />
@@ -337,14 +273,10 @@ export function InboxPage() {
 function FilterChips({
   kind,
   onKindChange,
-  assignee,
-  onAssigneeChange,
   counts,
 }: {
   kind: TicketKind | 'all';
   onKindChange: (v: TicketKind | 'all') => void;
-  assignee: AssigneeFilter | 'all';
-  onAssigneeChange: (v: AssigneeFilter | 'all') => void;
   counts: { all: number; bug: number; feature: number };
 }) {
   return (
@@ -359,19 +291,6 @@ function FilterChips({
       <Chip active={kind === 'feature'} onClick={() => onKindChange('feature')}>
         <Lightbulb className="size-3" />
         Ideas <Count>{counts.feature}</Count>
-      </Chip>
-      <span className="mx-1 hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
-      <Chip
-        active={assignee === 'me'}
-        onClick={() => onAssigneeChange(assignee === 'me' ? 'all' : 'me')}
-      >
-        Mine
-      </Chip>
-      <Chip
-        active={assignee === 'unassigned'}
-        onClick={() => onAssigneeChange(assignee === 'unassigned' ? 'all' : 'unassigned')}
-      >
-        Unassigned
       </Chip>
     </div>
   );
@@ -460,12 +379,10 @@ function StatusSelect({
 
 function TicketRow({
   ticket,
-  selectable,
   selected,
   onToggleSelect,
 }: {
   ticket: AdminTicket;
-  selectable: boolean;
   selected: boolean;
   onToggleSelect: () => void;
 }) {
@@ -483,25 +400,20 @@ function TicketRow({
           className="absolute left-0 top-4 bottom-4 w-[2px] bg-primary"
         />
       )}
-      {selectable && (
-        <label
-          className="flex items-center pt-0.5 pl-3 pr-1"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Checkbox
-            checked={selected}
-            onCheckedChange={onToggleSelect}
-            aria-label={`Select ticket "${ticket.title}"`}
-          />
-        </label>
-      )}
+      <label
+        className="flex items-center pt-0.5 pl-3 pr-1"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Checkbox
+          checked={selected}
+          onCheckedChange={onToggleSelect}
+          aria-label={`Select ticket "${ticket.title}"`}
+        />
+      </label>
       <Link
         to="/tickets/$id"
         params={{ id: ticket.id }}
-        className={cn(
-          'flex-1 min-w-0 block py-0.5 pl-1 pr-3 outline-none group-hover:bg-muted/30 focus-visible:bg-muted/40',
-          !selectable && 'pl-4',
-        )}
+        className="flex-1 min-w-0 block py-0.5 pl-1 pr-3 outline-none group-hover:bg-muted/30 focus-visible:bg-muted/40"
       >
         <div className="flex items-start gap-3">
           <KindGlyph kind={ticket.kind} />
@@ -524,7 +436,6 @@ function TicketRow({
               </time>
               {ticket.reporterEmail && <span>{ticket.reporterEmail}</span>}
               {ticket.kind === 'feature' && <span>{ticket.voteCount} votes</span>}
-              <AssigneeChip ticket={ticket} />
             </div>
           </div>
         </div>
@@ -547,21 +458,17 @@ function KindGlyph({ kind }: { kind: TicketKind }) {
 
 function BulkToolbar({
   count,
-  members,
   submitting,
   error,
   onStatus,
   onPriority,
-  onAssignee,
   onClear,
 }: {
   count: number;
-  members: ProjectMember[] | null;
   submitting: boolean;
   error: string | null;
   onStatus: (v: TicketStatus) => void;
   onPriority: (v: TicketPriority) => void;
-  onAssignee: (v: string | null) => void;
   onClear: () => void;
 }) {
   return (
@@ -593,18 +500,6 @@ function BulkToolbar({
             { value: 'medium', label: 'Medium' },
             { value: 'high', label: 'High' },
             { value: 'critical', label: 'Critical' },
-          ]}
-        />
-        <BulkSelect
-          disabled={submitting || members === null}
-          placeholder="Assign to…"
-          onChange={(v) => onAssignee(v === '__unassign__' ? null : v)}
-          options={[
-            { value: '__unassign__', label: 'Unassign' },
-            ...(members ?? []).map((m) => ({
-              value: m.userId,
-              label: m.displayName ?? m.email,
-            })),
           ]}
         />
         <div className="ml-auto">
@@ -681,14 +576,6 @@ function statusVariant(s: TicketStatus): 'default' | 'secondary' | 'outline' | '
   }
 }
 
-function AssigneeChip({ ticket }: { ticket: AdminTicket }) {
-  if (ticket.assignedToUserId === null) {
-    return <span className="text-destructive/80">unassigned</span>;
-  }
-  const label = ticket.assignedToDisplayName ?? ticket.assignedToEmail ?? 'someone';
-  return <span>→ {label}</span>;
-}
-
 function EmptyTickets({ project }: { project: AdminProject | null }) {
   return (
     <div className="border border-dashed border-border bg-muted/30 p-10 text-center">
@@ -725,7 +612,7 @@ function confirmBodyFor(status: TicketStatus): string {
   if (status === 'closed') {
     return "Closed tickets drop out of the triage inbox by default. You can still re-open them from the detail page, and the change is visible in each ticket's Activity log.";
   }
-  return "Won't-fix tells reporters the team has decided not to take this on. The change shows up in each ticket's Activity log and can be reverted from the detail page.";
+  return "Won't-fix tells reporters you've decided not to take this on. The change shows up in each ticket's Activity log and can be reverted from the detail page.";
 }
 
 function confirmLabelFor(status: TicketStatus): string {

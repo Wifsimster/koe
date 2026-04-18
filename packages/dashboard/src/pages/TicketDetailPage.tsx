@@ -3,7 +3,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft, Bug, Lightbulb, ShieldAlert } from 'lucide-react';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type { AdminTicket, ProjectMember, TicketComment, TicketEvent } from '../api/client';
+import type { AdminTicket, TicketComment, TicketEvent } from '../api/client';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { INBOX_DEFAULT_SEARCH } from '../router';
 import { Badge } from '../components/ui/badge';
@@ -24,7 +24,6 @@ export function TicketDetailPage() {
   const { state, api } = useAuth();
   const [ticket, setTicket] = useState<AdminTicket | null>(null);
   const [events, setEvents] = useState<TicketEvent[] | null>(null);
-  const [members, setMembers] = useState<ProjectMember[] | null>(null);
   const [comments, setComments] = useState<TicketComment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
@@ -33,11 +32,6 @@ export function TicketDetailPage() {
   const [batchReverting, setBatchReverting] = useState(false);
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
-  const role =
-    state.status === 'authenticated'
-      ? state.me.memberships.find((m) => m.projectKey === activeKey)?.role ?? 'viewer'
-      : 'viewer';
-  const canWrite = role === 'owner' || role === 'member';
 
   useEffect(() => {
     if (!activeKey) return;
@@ -94,22 +88,6 @@ export function TicketDetailPage() {
     void loadEvents();
   };
 
-  useEffect(() => {
-    if (!activeKey || !canWrite) return;
-    let alive = true;
-    api
-      .listProjectMembers(activeKey)
-      .then((rows) => {
-        if (alive) setMembers(rows);
-      })
-      .catch((err) => {
-        console.warn('[koe/dashboard] listProjectMembers failed', err);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [activeKey, api, canWrite]);
-
   const revertEvent = async (eventId: string): Promise<void> => {
     if (!activeKey) return;
     try {
@@ -146,11 +124,7 @@ export function TicketDetailPage() {
     }
   };
 
-  const applyPatch = async (patch: {
-    status?: TicketStatus;
-    priority?: TicketPriority;
-    assignedToUserId?: string | null;
-  }) => {
+  const applyPatch = async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
     if (!activeKey || !ticket) return;
     const prev = ticket;
     setMutError(null);
@@ -262,15 +236,13 @@ export function TicketDetailPage() {
             </Section>
           )}
 
-          <Section title="Comments">
-            <CommentsPanel comments={comments} canWrite={canWrite} onSubmit={postComment} />
+          <Section title="Notes">
+            <CommentsPanel comments={comments} onSubmit={postComment} />
           </Section>
 
           <Section title="Activity">
             <ActivityList
               events={events}
-              members={members}
-              canRevert={canWrite}
               onRevert={revertEvent}
               onRevertBatch={revertBatch}
             />
@@ -279,41 +251,16 @@ export function TicketDetailPage() {
 
         <aside className="space-y-6 md:sticky md:top-24 md:self-start">
           <MetaCard title="State">
-            {canWrite ? (
-              <StatusSelect
-                value={ticket.status}
-                disabled={mutating}
-                onChange={(status) => void applyPatch({ status })}
-              />
-            ) : (
-              <ReadonlyRow label="status" value={ticket.status.replace('_', ' ')} />
-            )}
-            {canWrite ? (
-              <PrioritySelect
-                value={ticket.priority}
-                disabled={mutating}
-                onChange={(priority) => void applyPatch({ priority })}
-              />
-            ) : (
-              <ReadonlyRow label="priority" value={ticket.priority} />
-            )}
-            {canWrite ? (
-              <AssigneeSelect
-                value={ticket.assignedToUserId}
-                members={members}
-                disabled={mutating}
-                onChange={(assignedToUserId) => void applyPatch({ assignedToUserId })}
-              />
-            ) : (
-              <ReadonlyRow
-                label="assignee"
-                value={
-                  ticket.assignedToUserId === null
-                    ? 'unassigned'
-                    : (ticket.assignedToDisplayName ?? ticket.assignedToEmail ?? 'someone')
-                }
-              />
-            )}
+            <StatusSelect
+              value={ticket.status}
+              disabled={mutating}
+              onChange={(status) => void applyPatch({ status })}
+            />
+            <PrioritySelect
+              value={ticket.priority}
+              disabled={mutating}
+              onChange={(priority) => void applyPatch({ priority })}
+            />
             {mutError && (
               <p role="alert" className="text-xs text-destructive">
                 {mutError}
@@ -341,7 +288,7 @@ export function TicketDetailPage() {
       {pendingBatchRevert && (
         <ConfirmDialog
           title="Undo this batch?"
-          body="Every ticket that was part of the bulk action will be reverted where possible. Skipped tickets (assignee left the project, already at the target state) will be reported."
+          body="Every ticket that was part of the bulk action will be reverted where possible. Tickets already at the target state will be skipped and reported."
           confirmLabel="Undo batch"
           submitting={batchReverting}
           onConfirm={() => void performBatchRevert(pendingBatchRevert)}
@@ -354,11 +301,9 @@ export function TicketDetailPage() {
 
 function CommentsPanel({
   comments,
-  canWrite,
   onSubmit,
 }: {
   comments: TicketComment[] | null;
-  canWrite: boolean;
   onSubmit: (body: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState('');
@@ -375,7 +320,7 @@ function CommentsPanel({
       await onSubmit(body);
       setDraft('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to post comment');
+      setError(err instanceof Error ? err.message : 'Failed to post note');
     } finally {
       setSubmitting(false);
     }
@@ -383,50 +328,44 @@ function CommentsPanel({
 
   return (
     <div className="space-y-4">
-      {canWrite && (
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Leave a note for your teammates…"
-            rows={3}
-            maxLength={10_000}
-            disabled={submitting}
-          />
-          <div className="flex items-center gap-3">
-            {error && (
-              <p role="alert" className="flex-1 text-xs text-destructive">
-                {error}
-              </p>
-            )}
-            <div className="ml-auto">
-              <Button
-                type="submit"
-                size="sm"
-                disabled={submitting || draft.trim().length === 0}
-              >
-                {submitting ? 'Posting…' : 'Post comment'}
-              </Button>
-            </div>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <Textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Leave a private note for yourself…"
+          rows={3}
+          maxLength={10_000}
+          disabled={submitting}
+        />
+        <div className="flex items-center gap-3">
+          {error && (
+            <p role="alert" className="flex-1 text-xs text-destructive">
+              {error}
+            </p>
+          )}
+          <div className="ml-auto">
+            <Button
+              type="submit"
+              size="sm"
+              disabled={submitting || draft.trim().length === 0}
+            >
+              {submitting ? 'Posting…' : 'Post note'}
+            </Button>
           </div>
-        </form>
-      )}
+        </div>
+      </form>
 
       {comments === null ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : comments.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No comments yet.{canWrite ? ' Internal notes stay off the reporter.' : ''}
+          No notes yet. Notes stay private — never shown to the reporter.
         </p>
       ) : (
         <ol className="space-y-4">
           {comments.map((c) => (
             <li key={c.id} className="border-l-2 border-border pl-4">
-              <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">
-                  {c.authorDisplayName ?? c.authorEmail ?? 'deleted user'}
-                </span>
-                <span>·</span>
+              <div className="font-mono text-[11px] text-muted-foreground">
                 <time dateTime={c.createdAt}>{new Date(c.createdAt).toLocaleString()}</time>
               </div>
               <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{c.body}</p>
@@ -440,14 +379,10 @@ function CommentsPanel({
 
 function ActivityList({
   events,
-  members,
-  canRevert,
   onRevert,
   onRevertBatch,
 }: {
   events: TicketEvent[] | null;
-  members: ProjectMember[] | null;
-  canRevert: boolean;
   onRevert: (eventId: string) => Promise<void>;
   onRevertBatch: (batchId: string) => Promise<void>;
 }) {
@@ -457,7 +392,7 @@ function ActivityList({
   if (events.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No changes yet. Status, priority, and assignment edits will show up here.
+        No changes yet. Status and priority edits will show up here.
       </p>
     );
   }
@@ -474,10 +409,7 @@ function ActivityList({
   return (
     <ol className="space-y-5 border-l border-border pl-5">
       {events.map((ev) => {
-        const revertable =
-          ev.kind === 'status_changed' ||
-          ev.kind === 'priority_changed' ||
-          ev.kind === 'assigned';
+        const revertable = ev.kind === 'status_changed' || ev.kind === 'priority_changed';
         const wasRevert = typeof (ev.payload as Record<string, unknown>).revertOf === 'string';
         return (
           <li
@@ -490,9 +422,8 @@ function ActivityList({
           >
             <div className="flex-1 min-w-0 text-sm">
               <div>
-                <span className="font-medium">{ev.actorEmail ?? 'deleted user'}</span>{' '}
                 <span className="text-muted-foreground">
-                  {describeEvent(ev, members)}
+                  {describeEvent(ev)}
                   {wasRevert && <span className="ml-1">(revert)</span>}
                 </span>
               </div>
@@ -500,7 +431,7 @@ function ActivityList({
                 {new Date(ev.createdAt).toLocaleString()}
               </div>
             </div>
-            {canRevert && revertable && (
+            {revertable && (
               <div className="flex shrink-0 flex-col items-end gap-1 text-[11px]">
                 <button
                   type="button"
@@ -529,37 +460,26 @@ function ActivityList({
   );
 }
 
-function describeEvent(ev: TicketEvent, members: ProjectMember[] | null): string {
+function describeEvent(ev: TicketEvent): string {
   if (ev.kind === 'status_changed') {
     const from = readString(ev.payload.from);
     const to = readString(ev.payload.to);
-    return `changed status from ${from} to ${to}`;
+    return `Status changed from ${from} to ${to}`;
   }
   if (ev.kind === 'priority_changed') {
     const from = readString(ev.payload.from);
     const to = readString(ev.payload.to);
-    return `changed priority from ${from} to ${to}`;
-  }
-  if (ev.kind === 'assigned') {
-    const toUserId = readNullableString(ev.payload.toUserId);
-    if (toUserId === null) return 'unassigned the ticket';
-    const target = members?.find((m) => m.userId === toUserId);
-    return `assigned the ticket to ${target?.email ?? 'someone'}`;
+    return `Priority changed from ${from} to ${to}`;
   }
   if (ev.kind === 'commented') {
     const excerpt = readString(ev.payload.excerpt);
-    return excerpt === '?' ? 'left a comment' : `left a comment: "${excerpt}"`;
+    return excerpt === '?' ? 'Note added' : `Note added: "${excerpt}"`;
   }
-  return `performed ${ev.kind}`;
+  return ev.kind;
 }
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.replace(/_/g, ' ') : '?';
-}
-
-function readNullableString(value: unknown): string | null {
-  if (value === null) return null;
-  return typeof value === 'string' ? value : null;
 }
 
 const STATUS_OPTIONS: Array<{ value: TicketStatus; label: string }> = [
@@ -650,41 +570,6 @@ function PrioritySelect({
           {PRIORITY_OPTIONS.map((o) => (
             <SelectItem key={o.value} value={o.value}>
               {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </EditRow>
-  );
-}
-
-function AssigneeSelect({
-  value,
-  members,
-  disabled,
-  onChange,
-}: {
-  value: string | null;
-  members: ProjectMember[] | null;
-  disabled: boolean;
-  onChange: (v: string | null) => void;
-}) {
-  const UNASSIGNED = '__unassigned__';
-  return (
-    <EditRow label="Assignee">
-      <Select
-        value={value ?? UNASSIGNED}
-        onValueChange={(v) => onChange(v === UNASSIGNED ? null : v)}
-        disabled={disabled || members === null}
-      >
-        <SelectTrigger size="sm" className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
-          {(members ?? []).map((m) => (
-            <SelectItem key={m.userId} value={m.userId}>
-              {m.displayName ?? m.email}
             </SelectItem>
           ))}
         </SelectContent>

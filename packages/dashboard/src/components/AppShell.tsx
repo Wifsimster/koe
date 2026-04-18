@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Grid2x2, Inbox, Layers, LogOut, Users } from 'lucide-react';
+import { Grid2x2, Inbox, Layers, LogOut } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { INBOX_DEFAULT_SEARCH } from '../router';
 import { ModeToggle } from './ModeToggle';
@@ -38,19 +38,10 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
 
   const isInbox = pathname === '/' || pathname.startsWith('/tickets');
   const isBatches = pathname.startsWith('/batches');
-  const isMembers = /^\/projects\/[^/]+\/members$/.test(pathname);
   const isOverview = pathname === '/overview';
-  // Overview is a landing surface for admins who juggle multiple
-  // projects — hiding it from single-project users keeps their
-  // sidebar minimal.
-  const showOverview = state.me.memberships.length >= 2;
-
-  // The "Members" link routes to the active project's members page.
-  // Resolved from `activeProjectKey` so switching projects re-targets
-  // the link without remounting the nav.
-  const activeMembership = state.activeProjectKey
-    ? state.me.memberships.find((m) => m.projectKey === state.activeProjectKey)
-    : null;
+  // Overview is a landing surface for the founder who juggles multiple
+  // projects — hidden when there's only one to keep the sidebar minimal.
+  const showOverview = state.projects.length >= 2;
 
   return (
     <SidebarProvider>
@@ -102,19 +93,6 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-                {activeMembership && (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild isActive={isMembers}>
-                      <Link
-                        to="/projects/$key/members"
-                        params={{ key: activeMembership.projectKey }}
-                      >
-                        <Users />
-                        <span>Members</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -126,7 +104,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
             <div className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
               Signed in
             </div>
-            <div className="truncate text-xs">{state.me.user.email}</div>
+            <div className="truncate text-xs">{state.me.email}</div>
           </div>
           <Button
             variant="ghost"

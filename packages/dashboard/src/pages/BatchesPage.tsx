@@ -15,12 +15,6 @@ export function BatchesPage() {
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
-  const role =
-    state.status === 'authenticated'
-      ? state.me.memberships.find((m) => m.projectKey === activeKey)?.role ?? 'viewer'
-      : 'viewer';
-  const canWrite = role === 'owner' || role === 'member';
-
   const load = useCallback(async () => {
     if (!activeKey) return;
     setError(null);
@@ -119,23 +113,18 @@ export function BatchesPage() {
                 </div>
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] text-muted-foreground">
                   <span>
-                    by {b.actorDisplayName ?? b.actorEmail ?? 'deleted user'}
-                  </span>
-                  <span>
                     {b.eventCount} event{b.eventCount === 1 ? '' : 's'}
                   </span>
                 </div>
               </div>
-              {canWrite && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPendingRevert(b)}
-                  disabled={reverting}
-                >
-                  Undo batch
-                </Button>
-              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPendingRevert(b)}
+                disabled={reverting}
+              >
+                Undo batch
+              </Button>
             </li>
           ))}
         </ul>
@@ -146,7 +135,7 @@ export function BatchesPage() {
           title="Undo this batch?"
           body={`${pendingRevert.ticketCount} ticket${
             pendingRevert.ticketCount === 1 ? '' : 's'
-          } will be reverted where possible. Tickets that already moved past this batch (or whose original assignee left) will be skipped and reported.`}
+          } will be reverted where possible. Tickets that already moved past this batch will be skipped and reported.`}
           confirmLabel="Undo batch"
           submitting={reverting}
           onConfirm={() => void performRevert(pendingRevert)}
@@ -181,10 +170,8 @@ function prettyKind(kind: string): string {
       return 'status';
     case 'priority_changed':
       return 'priority';
-    case 'assigned':
-      return 'assignee';
     case 'commented':
-      return 'comment';
+      return 'note';
     default:
       return kind;
   }

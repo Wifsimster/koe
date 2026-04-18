@@ -1,32 +1,23 @@
 import { Hono } from 'hono';
-import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { eq } from 'drizzle-orm';
+import { deleteCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
-import { db, schema } from '../db';
 import { ok, fail } from '../lib/response';
 import { hashPassword, verifyPassword } from '../lib/password';
-import { createRawSessionToken, hashSessionToken } from '../middleware/adminAuth';
+import { ADMIN_COOKIE_NAME, mintSessionCookie } from '../middleware/adminAuth';
 import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rateLimit';
 
 /**
- * Email + password login routes mounted at `/v1/admin/auth/*` when
- * `ADMIN_AUTH_MODE=password`.
+ * Login routes for the single admin. Mounted at `/v1/admin/auth/*`.
  *
- *   POST /password → verifies credentials, issues a session cookie
- *   POST /logout   → revokes the session, clears the cookie
+ *   POST /login  → verifies ADMIN_EMAIL + ADMIN_PASSWORD_HASH, sets cookie
+ *   POST /logout → clears cookie (stateless, no server-side revoke)
  *
- * Identical cookie + `admin_sessions` shape as the OIDC callback, so
- * `requireAdminSession` stays provider-agnostic and the SPA flow doesn't
- * change between modes.
- *
- * Kept as a sibling of `oidcAuth.ts` rather than folded into it: the
- * two are different trust paths and the overlap is only a few lines of
- * session-mint glue. A single shared helper for the mint step (see
- * `issueSession`) keeps them honest.
+ * Credentials live in env vars only — no admin_users table. Rotating
+ * the password is an env change + redeploy; rotating the session
+ * secret kicks every browser out on the next request.
  */
 
 export interface PasswordAuthConfig {
-  cookieName: string;
   sessionTtlDays: number;
   secureCookies: boolean;
 }
@@ -38,11 +29,9 @@ const loginSchema = z.object({
 
 /**
  * Hashed form of a sentinel value, computed lazily at first use. When
- * the submitted email doesn't match any user, we still verify against
- * this hash so the login endpoint's response time doesn't reveal
- * whether the email exists. The sentinel never matches a real password
- * because the DB never stores its plaintext — only this one-time-hashed
- * string held in memory.
+ * ADMIN_PASSWORD_HASH is unset we still verify against this dummy so
+ * the login endpoint's response time doesn't reveal whether the auth
+ * surface is configured at all.
  */
 let dummyHashPromise: Promise<string> | null = null;
 function getDummyHash(): Promise<string> {
@@ -52,13 +41,11 @@ function getDummyHash(): Promise<string> {
   return dummyHashPromise;
 }
 
-export function createPasswordAuthRoutes(cfg: PasswordAuthConfig): Hono {
+export function createAuthRoutes(cfg: PasswordAuthConfig): Hono {
   const app = new Hono();
 
-  // 5 attempts per minute per client IP. The limiter is shared
-  // across both login and logout even though logout is cheap — a
-  // single bucket is easier to reason about, and a logged-in user
-  // won't hit the cap.
+  // 5 attempts per minute per client IP. Same bucket for logout since
+  // it's cheap and the limiter is simpler with one key pattern.
   const limiter = createRateLimiterFromEnv({
     refillPerSecond: 5 / 60,
     capacity: 5,
@@ -71,12 +58,7 @@ export function createPasswordAuthRoutes(cfg: PasswordAuthConfig): Hono {
     key: (c) => `ip:${clientIp(c)}`,
   });
 
-  // Public mode discovery. The SPA fetches this at boot to pick the
-  // right login form without a build-time `VITE_ADMIN_AUTH_MODE` — a
-  // single published image serves every auth mode.
-  app.get('/config', (c) => ok(c, { mode: 'password' as const }));
-
-  app.post('/password', rateGate, async (c) => {
+  app.post('/login', rateGate, async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = loginSchema.safeParse(body);
     if (!parsed.success) {
@@ -85,65 +67,38 @@ export function createPasswordAuthRoutes(cfg: PasswordAuthConfig): Hono {
       });
     }
 
-    const { email, password } = parsed.data;
+    const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+    const adminHash = process.env.ADMIN_PASSWORD_HASH;
+    if (!adminEmail || !adminHash) {
+      return fail(c, 'service_unavailable', 'Admin auth is not configured', 503);
+    }
 
-    const [user] = await db
-      .select({
-        id: schema.adminUsers.id,
-        email: schema.adminUsers.email,
-        displayName: schema.adminUsers.displayName,
-        passwordHash: schema.adminUsers.passwordHash,
-      })
-      .from(schema.adminUsers)
-      .where(eq(schema.adminUsers.email, email))
-      .limit(1);
+    const emailMatches = parsed.data.email === adminEmail;
+    // Verify against either the real hash or a dummy so timing
+    // doesn't disclose whether the email matches the admin.
+    const hashToCheck = emailMatches ? adminHash : await getDummyHash();
+    const passwordMatches = await verifyPassword(hashToCheck, parsed.data.password);
 
-    // Verify against either the real hash or a dummy so the timing
-    // signal doesn't disclose account existence. Users that exist but
-    // have no password_hash (e.g. OIDC-only) fall into the dummy path
-    // too — login with password is explicitly unsupported for them.
-    const hashToCheck = user?.passwordHash ?? (await getDummyHash());
-    const matched = await verifyPassword(hashToCheck, password);
-
-    if (!user || !user.passwordHash || !matched) {
+    if (!emailMatches || !passwordMatches) {
       return fail(c, 'unauthorized', 'Invalid email or password', 401);
     }
 
-    const rawToken = createRawSessionToken();
-    const tokenHash = hashSessionToken(rawToken);
-    const expiresAt = new Date(Date.now() + cfg.sessionTtlDays * 24 * 60 * 60 * 1000);
+    const expiresAtMs = Date.now() + cfg.sessionTtlDays * 24 * 60 * 60 * 1000;
+    const cookieValue = mintSessionCookie(expiresAtMs);
 
-    await db.insert(schema.adminSessions).values({
-      userId: user.id,
-      tokenHash,
-      expiresAt,
-    });
-
-    // Same cookie shape as the OIDC callback so `requireAdminSession`
-    // treats both transports identically.
-    setCookie(c, cfg.cookieName, rawToken, {
+    setCookie(c, ADMIN_COOKIE_NAME, cookieValue, {
       httpOnly: true,
       secure: cfg.secureCookies,
       sameSite: 'Lax',
       path: '/',
-      expires: expiresAt,
+      expires: new Date(expiresAtMs),
     });
 
-    return ok(c, {
-      user: { id: user.id, email: user.email, displayName: user.displayName },
-    });
+    return ok(c, { email: adminEmail });
   });
 
   app.post('/logout', async (c) => {
-    const token = getCookie(c, cfg.cookieName);
-    if (token) {
-      const hash = hashSessionToken(token);
-      await db.delete(schema.adminSessions).where(eq(schema.adminSessions.tokenHash, hash));
-    }
-    deleteCookie(c, cfg.cookieName, {
-      path: '/',
-      secure: cfg.secureCookies,
-    });
+    deleteCookie(c, ADMIN_COOKIE_NAME, { path: '/', secure: cfg.secureCookies });
     return ok(c, { ok: true });
   });
 

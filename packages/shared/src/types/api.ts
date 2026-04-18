@@ -21,4 +21,5 @@ export type ApiErrorCode =
   | 'forbidden'
   | 'conflict'
   | 'rate_limited'
+  | 'service_unavailable'
   | 'internal_error';

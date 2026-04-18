@@ -7,28 +7,17 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 
 export function LoginPage() {
-  const { mode, login, state } = useAuth();
-  const [token, setToken] = useState('');
+  const { login, state } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
-  // Post-login navigation is driven by an effect, not by a direct
-  // `navigate()` call after `await login()`. The auth transition from
-  // 'unauthenticated' → 'loading' → 'authenticated' settles across
-  // multiple render ticks, and `<RouterProvider context={{ auth }}>`
-  // only sees the new auth state on its next commit. Calling navigate
-  // synchronously after login races that commit: the `_authenticated`
-  // beforeLoad reads the stale 'unauthenticated' context and bounces
-  // straight back to /login with `redirectTo=/` — leaving the user
-  // stranded on the sign-in form even though the cookie is set.
-  //
-  // Watching `state.status` inside an effect sidesteps the race: the
-  // effect runs AFTER React commits, so the router context is
-  // guaranteed to reflect the authenticated state by the time we
-  // navigate.
+  // Post-login navigation is driven by an effect so the router sees
+  // the new auth state on its next commit. Calling navigate
+  // synchronously would race the AuthProvider's transition and bounce
+  // back to /login.
   const pendingNavRef = useRef(false);
   useEffect(() => {
     if (pendingNavRef.current && state.status === 'authenticated') {
@@ -37,140 +26,59 @@ export function LoginPage() {
     }
   }, [state.status, navigate]);
 
-  if (mode === 'oidc') {
-    return (
-      <Shell
-        caption="Single sign-on"
-        subtitle="Sign in with your organization's identity provider."
-      >
-        <Button
-          type="button"
-          size="lg"
-          className="w-full"
-          onClick={() => void login()}
-        >
-          Continue with SSO
-        </Button>
-        <Hint>
-          You will be redirected to the identity provider configured for this deployment.
-        </Hint>
-      </Shell>
-    );
-  }
-
-  if (mode === 'password') {
-    const onSubmit = async (e: FormEvent) => {
-      e.preventDefault();
-      setError(null);
-      if (!email.trim() || !password) {
-        setError('Email and password are required.');
-        return;
-      }
-      setSubmitting(true);
-      try {
-        await login(undefined, { email: email.trim(), password });
-        pendingNavRef.current = true;
-      } catch (err) {
-        setError(
-          err instanceof Error && err.message
-            ? err.message
-            : 'Sign-in failed. Check your credentials and try again.',
-        );
-      } finally {
-        setSubmitting(false);
-      }
-    };
-
-    return (
-      <Shell caption="Email & password" subtitle="Sign in with your admin credentials.">
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email" className="tracking-[0.18em] text-[10px] uppercase">
-              Email
-            </Label>
-            <Input
-              id="email"
-              type="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              disabled={submitting}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password" className="tracking-[0.18em] text-[10px] uppercase">
-              Password
-            </Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••••••"
-              disabled={submitting}
-              required
-            />
-          </div>
-          {error && <ErrorLine>{error}</ErrorLine>}
-          <Button
-            type="submit"
-            size="lg"
-            className="w-full"
-            disabled={submitting || state.status === 'loading'}
-          >
-            {submitting || state.status === 'loading' ? 'Signing in…' : 'Sign in'}
-          </Button>
-          <Hint>
-            Accounts are seeded by an operator with:{' '}
-            <Code>docker compose run --rm api dist/admin-user.js --email you@example.com</Code>
-          </Hint>
-        </form>
-      </Shell>
-    );
-  }
-
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    const trimmed = token.trim();
-    if (!trimmed) {
-      setError('Paste the token printed by the admin-session CLI.');
+    if (!email.trim() || !password) {
+      setError('Email and password are required.');
       return;
     }
     setSubmitting(true);
     try {
-      await login(trimmed);
+      await login(email.trim(), password);
       pendingNavRef.current = true;
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Sign-in failed. Check your credentials and try again.',
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Shell
-      caption="Dev session"
-      subtitle={
-        <>
-          Paste the session token printed by your <Code>admin-session</Code> CLI.
-        </>
-      }
-    >
+    <Shell caption="Admin sign-in" subtitle="Sign in with your admin credentials.">
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="token" className="tracking-[0.18em] text-[10px] uppercase">
-            Session token
+          <Label htmlFor="email" className="tracking-[0.18em] text-[10px] uppercase">
+            Email
           </Label>
           <Input
-            id="token"
+            id="email"
+            type="email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            disabled={submitting}
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password" className="tracking-[0.18em] text-[10px] uppercase">
+            Password
+          </Label>
+          <Input
+            id="password"
             type="password"
             autoComplete="current-password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Paste token…"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••••••"
             disabled={submitting}
+            required
           />
         </div>
         {error && <ErrorLine>{error}</ErrorLine>}
@@ -183,10 +91,9 @@ export function LoginPage() {
           {submitting || state.status === 'loading' ? 'Signing in…' : 'Sign in'}
         </Button>
         <Hint>
-          Tokens expire. Mint a new one with:{' '}
-          <Code>
-            pnpm --filter @koe/api exec tsx src/bin/admin-session.ts --email you@example.com
-          </Code>
+          Credentials live in <Code>ADMIN_EMAIL</Code> and <Code>ADMIN_PASSWORD_HASH</Code> on
+          the server. Generate a hash with{' '}
+          <Code>docker compose run --rm api hash-password 'your-password'</Code>.
         </Hint>
       </form>
     </Shell>
