@@ -1,6 +1,7 @@
 # @wifsimster/koe
 
-Embeddable support widget for SaaS apps — bug reports, feature requests & live chat in one unified experience.
+Embeddable support widget for SaaS apps — bug reports, feature requests,
+voting, and a "my requests" tab so users can follow what they submitted.
 
 ## Install
 
@@ -74,6 +75,19 @@ res.json({ userHash });
 
 When the project has `requireIdentityVerification` turned on, any
 submission without a valid hash is rejected with `401 unauthorized`.
+
+## "My requests" tab
+
+When the host app passes a real (non-`anonymous`) `user.id`, the intent
+picker shows a fourth card that lists every ticket the caller has
+submitted, with its current status. Tickets that an admin has opted
+into the public roadmap (`is_public_roadmap = true` server-side) expose
+a "View on roadmap" link that deep-links to `/r/:projectKey#t-<id>` on
+the Koe service URL.
+
+Gating is intentional: anonymous sessions share a reporter id, so
+surfacing the tab to them would leak tickets across users. If you
+haven't identified the user, the card doesn't render.
 
 ## Configuration
 

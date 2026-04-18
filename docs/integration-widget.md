@@ -72,3 +72,4 @@ Exemple minimal pour une application sans framework.
 - **Build npm** : React est externe dans le package publie.
 - **Build autonome** : React est inclus dans `koe.iife.js`.
 - **Metadonnees navigateur** : le widget ajoute automatiquement le contexte utile aux bugs.
+- **Onglet « My requests »** : apparait uniquement si `user.id` est renseigne et different de `anonymous`. Consomme `/v1/widget/my-requests` ; un ticket publie sur la roadmap publique affiche un lien vers `/r/:projectKey#t-<id>`.

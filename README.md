@@ -39,6 +39,7 @@ graph LR
   - [Intégration React](#intégration-react)
   - [Intégration sans framework](#intégration-sans-framework)
   - [Options du widget](#options-du-widget)
+  - [Roadmap publique et « Mes demandes »](#roadmap-publique-et--mes-demandes-)
   - [Vérification d'identité](#vérification-didentité)
 - [Ce qui est disponible aujourd'hui](#ce-qui-est-disponible-aujourdhui)
 - [Développer ce dépôt](#développer-ce-dépôt)
@@ -284,6 +285,15 @@ Points importants :
 | `features`   | Non                  | toutes activées       | Active ou masque les onglets bugs, évolutions et chat.   |
 | `locale`     | Non                  | anglais               | Remplace les textes d'interface.                         |
 
+### Roadmap publique et « Mes demandes »
+
+Deux surfaces exploitent les tickets déjà stockés, sans nouveau module à déployer :
+
+- **`/r/:projectKey`** — page HTML SSR servie par le même process que l'API. Monte automatiquement, sans dépendre de `ADMIN_AUTH_MODE`. Les admins opt-in chaque ticket depuis le dashboard (case « Public roadmap » sur le détail) ; la page n'expose jamais `reporterEmail`, `reporterName`, `screenshotUrl`, `metadata` ou `notes`, et la `description` y est tronquée. Un JSON équivalent est disponible à `/v1/public/:projectKey/roadmap` avec `Access-Control-Allow-Origin: *`.
+- **Onglet « My requests » du widget** — disponible dès que l'application hôte renseigne un `user.id` non anonyme. Le widget appelle `GET /v1/widget/my-requests` et affiche l'état de chaque ticket soumis ; lorsqu'un ticket est publié sur la roadmap, une ancre deep-link ouvre sa carte sur `/r/:projectKey#t-<id>`.
+
+Les bascules admin émettent un événement d'audit `roadmap_toggled` dans la même transaction que le PATCH — réversible depuis la timeline du ticket au même titre que `status_changed` et `priority_changed`.
+
 ### Vérification d'identité
 
 La vérification d'identité évite qu'un tiers usurpe un utilisateur en réutilisant seulement le `projectKey`.
@@ -316,8 +326,10 @@ const userHash = createHmac('sha256', process.env.KOE_IDENTITY_SECRET)
 - **Bugs** : fonctionnels, avec métadonnées navigateur et `screenshotUrl`.
 - **Demandes d'évolution** : fonctionnelles.
 - **Votes** : fonctionnels sur la roadmap publique.
+- **Mes demandes (widget)** : chaque utilisateur identifié retrouve dans le widget la liste des tickets qu'il a soumis, avec statut à jour et lien vers la roadmap publique lorsque le ticket y est publié.
+- **Roadmap publique** : page SSR partagée à `/r/:projectKey` (colonnes *Planned* / *In progress* / *Shipped*), doublée d'un JSON CORS-ouvert à `/v1/public/:projectKey/roadmap`. Les admins publient les tickets ticket par ticket depuis le dashboard — défaut off, page curatée.
 - **Chat** : onglet visible, mais conversation encore locale et sans temps réel.
-- **Dashboard admin** : inbox des tickets, détail, modifications de statut/priorité, assignation, commentaires internes, actions en lot (bulk) et revert par `batchId`. Trois modes d'authentification branchés : `password`, `oidc`, `dev-session`. Invitation de membres par projet (`owner` / `member` / `viewer`).
+- **Dashboard admin** : inbox des tickets, détail, modifications de statut/priorité, notes privées, bascule « Public roadmap » par ticket, historique d'audit et revert ponctuel des événements. Trois modes d'authentification branchés : `password`, `oidc`, `dev-session`.
 - **Rotation des secrets d'identité** : CLI `rotate-secrets` avec schéma v2 (signature liée à `iat`, `nonce`, `kid`). Permet un renouvellement sans casser les intégrations existantes.
 - **Chiffrement des secrets au repos** : AES-256-GCM enveloppé, activable via `KOE_SECRET_KEYS`.
 
