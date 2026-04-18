@@ -509,7 +509,10 @@ export class AdminApiClient {
 
   async logout(): Promise<void> {
     if (!this.opts.logoutUrl) return;
-    await fetch(new URL(this.opts.logoutUrl, this.opts.baseUrl).toString(), {
+    // Resolve against `window.location.origin` (same pattern as
+    // `redirectToLogin`). `baseUrl` can be a relative path like
+    // `/v1/admin`, which is not a valid base for the URL constructor.
+    await fetch(new URL(this.opts.logoutUrl, window.location.origin).toString(), {
       method: 'POST',
       credentials: 'include',
     }).catch(() => {
