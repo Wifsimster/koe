@@ -1,104 +1,144 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## Vue d'ensemble
 
-Koe est un monorepo `pnpm` et Turborepo pour un widget support embarquable, une API publique et un back-office React. Produit mono-admin (un fondateur gere plusieurs de ses propres SaaS) — pas de seats, pas de roles, pas d'invitations. Les fonctionnalites reellement branchees couvrent les bugs, les demandes d'evolution et le vote public. Le chat temps reel est encore partiel.
+Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-hosted (bugs, demandes d'evolution, vote public) et son back-office. Produit auto-heberge : aucune instance geree. Distribue sous forme d'image Docker `ghcr.io/wifsimster/koe-server` (API + dashboard bundles) et de tags git `v*` pour le widget (consomme via `github:Wifsimster/koe#vX.Y.Z` ou jsDelivr). Le chat temps reel existe comme onglet de preview mais n'est pas branche.
 
-## Stack et dependances cles
+## Packages
 
-- Node `>=20`
-- `pnpm@9.12.0`
-- TypeScript `5.6.x`
-- Turbo `2.3.x`
-- Prettier `3.3.x`
-- React `19.x`
-- Vite `6.x`
-- Tailwind CSS `3.4.x`
-- Hono `4.6.x`
-- Drizzle ORM `0.36.x`
-- `postgres` `3.4.x`
-- Zod `3.23.x`
-- TanStack Router `1.82.x`
-- semantic-release `24.x`
+| Package           | Role                                                                 | Publication                           |
+| ----------------- | -------------------------------------------------------------------- | ------------------------------------- |
+| `@wifsimster/koe` | Widget React (build lib ESM + build IIFE autonome avec React inline) | Tags git `v*`, pas de npm             |
+| `@koe/api`        | API Hono : widget public + admin JSON + auth admin                   | Image Docker (bundle tsup)            |
+| `@koe/dashboard`  | SPA TanStack Router : inbox, ticket detail, batches, membres         | Embarquee dans l'image API (`/admin/`)|
+| `@koe/shared`     | Types metier et helpers transverses (`captureBrowserMetadata`)       | Prive au workspace                    |
 
-## Structure du projet
+## Stack et versions
 
-- `packages/widget` : widget React embarquable, avec build librairie ES et build IIFE autonome.
-- `packages/api` : API Hono, middlewares, schema Drizzle et acces PostgreSQL. Bundle via tsup (entrypoints `bin/serve.ts`, `bin/migrate.ts`, `bin/bootstrap.ts`, `bin/hash-password.ts`).
-- `packages/dashboard` : shell de back-office React avec routes et pages placeholder. Embarque dans l'image Docker du serveur, servi a `/admin/` quand `ENABLE_DASHBOARD=true` (defaut).
-- `packages/shared` : types metier partages et helper `captureBrowserMetadata`.
-- `packages/api/Dockerfile` : build multi-stage publie sur `ghcr.io/wifsimster/koe-server` (bundle API + dashboard).
-- `docker-compose.yml` + `.env.docker.example` : self-host en une commande (serveur + PostgreSQL).
-- `.github/workflows/widget-release.yml` : widget via semantic-release, tags `v*`.
-- `.github/workflows/server-image.yml` : image serveur, tags roulants `:edge` + `:sha-*` sur push main, tags stables sur push de `server-v*`.
-- `.releaserc.json` : orchestration des tags et GitHub Releases automatiques via `semantic-release`.
-- `tsconfig.base.json` : options TypeScript strictes partagees.
+- Node `>=20.8.1`, `pnpm@9.12.0`, TypeScript `5.6.x`, Turbo `2.3.x`, Prettier `3.3.x`
+- React `19.x`, Vite `6.x`, Tailwind `3.4.x`, TanStack Router `1.82.x`
+- Hono `4.6.x`, Drizzle ORM `0.36.x`, `postgres` `3.4.x`, Zod `3.23.x`
+- Auth admin : `@node-rs/argon2` `2.0.x`, `openid-client` (OIDC), cookies HMAC
+- Optionnel : `ioredis` `5.10.x` (rate limit + anti-rejeu multi-replicas)
+- Release : `semantic-release` `24.x`
 
-## Commandes utiles
+## Commandes
+
+### Globales (Turborepo)
 
 - `pnpm install`
+- `pnpm turbo run build` : build initial necessaire pour que `@koe/shared/dist` existe avant `pnpm dev`
 - `pnpm dev`
-- `pnpm build`
 - `pnpm typecheck`
-- `pnpm lint`
-- `pnpm test` : pipeline prevu, mais peu ou pas de suites sont branchees.
-- `pnpm --filter @koe/api dev`
-- `pnpm --filter @koe/api db:generate`
-- `pnpm --filter @koe/api db:migrate`
+- `pnpm lint` (soft-fail en CI, seul le widget a un script `lint` defini)
+- `pnpm test` : Node `--test` sur les fichiers `packages/api/src/{lib,middleware}/*.test.ts`. Pas de vitest/jest. Pas de suites cote widget/dashboard.
+- `pnpm release:dry` : verification semantic-release
+
+### Par package
+
+- `pnpm --filter @koe/api dev` : tsx watch
+- `pnpm --filter @koe/api db:generate` puis `db:migrate` : obligatoire apres toute modif de `packages/api/src/db/schema.ts`
 - `pnpm --filter @koe/api db:studio`
+- `pnpm --filter @koe/api admin-user -- --email you@example.com --project-key acme` : cree un admin en mode password
+- `pnpm --filter @koe/api bootstrap` : CLI interactif de creation de projet
+- `pnpm --filter @koe/api hash-password '...'` : argon2id CLI
+- `pnpm --filter @koe/api rotate-secrets` : rotation des `identitySecret` (schema v2 : `iat`, `nonce`, `kid`)
 - `pnpm --filter @koe/dashboard dev`
 - `pnpm --filter @wifsimster/koe dev`
-- `pnpm release:dry`
+
+### Lancer un test API isole
+
+```
+node --test packages/api/src/lib/identityToken.test.ts
+```
+
+## Architecture API (`packages/api`)
+
+- `src/index.ts` : montage conditionnel. Les routes admin `/v1/admin/*` ne sont montees **que si** `ADMIN_AUTH_MODE` est defini (`password`, `oidc`, ou `dev-session`). Sans cette var, l'API admin reste off — c'est le defaut sur.
+- `src/bin/` : entrypoints tsup (`serve.ts`, `migrate.ts`, `bootstrap.ts`, `hash-password.ts`, `rotate-secrets.ts`). L'image Docker expose `node dist/serve.js`, `dist/migrate.js`, `dist/bootstrap.js`.
+- `src/routes/` : `widget.ts` (public), `adminApi.ts` (JSON admin), `admin.ts` (pages HTML), `passwordAuth.ts` (login email+password), `health.ts`.
+- `src/middleware/` : `project.ts`, `identity.ts` (HMAC contributeurs), `cors.ts` (dynamique par projet), `rateLimit.ts`, `adminAuth.ts` (session cookie signe + garde-fous role). Pour toute route admin qui mute un ticket, toujours passer par `requireAdminSession`, `requireProjectMember`, `requireProjectWriter`, `requireProjectOwner` — ne jamais deduire l'autorisation de la seule session.
+- `src/db/` : `schema.ts` (modele central), `drizzle/` contient les migrations versionnees. Regenerer + commiter la migration a chaque change de schema.
+- `src/lib/` : `identityToken.ts` (token v2), `secretStore.ts` (lecture via `getSecretStoreFromEnv()` si `KOE_SECRET_KEYS` est actif).
+- Enveloppe JSON commune : toujours utiliser `ok()` et `fail()`. Valider toute entree externe avec Zod pres de la route.
+
+### Auth admin — trois modes
+
+- `password` : table `admin_users` (hash argon2id), login via `passwordAuth.ts`. Creer un utilisateur via CLI `admin-user`.
+- `oidc` : `openid-client` contre n'importe quel provider OIDC. Vars `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `OIDC_DASHBOARD_URL`, `OIDC_COOKIE_SECRET`, `OIDC_SCOPES`.
+- `dev-session` : tokens bearer mintes via CLI `admin-session`. **L'API refuse de demarrer en production avec ce mode.**
+- Sessions stockees en base (`admin_sessions`) sous forme de hash SHA-256 — un dump DB ne fuite pas de credentials actifs.
+- Roles par projet : `owner` / `member` / `viewer` (pas un seul admin global ; le produit n'est plus mono-admin).
+
+### Dashboard et CORS
+
+`ENABLE_DASHBOARD` est `false` par defaut. Passer a `true` pour servir la SPA a `/admin/`. Le build Vite utilise `base=/admin/` dans le Dockerfile. `ADMIN_DASHBOARD_ORIGIN` regle le CORS si le dashboard est heberge sur une autre origine.
+
+### Audit et actions en lot
+
+Les mutations admin doivent emettre un evenement `admin_ticket_events` dans la **meme transaction** que la mutation. Les actions en lot correlent leurs evenements via un `batchId` commun (permet le revert).
+
+## Architecture widget (`packages/widget`)
+
+- `vite.config.ts` fait une **double build** pilotee par `BUILD_TARGET` :
+  - `lib` → ESM + `.d.ts` via `vite-plugin-dts` (rollupTypes inline les types `@koe/shared`)
+  - `standalone` → IIFE `koe.iife.js` avec React bundle, expose `window.Koe` (`init`, `destroy`)
+- Composants dans `src/components/` : `KoeWidget`, `Panel`, `Launcher`, `IntentPicker`, `BrowseList`, formulaires (`BugReportForm`, `FeatureRequestForm`), primitives UI.
+- Client : `src/api/client.ts`. Context : `src/context/KoeContext.tsx`.
+- Ne **jamais** casser la double build : les consommateurs pinent soit via tag git (React) soit via `<script>` autonome.
+
+## Architecture dashboard (`packages/dashboard`)
+
+TanStack Router, shadcn/ui sur Tailwind. Pages : `InboxPage`, `TicketDetailPage`, `OverviewPage`, `OnboardingPage`, `LoginPage`. Pas de tache `lint` definie.
 
 ## Conventions de code
 
-- TypeScript strict. Voir `tsconfig.base.json`.
+- TypeScript strict (`tsconfig.base.json` : `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, target ES2022, module ESNext, moduleResolution Bundler).
 - ESM partout.
-- Formatage Prettier : `semi: true`, `singleQuote: true`, `trailingComma: all`, `printWidth: 100`.
-- Composants React en `PascalCase.tsx`.
-- Helpers, contextes et middlewares en `camelCase.ts` ou `camelCase.tsx`.
-- Types partages dans `@koe/shared`. Reutilisez-les avant de creer de nouveaux contrats.
-- Cote API, valider toute entree externe avec Zod pres de la route.
-- Utiliser `ok()` et `fail()` pour conserver l'enveloppe JSON commune.
+- Prettier : `semi: true`, `singleQuote: true`, `trailingComma: all`, `printWidth: 100`.
+- Composants React en `PascalCase.tsx`, helpers/middlewares/contextes en `camelCase.ts(x)`.
+- Reutiliser `@koe/shared` avant de dupliquer un type.
+- Preferer plusieurs petits middlewares Hono plutot qu'une grosse route monolithique.
+- Garder les formulaires du widget simples, locaux, sans state management externe.
 
-## Workflow git
+## Workflow git et releases
 
-- Branche de base : `main`.
-- Branches observees : branches de travail de type `claude/...`.
-- Commits observes : messages courts a l'imperatif. Les releases s'appuient sur Conventional Commits et `semantic-release`.
-- La release widget se declenche sur chaque push `main` et produit des tags `vX.Y.Z`.
-- L'image Docker de l'API est republiee sur chaque push `main` (tags `:edge` + `:sha-*`) ; les tags stables `:latest`, `:X.Y.Z` viennent d'un tag git `api-vX.Y.Z` pousse manuellement.
-- Le proxy git de l'environnement refuse le push de tags et les suppressions de refs. Passer par l'UI GitHub ou un poste local pour ces operations.
+- Branche de base : `main`. Branches de travail : `claude/...`.
+- **Conventional Commits** obligatoires (`feat(widget): ...`, `fix(api): ...`) — `semantic-release` les consomme. Voir `CONTRIBUTING.md` pour les impacts de release par type et l'usage de `!` / `BREAKING CHANGE:` pour un major.
+- Deux pipelines de release independants sur `main` :
+  - Widget (`.github/workflows/widget-release.yml`) : semantic-release, tags `vX.Y.Z`, GitHub Release avec notes auto. Pas de `CHANGELOG.md` committe. Pas de publication npm.
+  - Image serveur (`.github/workflows/server-image.yml`) : declenche sur push touchant `packages/api/**`, `packages/shared/**` ou `pnpm-lock.yaml`. Tags roulants `:edge` + `:sha-*` a chaque push. Tags stables `:latest`, `:x.y.z`, `:x.y`, `:x` **uniquement** sur push d'un tag git `server-vX.Y.Z`. Multi-arch (amd64+arm64), cosign keyless, SLSA provenance, SBOM, scan Trivy (soft-fail).
+- Le proxy git de l'environnement **refuse les push de tags et les suppressions de refs**. Passer par l'UI GitHub ou un poste local pour ces operations.
 
-## Fichiers et dossiers cles
+## Variables d'environnement cles
 
-- `packages/api/src/routes/widget.ts` : endpoints widget reellement implementes.
-- `packages/api/src/db/schema.ts` : modele de donnees central.
-- `packages/api/src/middleware/project.ts` : resolution et validation du projet.
-- `packages/api/src/middleware/identity.ts` : verification HMAC des contributeurs.
-- `packages/api/src/middleware/cors.ts` : CORS dynamique par projet.
-- `packages/api/src/middleware/rateLimit.ts` : limitation de debit en memoire.
-- `packages/api/src/middleware/adminAuth.ts` : gate mono-admin via cookie signe.
-- `packages/api/src/routes/passwordAuth.ts` : login email + password contre les vars `ADMIN_EMAIL` / `ADMIN_PASSWORD_HASH`.
-- `packages/widget/src/api/client.ts` : transport widget vers API.
-- `packages/widget/src/components/Panel.tsx` : navigation entre onglets du widget.
-- `packages/widget/vite.config.ts` : double build librairie et IIFE.
-- `packages/shared/src/types/*` : types de reference du produit.
-- `packages/shared/src/metadata.ts` : capture du contexte navigateur.
+- `DATABASE_URL` : obligatoire, sinon l'API refuse de demarrer.
+- `MIGRATE_ON_START` : `true` par defaut. Passer a `false` en multi-replicas et lancer `docker compose run --rm api migrate` avant le scale-up.
+- `ENABLE_DASHBOARD` : `false` par defaut.
+- `ADMIN_AUTH_MODE` : non defini = pas d'API admin (defaut sur). Sinon `password`, `oidc`, `dev-session`.
+- `KOE_SECRET_KEYS` (+ `KOE_SECRET_ACTIVE_KID`) : active le chiffrement AES-256-GCM au repos des `identitySecret`. Passer par `getSecretStoreFromEnv()` — ne **jamais** stocker ces secrets en clair une fois actif.
+- `REDIS_URL` : indispensable des qu'on scale au-dela d'un replica. Sans Redis, le rate limiter et l'anti-rejeu sont par-pod.
+- `packages/api/.env.example` et `.env.docker.example` listent le reste.
 
-## Gotchas et points d'attention
+## Gotchas
 
-- Le dashboard couvre l'inbox, la triage par batch, les notes internes et la creation de projets. Le chat temps reel n'est pas branche.
-- Aucun package n'est publie sur npm. Le widget se consomme via tags git `v*` ; le serveur se consomme via l'image Docker `ghcr.io/wifsimster/koe-server` (qui bundle API + dashboard). `@koe/api`, `@koe/dashboard` et `@koe/shared` restent prives au workspace.
-- `packages/api/.env.example` contient les variables indispensables. Sans `DATABASE_URL`, les routes DB renverront une erreur.
-- Toute modification de `packages/api/src/db/schema.ts` implique le workflow Drizzle.
-- L'image Docker execute les migrations au boot par defaut (`MIGRATE_ON_START=true`). Desactiver en multi-replicas et lancer `docker compose run --rm api migrate` avant le scale-up.
-- L'auth admin est mono-utilisateur, sans table users : credentials dans `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` (argon2id) + cookie HMAC signe par `ADMIN_SESSION_SECRET`. Les trois vars sont obligatoires pour monter `/v1/admin/*` ; sinon l'API admin reste off (safe default). Generer le hash via `docker compose run --rm api hash-password '...'`.
-- Toute modif des deps d'un package oblige a regenerer `pnpm-lock.yaml` ; la CI `--frozen-lockfile` echoue sinon.
+- `pnpm install` ne suffit pas avant `pnpm dev` : lancer d'abord `pnpm turbo run build` pour que `@koe/shared/dist` existe.
+- Toute modif de deps oblige a regenerer `pnpm-lock.yaml` — la CI `--frozen-lockfile` echoue sinon.
+- Ne **pas** documenter le chat temps reel comme fonctionnalite active.
+- Ne **pas** ressusciter `better-auth` (abandonne au profit de `openid-client` + argon2id). Les vars `BETTER_AUTH_*` n'existent plus.
+- Ne **pas** activer `ADMIN_AUTH_MODE=dev-session` en production : l'API refuse de demarrer.
+- Le script `lint` du widget reference `eslint` mais aucune config eslint n'est installee — la CI tourne `lint` avec `continue-on-error: true`.
+- Le `projectKey` est **public**, ce n'est pas un secret. Le vrai secret est `identitySecret`.
 
-## Patterns a suivre
+## Fichiers sensibles
 
-- Reutiliser `@koe/shared` pour les types et helpers transverses.
-- Preferer de petits middlewares Hono separes plutot qu'une grosse route monolithique.
-- Garder les formulaires du widget simples, locaux et sans state management externe.
-- Distinguer clairement ce qui est en production et ce qui est seulement prepare.
+- `packages/api/src/index.ts` — montage conditionnel des routes admin
+- `packages/api/src/db/schema.ts` — regenerer migration a chaque change
+- `packages/api/src/routes/widget.ts`, `routes/adminApi.ts`
+- `packages/api/src/middleware/adminAuth.ts`
+- `packages/api/src/lib/identityToken.ts`, `lib/secretStore.ts`
+- `packages/widget/vite.config.ts` — double build
+- `.github/workflows/ci.yml`, `widget-release.yml`, `server-image.yml`
+- `.releaserc.json`
