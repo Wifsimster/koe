@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FocusEvent, type FormEvent } from 'react';
 import { captureBrowserMetadata } from '@koe/shared';
 import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
@@ -8,18 +8,14 @@ import { Button } from '../ui/Button';
 interface FormState {
   title: string;
   description: string;
-  steps: string;
-  expected: string;
-  actual: string;
+  reproduce: string;
   email: string;
 }
 
 const EMPTY: FormState = {
   title: '',
   description: '',
-  steps: '',
-  expected: '',
-  actual: '',
+  reproduce: '',
   email: '',
 };
 
@@ -35,11 +31,17 @@ export function BugReportForm() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   // Cancel the in-flight request if the widget closes mid-submit so we
   // don't update state on an unmounted component and don't waste bytes on
   // a response nobody will read.
   const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => controllerRef.current?.abort(), []);
+
+  // Autofocus the first field so users can start typing immediately.
+  useEffect(() => {
+    if (!success) titleRef.current?.focus();
+  }, [success]);
 
   if (success) {
     return (
@@ -48,22 +50,37 @@ export function BugReportForm() {
         onDismiss={() => {
           setSuccess(false);
           setState(EMPTY);
+          setErrors({});
         }}
       />
     );
   }
+
+  const validateField = (key: keyof FormState, value: string): string | undefined => {
+    if (key === 'title' || key === 'description') {
+      if (!value.trim()) return locale.errors.required;
+    }
+    if (key === 'email') {
+      const v = value.trim();
+      if (v && !isValidEmail(v)) return locale.errors.invalidEmail;
+    }
+    return undefined;
+  };
+
+  const onBlur = (key: keyof FormState) => (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const msg = validateField(key, e.target.value);
+    setErrors((prev) => ({ ...prev, [key]: msg }));
+  };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setApiError(null);
 
     const nextErrors: Partial<Record<keyof FormState, string>> = {};
-    if (!state.title.trim()) nextErrors.title = locale.errors.required;
-    if (!state.description.trim()) nextErrors.description = locale.errors.required;
-    const trimmedEmail = state.email.trim();
-    if (trimmedEmail && !isValidEmail(trimmedEmail)) {
-      nextErrors.email = locale.errors.invalidEmail;
-    }
+    (['title', 'description', 'email'] as const).forEach((k) => {
+      const msg = validateField(k, state[k]);
+      if (msg) nextErrors[k] = msg;
+    });
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
@@ -81,9 +98,7 @@ export function BugReportForm() {
         {
           title: state.title.trim(),
           description: state.description.trim(),
-          stepsToReproduce: state.steps.trim() || undefined,
-          expectedBehavior: state.expected.trim() || undefined,
-          actualBehavior: state.actual.trim() || undefined,
+          stepsToReproduce: state.reproduce.trim() || undefined,
           reporter,
           metadata: captureBrowserMetadata(),
         },
@@ -111,9 +126,11 @@ export function BugReportForm() {
   return (
     <form onSubmit={onSubmit} noValidate>
       <TextField
+        ref={titleRef}
         label={locale.bugForm.title}
         value={state.title}
         onChange={(e) => update('title')(e.target.value)}
+        onBlur={onBlur('title')}
         error={errors.title}
         required
       />
@@ -121,37 +138,27 @@ export function BugReportForm() {
         label={locale.bugForm.description}
         value={state.description}
         onChange={(e) => update('description')(e.target.value)}
+        onBlur={onBlur('description')}
         error={errors.description}
         required
       />
       <TextAreaField
-        label={locale.bugForm.steps}
-        value={state.steps}
-        onChange={(e) => update('steps')(e.target.value)}
-        rows={2}
-      />
-      <TextAreaField
-        label={locale.bugForm.expected}
-        value={state.expected}
-        onChange={(e) => update('expected')(e.target.value)}
-        rows={2}
-      />
-      <TextAreaField
-        label={locale.bugForm.actual}
-        value={state.actual}
-        onChange={(e) => update('actual')(e.target.value)}
-        rows={2}
+        label={locale.bugForm.reproduce}
+        value={state.reproduce}
+        onChange={(e) => update('reproduce')(e.target.value)}
+        rows={3}
       />
       {/* Email field only shows when the host didn't already identify
           the user — otherwise it's redundant and adds friction. */}
       {!config.user?.email && (
         <TextField
-          label={locale.bugForm.email ?? 'Email (optional)'}
+          label={locale.bugForm.email ?? 'Email · optional'}
           type="email"
           autoComplete="email"
           inputMode="email"
           value={state.email}
           onChange={(e) => update('email')(e.target.value)}
+          onBlur={onBlur('email')}
           error={errors.email}
         />
       )}

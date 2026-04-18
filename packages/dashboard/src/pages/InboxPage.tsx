@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { Bug, Lightbulb, Search as SearchIcon, ShieldAlert } from 'lucide-react';
-import type { InboxSearch } from '../router';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { Bug, Heart, Lightbulb, Search as SearchIcon, ShieldAlert } from 'lucide-react';
+import { inboxRoute, type InboxSearch } from '../router';
 import type { TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
 import type { AdminProject, AdminTicket } from '../api/client';
@@ -25,35 +25,16 @@ export function InboxPage() {
   const { state, api } = useAuth();
   const [project, setProject] = useState<AdminProject | null>(null);
   const [tickets, setTickets] = useState<AdminTicket[] | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { kind, status, q } = useSearch({
-    from: '/_authenticated/',
-  }) as unknown as InboxSearch;
+  const { kind, status, q } = inboxRoute.useSearch();
   const navigate = useNavigate();
-  const setKind = useCallback(
-    (v: TicketKind | 'all') =>
+  const patch = useCallback(
+    (update: Partial<InboxSearch>, opts?: { replace?: boolean }) =>
       void navigate({
         to: '/',
-        search: (prev) => ({ ...(prev as unknown as InboxSearch), kind: v }),
-      }),
-    [navigate],
-  );
-  const setStatus = useCallback(
-    (v: TicketStatus | 'all') =>
-      void navigate({
-        to: '/',
-        search: (prev) => ({ ...(prev as unknown as InboxSearch), status: v }),
-      }),
-    [navigate],
-  );
-  const setQ = useCallback(
-    (v: string) =>
-      void navigate({
-        to: '/',
-        search: (prev) => ({ ...(prev as unknown as InboxSearch), q: v }),
-        replace: true,
+        search: (prev) => ({ ...(prev as InboxSearch), ...update }),
+        replace: opts?.replace,
       }),
     [navigate],
   );
@@ -76,19 +57,17 @@ export function InboxPage() {
 
   const loadTickets = useCallback(async () => {
     if (!activeKey) return;
-    setLoading(true);
     setError(null);
     try {
       const page = await api.listTickets(activeKey, {
         kind: kind === 'all' ? undefined : kind,
         status: status === 'all' ? undefined : status,
         search: q ? q : undefined,
+        sort: kind === 'feature' ? 'votes' : undefined,
       });
       setTickets(page.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tickets');
-    } finally {
-      setLoading(false);
     }
   }, [activeKey, api, kind, status, q]);
 
@@ -190,11 +169,15 @@ export function InboxPage() {
         <Separator />
 
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <SearchBox value={q} onChange={setQ} />
-          <StatusSelect value={status} onChange={setStatus} />
+          <SearchBox value={q} onChange={(v) => patch({ q: v }, { replace: true })} />
+          <StatusSelect value={status} onChange={(v) => patch({ status: v })} />
         </div>
 
-        <FilterChips kind={kind} onKindChange={setKind} counts={counts} />
+        <FilterChips
+          kind={kind}
+          onKindChange={(v) => patch({ kind: v })}
+          counts={counts}
+        />
       </section>
 
       {error && <ErrorLine>{error}</ErrorLine>}
@@ -225,9 +208,9 @@ export function InboxPage() {
         />
       )}
 
-      {loading && tickets === null ? (
+      {tickets === null ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : tickets && tickets.length === 0 ? (
+      ) : tickets.length === 0 ? (
         <EmptyTickets project={project} />
       ) : (
         <section>
@@ -416,7 +399,11 @@ function TicketRow({
         className="flex-1 min-w-0 block py-0.5 pl-1 pr-3 outline-none group-hover:bg-muted/30 focus-visible:bg-muted/40"
       >
         <div className="flex items-start gap-3">
-          <KindGlyph kind={ticket.kind} />
+          {ticket.kind === 'feature' ? (
+            <VoteGlyph count={ticket.voteCount} />
+          ) : (
+            <KindGlyph kind={ticket.kind} />
+          )}
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-heading text-base leading-snug tracking-tight text-foreground">
@@ -435,7 +422,11 @@ function TicketRow({
                 {new Date(ticket.createdAt).toLocaleString()}
               </time>
               {ticket.reporterEmail && <span>{ticket.reporterEmail}</span>}
-              {ticket.kind === 'feature' && <span>{ticket.voteCount} votes</span>}
+              {ticket.kind === 'feature' && (
+                <span className="inline-flex items-center gap-1">
+                  <Heart className="size-3" /> {ticket.voteCount}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -452,6 +443,18 @@ function KindGlyph({ kind }: { kind: TicketKind }) {
       className="mt-1 inline-flex size-6 shrink-0 items-center justify-center border border-border bg-card text-muted-foreground"
     >
       <Icon className="size-3.5" />
+    </span>
+  );
+}
+
+function VoteGlyph({ count }: { count: number }) {
+  return (
+    <span
+      aria-label={`${count} ${count === 1 ? 'vote' : 'votes'}`}
+      className="mt-1 inline-flex h-6 min-w-[2rem] shrink-0 items-center justify-center gap-1 border border-border bg-card px-1.5 font-mono text-[11px] tabular-nums text-muted-foreground"
+    >
+      {count}
+      <Heart className="size-3" aria-hidden="true" />
     </span>
   );
 }

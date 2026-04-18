@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FocusEvent, type FormEvent } from 'react';
 import { captureBrowserMetadata } from '@koe/shared';
 import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
@@ -29,8 +29,13 @@ export function FeatureRequestForm() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => controllerRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (!success) titleRef.current?.focus();
+  }, [success]);
 
   if (success) {
     return (
@@ -43,6 +48,7 @@ export function FeatureRequestForm() {
           onClick={() => {
             setSuccess(false);
             setState(EMPTY);
+            setErrors({});
           }}
         >
           Submit another
@@ -51,17 +57,31 @@ export function FeatureRequestForm() {
     );
   }
 
+  const validateField = (key: keyof FormState, value: string): string | undefined => {
+    if (key === 'title' || key === 'description') {
+      if (!value.trim()) return locale.errors.required;
+    }
+    if (key === 'email') {
+      const v = value.trim();
+      if (v && !isValidEmail(v)) return locale.errors.invalidEmail;
+    }
+    return undefined;
+  };
+
+  const onBlur = (key: keyof FormState) => (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const msg = validateField(key, e.target.value);
+    setErrors((prev) => ({ ...prev, [key]: msg }));
+  };
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setApiError(null);
 
     const nextErrors: Partial<Record<keyof FormState, string>> = {};
-    if (!state.title.trim()) nextErrors.title = locale.errors.required;
-    if (!state.description.trim()) nextErrors.description = locale.errors.required;
-    const trimmedEmail = state.email.trim();
-    if (trimmedEmail && !isValidEmail(trimmedEmail)) {
-      nextErrors.email = locale.errors.invalidEmail;
-    }
+    (['title', 'description', 'email'] as const).forEach((k) => {
+      const msg = validateField(k, state[k]);
+      if (msg) nextErrors[k] = msg;
+    });
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
@@ -70,7 +90,7 @@ export function FeatureRequestForm() {
     setSubmitting(true);
     try {
       const baseReporter = config.user ?? { id: 'anonymous' };
-      const finalEmail = trimmedEmail || baseReporter.email;
+      const finalEmail = state.email.trim() || baseReporter.email;
       const reporter = finalEmail ? { ...baseReporter, email: finalEmail } : baseReporter;
 
       await api.submitFeatureRequest(
@@ -104,9 +124,11 @@ export function FeatureRequestForm() {
   return (
     <form onSubmit={onSubmit} noValidate>
       <TextField
+        ref={titleRef}
         label={locale.featureForm.title}
         value={state.title}
         onChange={(e) => update('title')(e.target.value)}
+        onBlur={onBlur('title')}
         error={errors.title}
         required
       />
@@ -114,18 +136,20 @@ export function FeatureRequestForm() {
         label={locale.featureForm.description}
         value={state.description}
         onChange={(e) => update('description')(e.target.value)}
+        onBlur={onBlur('description')}
         error={errors.description}
         rows={4}
         required
       />
       {!config.user?.email && (
         <TextField
-          label={locale.featureForm.email ?? 'Email (optional)'}
+          label={locale.featureForm.email ?? 'Email · optional'}
           type="email"
           autoComplete="email"
           inputMode="email"
           value={state.email}
           onChange={(e) => update('email')(e.target.value)}
+          onBlur={onBlur('email')}
           error={errors.email}
         />
       )}

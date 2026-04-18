@@ -62,6 +62,7 @@ export interface InboxSearch {
   kind: TicketKind | 'all';
   status: TicketStatus | 'all';
   q: string;
+  sort: 'recent' | 'votes';
 }
 
 const VALID_KINDS: ReadonlySet<string> = new Set(['all', 'bug', 'feature']);
@@ -74,6 +75,7 @@ const VALID_STATUSES: ReadonlySet<string> = new Set([
   'closed',
   'wont_fix',
 ]);
+const VALID_SORTS: ReadonlySet<string> = new Set(['recent', 'votes']);
 
 function parseKind(raw: unknown): InboxSearch['kind'] {
   return typeof raw === 'string' && VALID_KINDS.has(raw)
@@ -85,8 +87,13 @@ function parseStatus(raw: unknown): InboxSearch['status'] {
     ? (raw as InboxSearch['status'])
     : 'open';
 }
+function parseSort(raw: unknown): InboxSearch['sort'] {
+  return typeof raw === 'string' && VALID_SORTS.has(raw)
+    ? (raw as InboxSearch['sort'])
+    : 'recent';
+}
 
-const inboxRoute = createRoute({
+export const inboxRoute = createRoute({
   getParentRoute: () => authenticatedLayoutRoute,
   path: '/',
   component: InboxPage,
@@ -94,6 +101,7 @@ const inboxRoute = createRoute({
     kind: parseKind(raw.kind),
     status: parseStatus(raw.status),
     q: typeof raw.q === 'string' ? raw.q.slice(0, 200) : '',
+    sort: parseSort(raw.sort),
   }),
 });
 
@@ -221,6 +229,7 @@ export const INBOX_DEFAULT_SEARCH: InboxSearch = {
   kind: 'all',
   status: 'open',
   q: '',
+  sort: 'recent',
 };
 
 function LoadingScreen(): ReactNode {

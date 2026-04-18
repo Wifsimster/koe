@@ -45,6 +45,14 @@ export interface WidgetConfig {
     bugs?: boolean;
     features?: boolean;
     chat?: boolean;
+    /**
+     * When true, surfaces a "browse & vote on ideas" screen alongside
+     * the submission forms. Defaults to true. The vote action itself
+     * additionally requires the host to pass an identified user — the
+     * browse list still renders for anonymous visitors in read-only
+     * mode so they aren't blocked from seeing existing requests.
+     */
+    vote?: boolean;
   };
   /** Localization strings. */
   locale?: Partial<WidgetLocale>;
@@ -65,6 +73,20 @@ export interface WidgetLocale {
     bugHint: string;
     feature: string;
     featureHint: string;
+    vote?: string;
+    voteHint?: string;
+  };
+  /** Strings for the browse-and-vote screen. */
+  browse?: {
+    title: string;
+    loading: string;
+    empty: string;
+    error: string;
+    retry: string;
+    voteAriaLabel: string;
+    unvoteAriaLabel: string;
+    /** Shown inline when the host hasn't identified the reporter. */
+    signInToVote: string;
   };
   /** Label for the back button that returns to the intent picker. */
   back?: string;
@@ -81,9 +103,21 @@ export interface WidgetLocale {
   bugForm: {
     title: string;
     description: string;
-    steps: string;
-    expected: string;
-    actual: string;
+    /**
+     * Single optional "how to reproduce" textarea. Replaces the earlier
+     * triplet (steps / expected / actual) — most reporters pasted a free
+     * form repro into one field anyway.
+     */
+    reproduce: string;
+    /**
+     * @deprecated Merged into `reproduce`. Retained so locales authored
+     * before the consolidation still typecheck; no longer rendered.
+     */
+    steps?: string;
+    /** @deprecated Merged into `reproduce`. */
+    expected?: string;
+    /** @deprecated Merged into `reproduce`. */
+    actual?: string;
     /** Label for the optional email field shown above submit. */
     email?: string;
     submit: string;
@@ -119,13 +153,25 @@ export interface WidgetLocale {
 export const DEFAULT_LOCALE: WidgetLocale = {
   launcherLabel: 'Support',
   title: 'How can we help?',
-  subtitle: 'Report a bug or suggest an idea — your feedback goes straight to the team.',
+  subtitle: 'We read every message.',
   picker: {
     prompt: "What's on your mind?",
     bug: 'Report a bug',
     bugHint: 'Something broken or confusing',
     feature: 'Suggest an idea',
     featureHint: 'New features, improvements',
+    vote: 'Browse ideas',
+    voteHint: 'Upvote requests from other users',
+  },
+  browse: {
+    title: 'Ideas',
+    loading: 'Loading ideas…',
+    empty: 'No ideas yet — be the first to suggest one.',
+    error: "Couldn't load ideas.",
+    retry: 'Try again',
+    voteAriaLabel: 'Upvote',
+    unvoteAriaLabel: 'Remove upvote',
+    signInToVote: 'Sign in to vote',
   },
   back: 'Back',
   tabs: {
@@ -136,17 +182,15 @@ export const DEFAULT_LOCALE: WidgetLocale = {
   bugForm: {
     title: 'Title',
     description: 'What happened?',
-    steps: 'Steps to reproduce',
-    expected: 'Expected behavior',
-    actual: 'Actual behavior',
-    email: 'Email (optional — so we can follow up)',
+    reproduce: 'How to reproduce',
+    email: 'Email · optional',
     submit: 'Send bug report',
     success: 'Thanks — your report has been received.',
   },
   featureForm: {
     title: 'Title',
     description: 'Describe your idea',
-    email: 'Email (optional — so we can follow up)',
+    email: 'Email · optional',
     submit: 'Submit request',
     success: 'Thanks for the suggestion!',
   },
@@ -156,7 +200,7 @@ export const DEFAULT_LOCALE: WidgetLocale = {
     send: 'Send',
   },
   errors: {
-    required: 'Required',
+    required: 'Please fill this out',
     invalidEmail: 'Enter a valid email',
     network: 'Network error — check your connection',
     generic: 'Something went wrong',

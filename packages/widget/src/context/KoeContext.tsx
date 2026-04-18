@@ -91,6 +91,9 @@ function mergeLocale(override?: Partial<WidgetLocale>): WidgetLocale {
     picker: override.picker
       ? { ...(DEFAULT_LOCALE.picker as NonNullable<WidgetLocale['picker']>), ...override.picker }
       : DEFAULT_LOCALE.picker,
+    browse: override.browse
+      ? { ...(DEFAULT_LOCALE.browse as NonNullable<WidgetLocale['browse']>), ...override.browse }
+      : DEFAULT_LOCALE.browse,
     tabs: { ...DEFAULT_LOCALE.tabs, ...(override.tabs ?? {}) },
     bugForm: { ...DEFAULT_LOCALE.bugForm, ...(override.bugForm ?? {}) },
     featureForm: { ...DEFAULT_LOCALE.featureForm, ...(override.featureForm ?? {}) },

@@ -107,6 +107,12 @@ export interface TicketListQuery {
   priority?: TicketPriority;
   verified?: boolean;
   search?: string;
+  /**
+   * Sort order. `recent` (default) orders by `updated_at` desc.
+   * `votes` orders by vote count desc and is incompatible with
+   * `cursor` (server returns 422).
+   */
+  sort?: 'recent' | 'votes';
   limit?: number;
   cursor?: string;
 }
@@ -120,22 +126,15 @@ export interface TicketListPage {
   };
 }
 
-export interface ProjectOverview {
-  openBugs: number;
-  openFeatures: number;
-  criticalOpenBugs: number;
-  resolvedLast14d: number;
-  openedLast14d: number;
-  topVotedThisWeek: AdminTicket[];
-  recent: AdminTicket[];
-}
-
+/**
+ * KPI tile for one project on the cross-project overview. All
+ * counters are pre-aggregated server-side; the dashboard just
+ * renders them.
+ */
 export interface WorkspaceProjectKpis {
   openBugs: number;
   openFeatures: number;
   openFeatureVotes: number;
-  activityLast7d: number;
-  activityPrev7d: number;
 }
 
 export interface WorkspaceProjectSummary {
@@ -189,16 +188,13 @@ export class AdminApiClient {
     if (query.priority) params.set('priority', query.priority);
     if (query.verified !== undefined) params.set('verified', String(query.verified));
     if (query.search) params.set('search', query.search);
+    if (query.sort && query.sort !== 'recent') params.set('sort', query.sort);
     if (query.limit) params.set('limit', String(query.limit));
     if (query.cursor) params.set('cursor', query.cursor);
     const qs = params.toString();
     return this.get<TicketListPage>(
       `/projects/${encodeURIComponent(projectKey)}/tickets${qs ? `?${qs}` : ''}`,
     );
-  }
-
-  overview(projectKey: string): Promise<ProjectOverview> {
-    return this.get<ProjectOverview>(`/projects/${encodeURIComponent(projectKey)}/overview`);
   }
 
   updateTicket(projectKey: string, id: string, patch: TicketPatch): Promise<AdminTicket> {
