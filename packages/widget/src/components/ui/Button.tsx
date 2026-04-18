@@ -28,7 +28,7 @@ export function Button({
         // Primary = foreground-on-background, inverts automatically via
         // `--koe-text` / `--koe-bg` in dark mode.
         variant === 'primary' &&
-          'koe-bg-koe-text koe-text-koe-bg hover:koe-bg-koe-accent-hover',
+          'koe-bg-koe-text koe-text-koe-bg hover:koe-bg-koe-text-hover',
         variant === 'outline' &&
           'koe-border koe-border-koe-border koe-text-koe-text hover:koe-bg-koe-bg-muted',
         variant === 'ghost' &&

@@ -18,6 +18,10 @@
   --koe-border: #e5e5e5;
   --koe-text: #0a0a0a;
   --koe-text-muted: #737373;
+  /* Subtle shift of the foreground for primary-button hover — mirrors
+   * shadcn's `bg-primary/90`. Flipped in dark mode so the hover stays
+   * in the same visual family as the base state. */
+  --koe-text-hover: #262626;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: 13px;
   line-height: 1.5;
@@ -168,6 +172,7 @@
     --koe-border: #262626;
     --koe-text: #fafafa;
     --koe-text-muted: #a3a3a3;
+    --koe-text-hover: #e5e5e5;
   }
 }
 
@@ -177,4 +182,5 @@
   --koe-border: #262626;
   --koe-text: #fafafa;
   --koe-text-muted: #a3a3a3;
+  --koe-text-hover: #e5e5e5;
 }

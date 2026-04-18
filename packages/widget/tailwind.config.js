@@ -21,6 +21,7 @@ export default {
           border: 'var(--koe-border)',
           text: 'var(--koe-text)',
           'text-muted': 'var(--koe-text-muted)',
+          'text-hover': 'var(--koe-text-hover)',
         },
       },
       boxShadow: {
