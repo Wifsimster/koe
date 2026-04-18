@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import type { InputHTMLAttributes, Ref, TextareaHTMLAttributes } from 'react';
 import clsx from 'clsx';
 
 interface BaseProps {
@@ -9,19 +9,24 @@ interface BaseProps {
 const inputClasses =
   // `text-base` is 16px — anything smaller triggers iOS Safari's auto-zoom
   // on focus, which ruins the panel layout.
-  'koe-w-full koe-px-3 koe-py-2 koe-text-base koe-border koe-border-koe-border koe-bg-koe-bg focus:koe-outline-none focus:koe-border-koe-text focus:koe-ring-1 focus:koe-ring-koe-text';
+  // `koe-field` applies a stronger rest border (see styles.css) so the
+  // input reads as interactive, not editorial text. Focus lifts to the
+  // full foreground color + ring.
+  'koe-field koe-w-full koe-px-3 koe-py-2 koe-text-base koe-border koe-bg-koe-bg focus:koe-outline-none focus:koe-border-koe-text focus:koe-ring-1 focus:koe-ring-koe-text';
 
 export function TextField({
   label,
   error,
   className,
+  ref,
   ...rest
-}: BaseProps & InputHTMLAttributes<HTMLInputElement>) {
+}: BaseProps & InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement> }) {
   return (
     <label className="koe-block koe-mb-4">
       <span className="koe-label koe-mb-1.5">{label}</span>
       <input
         {...rest}
+        ref={ref}
         className={clsx(inputClasses, error && 'koe-border-red-500', className)}
       />
       {error && <span className="koe-block koe-text-xs koe-text-red-500 koe-mt-1">{error}</span>}

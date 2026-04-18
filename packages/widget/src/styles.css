@@ -127,6 +127,52 @@
   color: var(--koe-text-muted);
 }
 
+/*
+ * Input rest border — deliberately stronger than `--koe-border` so fields
+ * read as interactive, not as editorial text. A Tailwind `border-koe-*`
+ * utility on the element wins over this via specificity when an error
+ * paints it red.
+ */
+.koe-root .koe-field {
+  border-color: var(--koe-field-border, #c4c4c4);
+}
+.koe-root .koe-field:hover {
+  border-color: var(--koe-text-muted);
+}
+
+/* Open animation — ~180ms ease-out. Respects reduced-motion users. */
+.koe-panel-shell {
+  animation: koe-panel-in 180ms ease-out;
+}
+@keyframes koe-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .koe-panel-shell {
+    animation: none;
+  }
+  .koe-spin {
+    animation: none !important;
+  }
+}
+
+/* Button loading spinner. */
+.koe-spin {
+  animation: koe-spin 0.8s linear infinite;
+}
+@keyframes koe-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Bottom-sheet posture on narrow viewports. */
 @media (max-width: 480px) {
   .koe-root {
@@ -170,6 +216,7 @@
     --koe-bg: #0a0a0a;
     --koe-bg-muted: #171717;
     --koe-border: #262626;
+    --koe-field-border: #3f3f3f;
     --koe-text: #fafafa;
     --koe-text-muted: #a3a3a3;
     --koe-text-hover: #e5e5e5;
@@ -180,6 +227,7 @@
   --koe-bg: #0a0a0a;
   --koe-bg-muted: #171717;
   --koe-border: #262626;
+  --koe-field-border: #3f3f3f;
   --koe-text: #fafafa;
   --koe-text-muted: #a3a3a3;
   --koe-text-hover: #e5e5e5;

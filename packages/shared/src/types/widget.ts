@@ -81,9 +81,21 @@ export interface WidgetLocale {
   bugForm: {
     title: string;
     description: string;
-    steps: string;
-    expected: string;
-    actual: string;
+    /**
+     * Single optional "how to reproduce" textarea. Replaces the earlier
+     * triplet (steps / expected / actual) — most reporters pasted a free
+     * form repro into one field anyway.
+     */
+    reproduce: string;
+    /**
+     * @deprecated Merged into `reproduce`. Retained so locales authored
+     * before the consolidation still typecheck; no longer rendered.
+     */
+    steps?: string;
+    /** @deprecated Merged into `reproduce`. */
+    expected?: string;
+    /** @deprecated Merged into `reproduce`. */
+    actual?: string;
     /** Label for the optional email field shown above submit. */
     email?: string;
     submit: string;
@@ -119,7 +131,7 @@ export interface WidgetLocale {
 export const DEFAULT_LOCALE: WidgetLocale = {
   launcherLabel: 'Support',
   title: 'How can we help?',
-  subtitle: 'Report a bug or suggest an idea — your feedback goes straight to the team.',
+  subtitle: 'We read every message.',
   picker: {
     prompt: "What's on your mind?",
     bug: 'Report a bug',
@@ -136,17 +148,15 @@ export const DEFAULT_LOCALE: WidgetLocale = {
   bugForm: {
     title: 'Title',
     description: 'What happened?',
-    steps: 'Steps to reproduce',
-    expected: 'Expected behavior',
-    actual: 'Actual behavior',
-    email: 'Email (optional — so we can follow up)',
+    reproduce: 'How to reproduce',
+    email: 'Email · optional',
     submit: 'Send bug report',
     success: 'Thanks — your report has been received.',
   },
   featureForm: {
     title: 'Title',
     description: 'Describe your idea',
-    email: 'Email (optional — so we can follow up)',
+    email: 'Email · optional',
     submit: 'Submit request',
     success: 'Thanks for the suggestion!',
   },
@@ -156,7 +166,7 @@ export const DEFAULT_LOCALE: WidgetLocale = {
     send: 'Send',
   },
   errors: {
-    required: 'Required',
+    required: 'Please fill this out',
     invalidEmail: 'Enter a valid email',
     network: 'Network error — check your connection',
     generic: 'Something went wrong',
