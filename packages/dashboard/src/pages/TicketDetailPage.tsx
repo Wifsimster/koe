@@ -3,8 +3,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft, Bug, Lightbulb, ShieldAlert } from 'lucide-react';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type { AdminTicket, TicketComment, TicketEvent } from '../api/client';
-import { ConfirmDialog } from '../components/ConfirmDialog';
+import type { AdminTicket, TicketEvent, TicketPatch } from '../api/client';
 import { INBOX_DEFAULT_SEARCH } from '../router';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -24,12 +23,9 @@ export function TicketDetailPage() {
   const { state, api } = useAuth();
   const [ticket, setTicket] = useState<AdminTicket | null>(null);
   const [events, setEvents] = useState<TicketEvent[] | null>(null);
-  const [comments, setComments] = useState<TicketComment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
-  const [pendingBatchRevert, setPendingBatchRevert] = useState<string | null>(null);
-  const [batchReverting, setBatchReverting] = useState(false);
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
@@ -66,27 +62,9 @@ export function TicketDetailPage() {
     }
   }, [activeKey, api, id]);
 
-  const loadComments = useCallback(async () => {
-    if (!activeKey) return;
-    try {
-      const rows = await api.listTicketComments(activeKey, id);
-      setComments(rows);
-    } catch (err) {
-      console.warn('[koe/dashboard] listTicketComments failed', err);
-    }
-  }, [activeKey, api, id]);
-
   useEffect(() => {
     void loadEvents();
-    void loadComments();
-  }, [loadEvents, loadComments]);
-
-  const postComment = async (body: string) => {
-    if (!activeKey) return;
-    const created = await api.createTicketComment(activeKey, id, body);
-    setComments((prev) => (prev ? [created, ...prev] : [created]));
-    void loadEvents();
-  };
+  }, [loadEvents]);
 
   const revertEvent = async (eventId: string): Promise<void> => {
     if (!activeKey) return;
@@ -99,44 +77,29 @@ export function TicketDetailPage() {
     }
   };
 
-  const revertBatch = async (batchId: string): Promise<void> => {
-    if (!activeKey) return;
-    setPendingBatchRevert(batchId);
-  };
-
-  const performBatchRevert = async (batchId: string): Promise<void> => {
-    if (!activeKey) return;
-    setBatchReverting(true);
-    try {
-      const res = await api.revertEventBatch(activeKey, batchId);
-      setPendingBatchRevert(null);
-      void loadEvents();
-      if (res.skipped.length > 0) {
-        setMutError(
-          `Batch partially reverted: ${res.reverted} succeeded, ${res.skipped.length} skipped.`,
-        );
-      }
-    } catch (err) {
-      setMutError(err instanceof Error ? err.message : 'Batch revert failed');
-      setPendingBatchRevert(null);
-    } finally {
-      setBatchReverting(false);
-    }
-  };
-
-  const applyPatch = async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
+  const applyPatch = async (patch: TicketPatch) => {
     if (!activeKey || !ticket) return;
     const prev = ticket;
     setMutError(null);
     setMutating(true);
-    setTicket({ ...ticket, ...patch });
+    // Optimistic update. `notes` normalises empty string to null so the
+    // local ticket shape matches what the server returns.
+    setTicket({
+      ...ticket,
+      ...patch,
+      ...(patch.notes !== undefined ? { notes: patch.notes || null } : {}),
+    });
     try {
       const next = await api.updateTicket(activeKey, ticket.id, patch);
       setTicket(next);
-      void loadEvents();
+      // Notes-only patches don't emit an audit event, so skip the refetch.
+      if (patch.status !== undefined || patch.priority !== undefined) {
+        void loadEvents();
+      }
     } catch (err) {
       setTicket(prev);
       setMutError(err instanceof Error ? err.message : 'Update failed');
+      throw err;
     } finally {
       setMutating(false);
     }
@@ -237,15 +200,14 @@ export function TicketDetailPage() {
           )}
 
           <Section title="Notes">
-            <CommentsPanel comments={comments} onSubmit={postComment} />
+            <NotesPanel
+              value={ticket.notes ?? ''}
+              onSave={(notes) => applyPatch({ notes })}
+            />
           </Section>
 
           <Section title="Activity">
-            <ActivityList
-              events={events}
-              onRevert={revertEvent}
-              onRevertBatch={revertBatch}
-            />
+            <ActivityList events={events} onRevert={revertEvent} />
           </Section>
         </div>
 
@@ -284,107 +246,93 @@ export function TicketDetailPage() {
           </MetaCard>
         </aside>
       </div>
-
-      {pendingBatchRevert && (
-        <ConfirmDialog
-          title="Undo this batch?"
-          body="Every ticket that was part of the bulk action will be reverted where possible. Tickets already at the target state will be skipped and reported."
-          confirmLabel="Undo batch"
-          submitting={batchReverting}
-          onConfirm={() => void performBatchRevert(pendingBatchRevert)}
-          onCancel={() => setPendingBatchRevert(null)}
-        />
-      )}
     </div>
   );
 }
 
-function CommentsPanel({
-  comments,
-  onSubmit,
+/**
+ * Private notes textarea, saved on demand. One field on the ticket,
+ * not a stream — the solo admin doesn't need threaded notes, and
+ * avoiding the comments table simplifies the server too.
+ *
+ * Save triggers an explicit PATCH rather than debouncing on every
+ * keystroke: debouncing a save with no visible feedback would leave
+ * the operator unsure whether their half-finished thought was
+ * persisted. An explicit button also matches the model — notes are
+ * settings-like, not chat-like.
+ */
+function NotesPanel({
+  value,
+  onSave,
 }: {
-  comments: TicketComment[] | null;
-  onSubmit: (body: string) => Promise<void>;
+  value: string;
+  onSave: (notes: string) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(value);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Keep the draft in sync with incoming props (e.g. after a revert
+  // refetches the ticket) as long as the operator isn't mid-edit.
+  useEffect(() => {
+    if (!submitting) setDraft(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const dirty = draft !== value;
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const body = draft.trim();
-    if (!body) return;
+    if (!dirty) return;
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(body);
-      setDraft('');
+      await onSave(draft);
+      setSavedAt(Date.now());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to post note');
+      setError(err instanceof Error ? err.message : 'Failed to save notes');
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <div className="space-y-4">
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <Textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Leave a private note for yourself…"
-          rows={3}
-          maxLength={10_000}
-          disabled={submitting}
-        />
-        <div className="flex items-center gap-3">
-          {error && (
-            <p role="alert" className="flex-1 text-xs text-destructive">
-              {error}
-            </p>
-          )}
-          <div className="ml-auto">
-            <Button
-              type="submit"
-              size="sm"
-              disabled={submitting || draft.trim().length === 0}
-            >
-              {submitting ? 'Posting…' : 'Post note'}
-            </Button>
-          </div>
-        </div>
-      </form>
+  const savedRecently = savedAt !== null && Date.now() - savedAt < 2000;
 
-      {comments === null ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : comments.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No notes yet. Notes stay private — never shown to the reporter.
-        </p>
-      ) : (
-        <ol className="space-y-4">
-          {comments.map((c) => (
-            <li key={c.id} className="border-l-2 border-border pl-4">
-              <div className="font-mono text-[11px] text-muted-foreground">
-                <time dateTime={c.createdAt}>{new Date(c.createdAt).toLocaleString()}</time>
-              </div>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{c.body}</p>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
+  return (
+    <form onSubmit={handleSave} className="space-y-3">
+      <Textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Private scratch space. Never shown to the reporter."
+        rows={4}
+        maxLength={10_000}
+        disabled={submitting}
+      />
+      <div className="flex items-center gap-3">
+        {error ? (
+          <p role="alert" className="flex-1 text-xs text-destructive">
+            {error}
+          </p>
+        ) : savedRecently ? (
+          <p className="flex-1 text-xs text-muted-foreground">Saved.</p>
+        ) : null}
+        <div className="ml-auto">
+          <Button type="submit" size="sm" disabled={submitting || !dirty}>
+            {submitting ? 'Saving…' : 'Save notes'}
+          </Button>
+        </div>
+      </div>
+    </form>
   );
 }
 
 function ActivityList({
   events,
   onRevert,
-  onRevertBatch,
 }: {
   events: TicketEvent[] | null;
   onRevert: (eventId: string) => Promise<void>;
-  onRevertBatch: (batchId: string) => Promise<void>;
 }) {
   const [reverting, setReverting] = useState<string | null>(null);
 
@@ -409,7 +357,6 @@ function ActivityList({
   return (
     <ol className="space-y-5 border-l border-border pl-5">
       {events.map((ev) => {
-        const revertable = ev.kind === 'status_changed' || ev.kind === 'priority_changed';
         const wasRevert = typeof (ev.payload as Record<string, unknown>).revertOf === 'string';
         return (
           <li
@@ -431,28 +378,16 @@ function ActivityList({
                 {new Date(ev.createdAt).toLocaleString()}
               </div>
             </div>
-            {revertable && (
-              <div className="flex shrink-0 flex-col items-end gap-1 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => void handleRevert(ev.id)}
-                  disabled={reverting !== null}
-                  className="underline underline-offset-4 hover:text-primary disabled:opacity-60"
-                >
-                  {reverting === ev.id ? 'Reverting…' : 'Undo'}
-                </button>
-                {ev.batchId && (
-                  <button
-                    type="button"
-                    onClick={() => void onRevertBatch(ev.batchId!)}
-                    disabled={reverting !== null}
-                    className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-60"
-                  >
-                    Undo batch
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="flex shrink-0 flex-col items-end gap-1 text-[11px]">
+              <button
+                type="button"
+                onClick={() => void handleRevert(ev.id)}
+                disabled={reverting !== null}
+                className="underline underline-offset-4 hover:text-primary disabled:opacity-60"
+              >
+                {reverting === ev.id ? 'Reverting…' : 'Undo'}
+              </button>
+            </div>
           </li>
         );
       })}
@@ -470,10 +405,6 @@ function describeEvent(ev: TicketEvent): string {
     const from = readString(ev.payload.from);
     const to = readString(ev.payload.to);
     return `Priority changed from ${from} to ${to}`;
-  }
-  if (ev.kind === 'commented') {
-    const excerpt = readString(ev.payload.excerpt);
-    return excerpt === '?' ? 'Note added' : `Note added: "${excerpt}"`;
   }
   return ev.kind;
 }
