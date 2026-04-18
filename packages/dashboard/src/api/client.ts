@@ -3,29 +3,16 @@ import type { BrowserMetadata, TicketKind, TicketPriority, TicketStatus } from '
 export interface TicketPatch {
   status?: TicketStatus;
   priority?: TicketPriority;
+  /**
+   * Private admin notes. Empty string clears the field — both "" and
+   * null read back as no notes on the returned ticket.
+   */
+  notes?: string | null;
 }
 
 export interface BulkUpdateResult {
   updated: number;
   failed: Array<{ id: string; reason: 'not_found' }>;
-  /** Audit correlation id for every event the bulk call emitted. */
-  batchId: string | null;
-}
-
-export interface BatchRevertResult {
-  reverted: number;
-  skipped: Array<{
-    eventId: string;
-    reason: 'unrevertable' | 'no_change';
-  }>;
-}
-
-export interface BatchSummary {
-  batchId: string;
-  createdAt: string;
-  eventCount: number;
-  ticketCount: number;
-  kinds: string[];
 }
 
 export interface CreateProjectPayload {
@@ -44,22 +31,13 @@ export interface CreateProjectResult {
   identitySecret: string;
 }
 
-export type TicketEventKind = 'status_changed' | 'priority_changed' | 'commented';
+export type TicketEventKind = 'status_changed' | 'priority_changed';
 
 export interface TicketEvent {
   id: string;
   ticketId: string;
   kind: TicketEventKind;
   payload: Record<string, unknown>;
-  createdAt: string;
-  /** Correlation id for events from the same bulk call. `null` for single-ticket. */
-  batchId: string | null;
-}
-
-export interface TicketComment {
-  id: string;
-  ticketId: string;
-  body: string;
   createdAt: string;
 }
 
@@ -96,6 +74,8 @@ export interface AdminTicket {
   actualBehavior: string | null;
   metadata: BrowserMetadata | null;
   screenshotUrl: string | null;
+  /** Private admin notes. Never shown to the widget reporter. */
+  notes: string | null;
   createdAt: string;
   updatedAt: string;
   voteCount: number;
@@ -236,41 +216,8 @@ export class AdminApiClient {
     );
   }
 
-  revertEventBatch(projectKey: string, batchId: string): Promise<BatchRevertResult> {
-    return this.send<BatchRevertResult>(
-      'POST',
-      `/projects/${encodeURIComponent(projectKey)}/events/batches/${encodeURIComponent(
-        batchId,
-      )}/revert`,
-    );
-  }
-
-  listEventBatches(projectKey: string): Promise<BatchSummary[]> {
-    return this.get<BatchSummary[]>(
-      `/projects/${encodeURIComponent(projectKey)}/events/batches`,
-    );
-  }
-
   createProject(payload: CreateProjectPayload): Promise<CreateProjectResult> {
     return this.send<CreateProjectResult>('POST', '/projects', payload);
-  }
-
-  listTicketComments(projectKey: string, id: string): Promise<TicketComment[]> {
-    return this.get<TicketComment[]>(
-      `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}/comments`,
-    );
-  }
-
-  createTicketComment(
-    projectKey: string,
-    id: string,
-    body: string,
-  ): Promise<TicketComment> {
-    return this.send<TicketComment>(
-      'POST',
-      `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}/comments`,
-      { body },
-    );
   }
 
   loginWithPassword(email: string, password: string): Promise<{ email: string }> {

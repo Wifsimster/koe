@@ -11,7 +11,6 @@ import type { TicketKind, TicketStatus } from '@koe/shared';
 import { LoginPage } from './pages/LoginPage';
 import { InboxPage } from './pages/InboxPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
-import { BatchesPage } from './pages/BatchesPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { AppShell } from './components/AppShell';
@@ -111,12 +110,6 @@ const ticketDetailRoute = createRoute({
   component: TicketDetailPage,
 });
 
-const batchesRoute = createRoute({
-  getParentRoute: () => authenticatedLayoutRoute,
-  path: '/batches',
-  component: BatchesPage,
-});
-
 const onboardingRoute = createRoute({
   getParentRoute: () => authenticatedLayoutRoute,
   path: '/onboarding',
@@ -134,7 +127,6 @@ export const routeTree = rootRoute.addChildren([
   authenticatedLayoutRoute.addChildren([
     inboxRoute,
     ticketDetailRoute,
-    batchesRoute,
     onboardingRoute,
     overviewRoute,
   ]),
@@ -206,9 +198,6 @@ function RouteHeader(): ReactNode {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (pathname === '/overview') {
     return <Crumb label="Overview" caption="Every project at a glance." />;
-  }
-  if (pathname.startsWith('/batches')) {
-    return <Crumb label="Batches" caption="Undo bulk actions across the project." />;
   }
   if (pathname.startsWith('/tickets/')) {
     return <Crumb label="Ticket" caption="Triage, route, respond." />;

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Grid2x2, Inbox, Layers, LogOut } from 'lucide-react';
+import { Grid2x2, Inbox, LogOut } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { INBOX_DEFAULT_SEARCH } from '../router';
 import { ModeToggle } from './ModeToggle';
@@ -37,7 +37,6 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
   }
 
   const isInbox = pathname === '/' || pathname.startsWith('/tickets');
-  const isBatches = pathname.startsWith('/batches');
   const isOverview = pathname === '/overview';
   // Overview is a landing surface for the founder who juggles multiple
   // projects — hidden when there's only one to keep the sidebar minimal.
@@ -82,14 +81,6 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
                     <Link to="/" search={INBOX_DEFAULT_SEARCH}>
                       <Inbox />
                       <span>Inbox</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isBatches}>
-                    <Link to="/batches">
-                      <Layers />
-                      <span>Recent batches</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

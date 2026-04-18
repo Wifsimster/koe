@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
@@ -314,19 +314,27 @@ export function createAdminApiRoutes() {
   });
 
   /**
-   * Triage mutation. Partial update: both fields optional, at least one
-   * required. We don't expose other columns on purpose — things like
-   * `reporter_email` and `metadata` come from the submitter and must
-   * not be rewritable here. Notes are a separate surface.
+   * Triage mutation. Partial update: every field is optional, at least
+   * one is required. `notes` is free-text admin-only scratch space;
+   * reporter-supplied columns (`reporter_email`, `metadata`, …) stay
+   * unwritable.
+   *
+   * Empty string on `notes` clears the field; `null` does too. The
+   * distinction doesn't matter to the operator — both read back as
+   * "no notes" — but accepting both lets the form submit a cleared
+   * textarea without a special case.
    */
   const patchTicketSchema = z
     .object({
       status: ticketStatusSchema.optional(),
       priority: ticketPrioritySchema.optional(),
+      notes: z.string().max(10_000).nullable().optional(),
     })
-    .refine((v) => v.status !== undefined || v.priority !== undefined, {
-      message: 'At least one of status or priority is required',
-    });
+    .refine(
+      (v) =>
+        v.status !== undefined || v.priority !== undefined || v.notes !== undefined,
+      { message: 'At least one of status, priority, or notes is required' },
+    );
 
   api.patch('/projects/:key/tickets/:id', resolveProject, async (c) => {
     const project = c.get('project');
@@ -355,6 +363,11 @@ export function createAdminApiRoutes() {
         .set({
           ...(parsed.data.status ? { status: parsed.data.status } : {}),
           ...(parsed.data.priority ? { priority: parsed.data.priority } : {}),
+          // Normalise "" -> null so a cleared textarea doesn't persist
+          // an empty string that sorts different from "never written".
+          ...(parsed.data.notes !== undefined
+            ? { notes: parsed.data.notes ? parsed.data.notes : null }
+            : {}),
           updatedAt: new Date(),
         })
         .where(
@@ -424,7 +437,6 @@ export function createAdminApiRoutes() {
         kind: schema.adminTicketEvents.kind,
         payload: schema.adminTicketEvents.payload,
         createdAt: schema.adminTicketEvents.createdAt,
-        batchId: schema.adminTicketEvents.batchId,
       })
       .from(schema.adminTicketEvents)
       .where(eq(schema.adminTicketEvents.ticketId, id))
@@ -434,81 +446,12 @@ export function createAdminApiRoutes() {
     return ok(c, rows);
   });
 
-  /** Triage notes on a ticket. */
-  api.get('/projects/:key/tickets/:id/comments', resolveProject, async (c) => {
-    const project = c.get('project');
-    const id = c.req.param('id');
-
-    const [ticket] = await db
-      .select({ id: schema.tickets.id })
-      .from(schema.tickets)
-      .where(and(eq(schema.tickets.id, id), eq(schema.tickets.projectId, project.id)))
-      .limit(1);
-    if (!ticket) return fail(c, 'not_found', 'Ticket not found', 404);
-
-    const rows = await db
-      .select({
-        id: schema.adminTicketComments.id,
-        ticketId: schema.adminTicketComments.ticketId,
-        body: schema.adminTicketComments.body,
-        createdAt: schema.adminTicketComments.createdAt,
-      })
-      .from(schema.adminTicketComments)
-      .where(eq(schema.adminTicketComments.ticketId, id))
-      .orderBy(desc(schema.adminTicketComments.createdAt))
-      .limit(200);
-
-    return ok(c, rows);
-  });
-
-  const createCommentSchema = z.object({
-    body: z.string().trim().min(1).max(10_000),
-  });
-
-  api.post('/projects/:key/tickets/:id/comments', resolveProject, async (c) => {
-    const project = c.get('project');
-    const id = c.req.param('id');
-
-    const body = await c.req.json().catch(() => null);
-    const parsed = createCommentSchema.safeParse(body);
-    if (!parsed.success) {
-      return fail(c, 'validation_failed', 'Invalid comment payload', 422, {
-        issues: parsed.error.issues,
-      });
-    }
-
-    const created = await db.transaction(async (tx) => {
-      const [ticket] = await tx
-        .select({ id: schema.tickets.id })
-        .from(schema.tickets)
-        .where(and(eq(schema.tickets.id, id), eq(schema.tickets.projectId, project.id)))
-        .limit(1);
-      if (!ticket) return { notFound: true } as const;
-
-      const [row] = await tx
-        .insert(schema.adminTicketComments)
-        .values({ ticketId: id, body: parsed.data.body })
-        .returning();
-      const comment = firstOrThrow(row ? [row] : [], 'comment after insert');
-
-      const excerpt = comment.body.slice(0, 200);
-      await tx.insert(schema.adminTicketEvents).values({
-        ticketId: id,
-        kind: 'commented',
-        payload: { commentId: comment.id, excerpt },
-      });
-
-      return { notFound: false, comment } as const;
-    });
-
-    if (created.notFound) return fail(c, 'not_found', 'Ticket not found', 404);
-    return ok(c, created.comment, 201);
-  });
-
   /**
    * Bulk PATCH — apply the same status/priority change to up to 100
-   * tickets at once. Same audit shape as the single PATCH; events
-   * share a `batchId` so the dashboard can offer "undo this batch".
+   * tickets at once. Same audit shape as the single PATCH: per-ticket
+   * events emitted independently. No batch correlation: a solo
+   * operator knows what they just bulk-changed; per-event undo on the
+   * timeline covers mistakes.
    */
   const bulkPatchSchema = z.object({
     ids: z.array(z.string().uuid()).min(1).max(100),
@@ -548,7 +491,7 @@ export function createAdminApiRoutes() {
         .map((id) => ({ id, reason: 'not_found' }));
 
       if (before.length === 0) {
-        return { updatedCount: 0, failed, batchId: null } as const;
+        return { updatedCount: 0, failed } as const;
       }
 
       const updated = await tx
@@ -569,13 +512,10 @@ export function createAdminApiRoutes() {
         )
         .returning({ id: schema.tickets.id });
 
-      const batchId = randomUUID();
-
       const events: Array<{
         ticketId: string;
         kind: 'status_changed' | 'priority_changed';
         payload: Record<string, unknown>;
-        batchId: string;
       }> = [];
       for (const row of before) {
         if (patch.status && patch.status !== row.status) {
@@ -583,7 +523,6 @@ export function createAdminApiRoutes() {
             ticketId: row.id,
             kind: 'status_changed',
             payload: { from: row.status, to: patch.status },
-            batchId,
           });
         }
         if (patch.priority && patch.priority !== row.priority) {
@@ -591,7 +530,6 @@ export function createAdminApiRoutes() {
             ticketId: row.id,
             kind: 'priority_changed',
             payload: { from: row.priority, to: patch.priority },
-            batchId,
           });
         }
       }
@@ -599,17 +537,12 @@ export function createAdminApiRoutes() {
         await tx.insert(schema.adminTicketEvents).values(events);
       }
 
-      return {
-        updatedCount: updated.length,
-        failed,
-        batchId: events.length > 0 ? batchId : null,
-      } as const;
+      return { updatedCount: updated.length, failed } as const;
     });
 
     return ok(c, {
       updated: result.updatedCount,
       failed: result.failed,
-      batchId: result.batchId,
     });
   });
 
@@ -712,144 +645,6 @@ export function createAdminApiRoutes() {
       return ok(c, { ...row.ticket, voteCount: row.voteCount });
     },
   );
-
-  /** Recent bulk actions for the project. Sorted newest-first. */
-  api.get('/projects/:key/events/batches', resolveProject, async (c) => {
-    const project = c.get('project');
-
-    const rows = (await db.execute(sql`
-      with grouped as (
-        select
-          e.batch_id                           as batch_id,
-          min(e.created_at)                    as created_at,
-          count(*)::int                        as event_count,
-          count(distinct e.ticket_id)::int     as ticket_count,
-          array_agg(distinct e.kind::text)     as kinds
-        from admin_ticket_events e
-        join tickets t on t.id = e.ticket_id
-        where e.batch_id is not null
-          and t.project_id = ${project.id}
-        group by e.batch_id
-      )
-      select batch_id, created_at, event_count, ticket_count, kinds
-      from grouped
-      order by created_at desc
-      limit 50
-    `)) as unknown as Array<{
-      batch_id: string;
-      created_at: Date;
-      event_count: number;
-      ticket_count: number;
-      kinds: string[];
-    }>;
-
-    return ok(
-      c,
-      rows.map((r) => ({
-        batchId: r.batch_id,
-        createdAt: r.created_at,
-        eventCount: r.event_count,
-        ticketCount: r.ticket_count,
-        kinds: r.kinds,
-      })),
-    );
-  });
-
-  /** Revert every event sharing a `batchId`. */
-  api.post('/projects/:key/events/batches/:batchId/revert', resolveProject, async (c) => {
-    const project = c.get('project');
-    const batchId = c.req.param('batchId');
-
-    const outcome = await db.transaction(async (tx) => {
-      const events = await tx
-        .select({ event: schema.adminTicketEvents, ticket: schema.tickets })
-        .from(schema.adminTicketEvents)
-        .innerJoin(
-          schema.tickets,
-          eq(schema.tickets.id, schema.adminTicketEvents.ticketId),
-        )
-        .where(
-          and(
-            eq(schema.adminTicketEvents.batchId, batchId),
-            eq(schema.tickets.projectId, project.id),
-          ),
-        )
-        .orderBy(desc(schema.adminTicketEvents.createdAt));
-
-      type Skip = { eventId: string; reason: string };
-      const skipped: Skip[] = [];
-      let reverted = 0;
-
-      const currentState = new Map<
-        string,
-        { status: TicketStatus; priority: TicketPriority }
-      >();
-      for (const { ticket } of events) {
-        if (!currentState.has(ticket.id)) {
-          currentState.set(ticket.id, {
-            status: ticket.status,
-            priority: ticket.priority,
-          });
-        }
-      }
-
-      for (const { event } of events) {
-        const state = currentState.get(event.ticketId)!;
-        const payload = event.payload as Record<string, unknown>;
-
-        let update:
-          | { column: 'status'; value: TicketStatus }
-          | { column: 'priority'; value: TicketPriority }
-          | null = null;
-
-        if (event.kind === 'status_changed') {
-          const from = typeof payload.from === 'string' ? payload.from : null;
-          if (from && isTicketStatus(from)) update = { column: 'status', value: from };
-        } else if (event.kind === 'priority_changed') {
-          const from = typeof payload.from === 'string' ? payload.from : null;
-          if (from && isTicketPriority(from)) update = { column: 'priority', value: from };
-        }
-
-        if (!update) {
-          skipped.push({ eventId: event.id, reason: 'unrevertable' });
-          continue;
-        }
-
-        const currentValue = state[update.column];
-        if (currentValue === update.value) {
-          skipped.push({ eventId: event.id, reason: 'no_change' });
-          continue;
-        }
-
-        await tx
-          .update(schema.tickets)
-          .set({
-            ...(update.column === 'status' ? { status: update.value } : {}),
-            ...(update.column === 'priority' ? { priority: update.value } : {}),
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.tickets.id, event.ticketId));
-
-        await tx.insert(schema.adminTicketEvents).values({
-          ticketId: event.ticketId,
-          kind: event.kind,
-          payload: {
-            from: currentValue,
-            to: update.value,
-            revertOf: event.id,
-          },
-        });
-
-        if (update.column === 'status') state.status = update.value;
-        else state.priority = update.value;
-        reverted += 1;
-      }
-
-      return { reverted, skipped } as const;
-    });
-
-    return ok(c, outcome);
-  });
 
   return api;
 }

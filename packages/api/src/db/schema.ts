@@ -34,15 +34,12 @@ export const identitySecretStatusEnum = pgEnum('identity_secret_status', [
 
 /**
  * Audit event kinds. `status_changed` and `priority_changed` are the
- * two a PATCH actually emits today; `commented` is listed so the
- * schema doesn't need a migration the day the comment flow ships.
- * Postgres enum additions are their own DDL, so forward-listing costs
- * nothing and saves a round-trip.
+ * two a PATCH emits. Keep forward-listing minimal — adding a value
+ * later is one-line DDL, but removing one is an enum recreation.
  */
 export const ticketEventKindEnum = pgEnum('ticket_event_kind', [
   'status_changed',
   'priority_changed',
-  'commented',
 ]);
 
 export const projects = pgTable('projects', {
@@ -108,6 +105,13 @@ export const tickets = pgTable('tickets', {
   metadata: jsonb('metadata').$type<Record<string, unknown>>(),
   /** URL to screenshot stored on object storage — never base64 inline. */
   screenshotUrl: text('screenshot_url'),
+  /**
+   * Private admin notes. Single-admin product, so this is a plain
+   * free-text field rather than a joined comments table — one stream
+   * of notes per ticket, no threading, no authorship to track.
+   * Never shown to the widget reporter.
+   */
+  notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -223,9 +227,9 @@ export const messagesRelations = relations(messages, ({ one }) => ({
 /**
  * Audit trail for admin-driven ticket mutations. One row per state
  * transition — what changed, when. No actor column: Koe is a single-
- * admin product, the actor is always "the admin". `batch_id`
- * correlates events emitted from a single bulk call so the UI can
- * offer "undo that whole bulk action".
+ * admin product, the actor is always "the admin". No batch_id either:
+ * a solo operator doing their own bulk action already knows what they
+ * just did; the per-event undo on the timeline covers honest mistakes.
  */
 export const adminTicketEvents = pgTable('admin_ticket_events', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -234,34 +238,12 @@ export const adminTicketEvents = pgTable('admin_ticket_events', {
     .references(() => tickets.id, { onDelete: 'cascade' }),
   kind: ticketEventKindEnum('kind').notNull(),
   payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
-  batchId: uuid('batch_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const adminTicketEventsRelations = relations(adminTicketEvents, ({ one }) => ({
   ticket: one(tickets, {
     fields: [adminTicketEvents.ticketId],
-    references: [tickets.id],
-  }),
-}));
-
-/**
- * Admin-side comments on tickets. Internal triage notes — not shown
- * to the widget reporter. No author column: single-admin product,
- * every note is the admin's.
- */
-export const adminTicketComments = pgTable('admin_ticket_comments', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  ticketId: uuid('ticket_id')
-    .notNull()
-    .references(() => tickets.id, { onDelete: 'cascade' }),
-  body: text('body').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
-export const adminTicketCommentsRelations = relations(adminTicketComments, ({ one }) => ({
-  ticket: one(tickets, {
-    fields: [adminTicketComments.ticketId],
     references: [tickets.id],
   }),
 }));
