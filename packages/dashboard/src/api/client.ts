@@ -229,6 +229,37 @@ export interface ProjectOverview {
   recent: AdminTicket[];
 }
 
+/**
+ * KPI tile for one project on the cross-project overview. All
+ * counters are pre-aggregated server-side; the dashboard just
+ * renders them.
+ */
+export interface WorkspaceProjectKpis {
+  openBugs: number;
+  openFeatures: number;
+  openFeatureVotes: number;
+  /** Tickets whose `updated_at` falls in the last 7 days. */
+  activityLast7d: number;
+  /** Same window offset by 7 days, for the delta arrow. */
+  activityPrev7d: number;
+}
+
+export interface WorkspaceProjectSummary {
+  id: string;
+  key: string;
+  name: string;
+  accentColor: string;
+  kpis: WorkspaceProjectKpis;
+}
+
+/**
+ * Response for `GET /v1/admin/overview` — one tile per project the
+ * signed-in admin belongs to. Ordered by project name.
+ */
+export interface WorkspaceOverview {
+  projects: WorkspaceProjectSummary[];
+}
+
 type Envelope<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
 
 export class AdminApiError extends Error {
@@ -275,6 +306,14 @@ export class AdminApiClient {
 
   listProjects(): Promise<AdminProject[]> {
     return this.get<AdminProject[]>('/projects');
+  }
+
+  /**
+   * One-call KPI snapshot across every project the admin belongs to.
+   * Powers the `/overview` landing page for multi-project admins.
+   */
+  workspaceOverview(): Promise<WorkspaceOverview> {
+    return this.get<WorkspaceOverview>('/overview');
   }
 
   /**

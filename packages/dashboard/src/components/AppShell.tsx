@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Inbox, Layers, LogOut, Users } from 'lucide-react';
+import { Grid2x2, Inbox, Layers, LogOut, Users } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { INBOX_DEFAULT_SEARCH } from '../router';
 import { ModeToggle } from './ModeToggle';
@@ -39,6 +39,11 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
   const isInbox = pathname === '/' || pathname.startsWith('/tickets');
   const isBatches = pathname.startsWith('/batches');
   const isMembers = /^\/projects\/[^/]+\/members$/.test(pathname);
+  const isOverview = pathname === '/overview';
+  // Overview is a landing surface for admins who juggle multiple
+  // projects — hiding it from single-project users keeps their
+  // sidebar minimal.
+  const showOverview = state.me.memberships.length >= 2;
 
   // The "Members" link routes to the active project's members page.
   // Resolved from `activeProjectKey` so switching projects re-targets
@@ -71,6 +76,16 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
+                {showOverview && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={isOverview}>
+                      <Link to="/overview">
+                        <Grid2x2 />
+                        <span>Overview</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild isActive={isInbox}>
                     <Link to="/" search={INBOX_DEFAULT_SEARCH}>

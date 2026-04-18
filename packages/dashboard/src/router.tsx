@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
   createRootRouteWithContext,
   createRoute,
@@ -14,6 +14,7 @@ import { TicketDetailPage } from './pages/TicketDetailPage';
 import { BatchesPage } from './pages/BatchesPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { MembersPage } from './pages/MembersPage';
+import { OverviewPage } from './pages/OverviewPage';
 import { AppShell } from './components/AppShell';
 import { useAuth, type AuthContextValue } from './auth/AuthContext';
 import type { AssigneeFilter } from './api/client';
@@ -150,6 +151,12 @@ const membersRoute = createRoute({
   component: MembersPage,
 });
 
+const overviewRoute = createRoute({
+  getParentRoute: () => authenticatedLayoutRoute,
+  path: '/overview',
+  component: OverviewPage,
+});
+
 export const routeTree = rootRoute.addChildren([
   loginRoute,
   authenticatedLayoutRoute.addChildren([
@@ -158,6 +165,7 @@ export const routeTree = rootRoute.addChildren([
     batchesRoute,
     onboardingRoute,
     membersRoute,
+    overviewRoute,
   ]),
 ]);
 
@@ -202,6 +210,34 @@ function AuthenticatedLayout() {
     }
   }, [state, navigate, pathname]);
 
+  // Multi-project landing. Fires once per auth transition (login or
+  // initial cookie-carried session), not on every navigation — so a
+  // user who clicks "Inbox" in the sidebar from `/overview` still
+  // lands on `/`, even though they have ≥ 2 memberships. A ref gates
+  // the effect so it's inert after the first fire, and resets when
+  // auth drops so logging back in re-triggers the landing logic.
+  const didLandingRef = useRef(false);
+  useEffect(() => {
+    if (state.status === 'unauthenticated') {
+      didLandingRef.current = false;
+      return;
+    }
+    if (
+      state.status === 'authenticated' &&
+      !didLandingRef.current &&
+      state.me.memberships.length >= 2 &&
+      pathname === '/'
+    ) {
+      didLandingRef.current = true;
+      void navigate({ to: '/overview' });
+    } else if (state.status === 'authenticated') {
+      // Arm the ref even when we don't redirect (e.g. single-project
+      // user, or landed on a non-root path) so a later navigation to
+      // `/` via the sidebar isn't auto-bounced.
+      didLandingRef.current = true;
+    }
+  }, [state, pathname, navigate]);
+
   if (state.status !== 'authenticated') {
     return <LoadingScreen />;
   }
@@ -224,6 +260,9 @@ function AuthenticatedLayout() {
  */
 function RouteHeader(): ReactNode {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  if (pathname === '/overview') {
+    return <Crumb label="Overview" caption="Every project at a glance." />;
+  }
   if (pathname.startsWith('/batches')) {
     return <Crumb label="Batches" caption="Undo bulk actions across the project." />;
   }

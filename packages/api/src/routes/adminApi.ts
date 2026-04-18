@@ -100,6 +100,71 @@ export function createAdminApiRoutes(opts: { dashboardOrigin?: string }) {
   });
 
   /**
+   * Cross-project KPI landing for admins who belong to more than one
+   * project. One SQL round-trip: `project_members` → `projects` left-
+   * joined to `tickets` and `ticket_votes`, with FILTER-aggregated
+   * counters per project.
+   *
+   * Why `count(DISTINCT tickets.id) FILTER (…)` for ticket counts:
+   * the left-join on `ticket_votes` multiplies each voted ticket row
+   * by its vote count, which would inflate every plain `count(*)`.
+   * `DISTINCT tickets.id` collapses the multiplied rows back to one
+   * per ticket. The vote counter itself uses `count(ticket_votes.
+   * ticket_id)` (no DISTINCT) because we want the row count, not the
+   * ticket count.
+   *
+   * Scoping: filtered by `project_members.user_id`. The session check
+   * already forbids unauthenticated callers; this forbids cross-
+   * tenant leaks from authenticated ones.
+   */
+  api.get('/overview', async (c) => {
+    const user = c.get('user');
+
+    // ISO strings, not Date objects — the `postgres` driver rejects
+    // Date in raw `sql` template bindings (drizzle's typed helpers
+    // like `gte()` coerce for you, but FILTER clauses require raw
+    // sql so we coerce manually).
+    const sevenDaysAgo = daysAgo(7).toISOString();
+    const fourteenDaysAgo = daysAgo(14).toISOString();
+
+    const rows = await db
+      .select({
+        id: schema.projects.id,
+        key: schema.projects.key,
+        name: schema.projects.name,
+        accentColor: schema.projects.accentColor,
+        openBugs: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.kind} = 'bug' and ${schema.tickets.status} = 'open')::int`,
+        openFeatures: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.kind} = 'feature' and ${schema.tickets.status} = 'open')::int`,
+        openFeatureVotes: sql<number>`count(${schema.ticketVotes.ticketId}) filter (where ${schema.tickets.kind} = 'feature' and ${schema.tickets.status} = 'open')::int`,
+        activityLast7d: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.updatedAt} >= ${sevenDaysAgo}::timestamptz)::int`,
+        activityPrev7d: sql<number>`count(distinct ${schema.tickets.id}) filter (where ${schema.tickets.updatedAt} >= ${fourteenDaysAgo}::timestamptz and ${schema.tickets.updatedAt} < ${sevenDaysAgo}::timestamptz)::int`,
+      })
+      .from(schema.projectMembers)
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.projectMembers.projectId))
+      .leftJoin(schema.tickets, eq(schema.tickets.projectId, schema.projects.id))
+      .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
+      .where(eq(schema.projectMembers.userId, user.id))
+      .groupBy(schema.projects.id)
+      .orderBy(schema.projects.name);
+
+    return ok(c, {
+      projects: rows.map((r) => ({
+        id: r.id,
+        key: r.key,
+        name: r.name,
+        accentColor: r.accentColor,
+        kpis: {
+          openBugs: r.openBugs,
+          openFeatures: r.openFeatures,
+          openFeatureVotes: r.openFeatureVotes,
+          activityLast7d: r.activityLast7d,
+          activityPrev7d: r.activityPrev7d,
+        },
+      })),
+    });
+  });
+
+  /**
    * Create a new project + grant the calling user `owner` membership in
    * one transaction. Replaces the `bootstrap` CLI for operators who'd
    * rather click a button than shell into a container.
