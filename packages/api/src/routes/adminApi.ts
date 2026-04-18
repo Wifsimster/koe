@@ -329,11 +329,15 @@ export function createAdminApiRoutes() {
       status: ticketStatusSchema.optional(),
       priority: ticketPrioritySchema.optional(),
       notes: z.string().max(10_000).nullable().optional(),
+      isPublicRoadmap: z.boolean().optional(),
     })
     .refine(
       (v) =>
-        v.status !== undefined || v.priority !== undefined || v.notes !== undefined,
-      { message: 'At least one of status, priority, or notes is required' },
+        v.status !== undefined ||
+        v.priority !== undefined ||
+        v.notes !== undefined ||
+        v.isPublicRoadmap !== undefined,
+      { message: 'At least one of status, priority, notes, or isPublicRoadmap is required' },
     );
 
   api.patch('/projects/:key/tickets/:id', resolveProject, async (c) => {
@@ -368,6 +372,9 @@ export function createAdminApiRoutes() {
           ...(parsed.data.notes !== undefined
             ? { notes: parsed.data.notes ? parsed.data.notes : null }
             : {}),
+          ...(parsed.data.isPublicRoadmap !== undefined
+            ? { isPublicRoadmap: parsed.data.isPublicRoadmap }
+            : {}),
           updatedAt: new Date(),
         })
         .where(
@@ -378,7 +385,7 @@ export function createAdminApiRoutes() {
 
       const events: Array<{
         ticketId: string;
-        kind: 'status_changed' | 'priority_changed';
+        kind: 'status_changed' | 'priority_changed' | 'roadmap_toggled';
         payload: Record<string, unknown>;
       }> = [];
       if (parsed.data.status && parsed.data.status !== before.status) {
@@ -393,6 +400,16 @@ export function createAdminApiRoutes() {
           ticketId: id,
           kind: 'priority_changed',
           payload: { from: before.priority, to: parsed.data.priority },
+        });
+      }
+      if (
+        parsed.data.isPublicRoadmap !== undefined &&
+        parsed.data.isPublicRoadmap !== before.isPublicRoadmap
+      ) {
+        events.push({
+          ticketId: id,
+          kind: 'roadmap_toggled',
+          payload: { from: before.isPublicRoadmap, to: parsed.data.isPublicRoadmap },
         });
       }
       if (events.length > 0) {
@@ -585,6 +602,7 @@ export function createAdminApiRoutes() {
         let nextField:
           | { column: 'status'; value: TicketStatus; currentValue: TicketStatus }
           | { column: 'priority'; value: TicketPriority; currentValue: TicketPriority }
+          | { column: 'isPublicRoadmap'; value: boolean; currentValue: boolean }
           | null = null;
 
         if (event.kind === 'status_changed') {
@@ -596,6 +614,15 @@ export function createAdminApiRoutes() {
           const from = typeof payload.from === 'string' ? payload.from : null;
           if (from && isTicketPriority(from)) {
             nextField = { column: 'priority', value: from, currentValue: ticket.priority };
+          }
+        } else if (event.kind === 'roadmap_toggled') {
+          const from = typeof payload.from === 'boolean' ? payload.from : null;
+          if (from !== null) {
+            nextField = {
+              column: 'isPublicRoadmap',
+              value: from,
+              currentValue: ticket.isPublicRoadmap,
+            };
           }
         }
 
@@ -609,6 +636,9 @@ export function createAdminApiRoutes() {
           .set({
             ...(nextField.column === 'status' ? { status: nextField.value } : {}),
             ...(nextField.column === 'priority' ? { priority: nextField.value } : {}),
+            ...(nextField.column === 'isPublicRoadmap'
+              ? { isPublicRoadmap: nextField.value }
+              : {}),
             updatedAt: new Date(),
           })
           .where(eq(schema.tickets.id, ticketId));

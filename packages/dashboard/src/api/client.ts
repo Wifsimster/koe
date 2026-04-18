@@ -8,6 +8,12 @@ export interface TicketPatch {
    * null read back as no notes on the returned ticket.
    */
   notes?: string | null;
+  /**
+   * Whether to publish this ticket on the public roadmap at
+   * `/r/:projectKey`. Toggled by the operator from the ticket detail
+   * page; emits a `roadmap_toggled` audit event when the value changes.
+   */
+  isPublicRoadmap?: boolean;
 }
 
 export interface BulkUpdateResult {
@@ -31,7 +37,7 @@ export interface CreateProjectResult {
   identitySecret: string;
 }
 
-export type TicketEventKind = 'status_changed' | 'priority_changed';
+export type TicketEventKind = 'status_changed' | 'priority_changed' | 'roadmap_toggled';
 
 export interface TicketEvent {
   id: string;
@@ -76,6 +82,8 @@ export interface AdminTicket {
   screenshotUrl: string | null;
   /** Private admin notes. Never shown to the widget reporter. */
   notes: string | null;
+  /** Whether this ticket appears on the public roadmap at `/r/:projectKey`. */
+  isPublicRoadmap: boolean;
   createdAt: string;
   updatedAt: string;
   voteCount: number;

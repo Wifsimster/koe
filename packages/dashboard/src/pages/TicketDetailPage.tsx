@@ -7,6 +7,7 @@ import type { AdminTicket, TicketEvent, TicketPatch } from '../api/client';
 import { INBOX_DEFAULT_SEARCH } from '../router';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import { Checkbox } from '../components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -93,7 +94,11 @@ export function TicketDetailPage() {
       const next = await api.updateTicket(activeKey, ticket.id, patch);
       setTicket(next);
       // Notes-only patches don't emit an audit event, so skip the refetch.
-      if (patch.status !== undefined || patch.priority !== undefined) {
+      if (
+        patch.status !== undefined ||
+        patch.priority !== undefined ||
+        patch.isPublicRoadmap !== undefined
+      ) {
         void loadEvents();
       }
     } catch (err) {
@@ -228,6 +233,14 @@ export function TicketDetailPage() {
                 {mutError}
               </p>
             )}
+          </MetaCard>
+
+          <MetaCard title="Visibility">
+            <RoadmapToggle
+              checked={ticket.isPublicRoadmap}
+              disabled={mutating}
+              onChange={(next) => void applyPatch({ isPublicRoadmap: next })}
+            />
           </MetaCard>
 
           <MetaCard title="Reporter">
@@ -406,6 +419,10 @@ function describeEvent(ev: TicketEvent): string {
     const to = readString(ev.payload.to);
     return `Priority changed from ${from} to ${to}`;
   }
+  if (ev.kind === 'roadmap_toggled') {
+    const to = ev.payload.to === true;
+    return to ? 'Published on public roadmap' : 'Unpublished from public roadmap';
+  }
   return ev.kind;
 }
 
@@ -428,6 +445,40 @@ const PRIORITY_OPTIONS: Array<{ value: TicketPriority; label: string }> = [
   { value: 'high', label: 'High' },
   { value: 'critical', label: 'Critical' },
 ];
+
+/**
+ * Publish-to-roadmap toggle. Default is off; operators opt tickets in
+ * individually so the public page stays curated rather than dumping
+ * every submission. Emits a `roadmap_toggled` audit event on every
+ * flip — revertable from the Activity timeline like status/priority.
+ */
+function RoadmapToggle({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3">
+      <Checkbox
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(v) => onChange(v === true)}
+        className="mt-0.5"
+      />
+      <span className="space-y-1">
+        <span className="block text-sm font-medium leading-none">Public roadmap</span>
+        <span className="block text-[11px] leading-relaxed text-muted-foreground">
+          Show this ticket on the public roadmap page at{' '}
+          <code className="font-mono text-[11px]">/r/:projectKey</code>.
+        </span>
+      </span>
+    </label>
+  );
+}
 
 function MetaCard({ title, children }: { title: string; children: ReactNode }) {
   return (

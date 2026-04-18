@@ -3,6 +3,7 @@ import type {
   CreateBugReportInput,
   CreateFeatureRequestInput,
   FeatureRequest,
+  MyRequestRow,
 } from '@koe/shared';
 import { z } from 'zod';
 
@@ -96,6 +97,32 @@ export class KoeApiClient {
     opts: RequestOptions = {},
   ): Promise<FeatureRequest> {
     return this.post<FeatureRequest>(`/v1/widget/features/${id}/vote`, { userId }, opts.signal);
+  }
+
+  /**
+   * Tickets authored by the caller. Powers the "My requests" tab.
+   * Always sends `userId` explicitly — the API still calls
+   * `verifyReporter` against the identity headers, so a mismatched
+   * query-string id on a verification-required project is rejected.
+   */
+  async listMyRequests(
+    userId: string,
+    opts: RequestOptions = {},
+  ): Promise<MyRequestRow[]> {
+    const qs = `?userId=${encodeURIComponent(userId)}`;
+    return this.get<MyRequestRow[]>(`/v1/widget/my-requests${qs}`, opts.signal);
+  }
+
+  /**
+   * Build a deep-link to the public roadmap page for this project. When
+   * `ticketId` is provided, the URL anchors to that ticket's card so a
+   * reporter can jump from "my requests" straight to the row on the
+   * roadmap. The client owns this since it already has the validated
+   * `apiUrl` and the `projectKey`.
+   */
+  roadmapUrl(ticketId?: string): string {
+    const base = `${this.apiUrl}/r/${encodeURIComponent(this.projectKey)}`;
+    return ticketId ? `${base}#t-${encodeURIComponent(ticketId)}` : base;
   }
 
   private async get<T>(path: string, signal?: AbortSignal): Promise<T> {

@@ -45,8 +45,46 @@ export interface TicketBase {
    * upload). Never a base64 data URL — those are rejected at the API.
    */
   screenshotUrl?: string;
+  /**
+   * Whether this ticket is published on the public roadmap at
+   * `/r/:projectKey`. Toggled per ticket by an admin — default false.
+   */
+  isPublicRoadmap: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Row returned by `GET /v1/widget/my-requests`. Intentionally a thin
+ * projection — no metadata, no screenshot, no reporter email — since
+ * this is the shape the widget renders in a compact "my submissions"
+ * list and we don't want to ship PII we don't need.
+ */
+export interface MyRequestRow {
+  id: string;
+  kind: TicketKind;
+  title: string;
+  status: TicketStatus;
+  createdAt: string;
+  updatedAt: string;
+  isPublicRoadmap: boolean;
+  /** Zero for bugs; derived via `count(*)` for features. */
+  voteCount: number;
+}
+
+/**
+ * Row returned by the public roadmap JSON endpoint
+ * `GET /v1/public/:projectKey/roadmap`. Explicitly public — never
+ * includes reporter identity, screenshots, or private metadata.
+ */
+export interface PublicRoadmapRow {
+  id: string;
+  kind: TicketKind;
+  title: string;
+  /** Truncated server-side to keep the public page concise. */
+  description: string;
+  status: Extract<TicketStatus, 'planned' | 'in_progress' | 'resolved'>;
+  voteCount: number;
 }
 
 export interface BugReport extends TicketBase {

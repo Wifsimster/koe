@@ -66,6 +66,11 @@ const voteSchema = z.object({
   userId: z.string().min(1).max(256),
 });
 
+const myRequestsQuerySchema = z.object({
+  userId: z.string().min(1).max(256),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
 type WidgetVariables = ProjectContext & { verifyReporter: VerifyReporterFn };
 
 export const widgetRoutes = new Hono<{ Variables: WidgetVariables }>();
@@ -258,4 +263,64 @@ widgetRoutes.post('/features/:id/vote', async (c) => {
   const voteCount = countRows[0]?.count ?? 0;
 
   return ok(c, { ...ticket, voteCount, hasVoted });
+});
+
+/**
+ * List tickets authored by the caller ("my requests"). The widget shows
+ * these in a dedicated tab so users can follow the status of what they
+ * submitted without needing an account.
+ *
+ * Scoping: `reporterId = userId AND projectId = currentProject`. The
+ * reporter id is always validated by `verifyReporter` — when the project
+ * requires identity verification, unsigned calls return 401 (same posture
+ * as `/features/:id/vote`). When verification is optional, we still trust
+ * the `userId` query param; operators running public-facing sites should
+ * flip `requireIdentityVerification=true` to block enumeration.
+ *
+ * Response is a deliberate projection — no `reporterEmail`, `metadata`,
+ * `screenshotUrl`, or `notes`. Those are admin-side concerns and have no
+ * business round-tripping through a widget response.
+ */
+widgetRoutes.get('/my-requests', async (c) => {
+  const project = c.get('project');
+  const parsed = myRequestsQuerySchema.safeParse({
+    userId: c.req.query('userId'),
+    limit: c.req.query('limit'),
+  });
+  if (!parsed.success) {
+    return fail(c, 'validation_failed', 'userId is required', 422, {
+      issues: parsed.error.issues,
+    });
+  }
+  const { userId, limit } = parsed.data;
+
+  const verdict = await c.get('verifyReporter')(userId);
+  if (!verdict.ok) return fail(c, 'unauthorized', verdict.reason, 401);
+
+  const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
+
+  const rows = await db
+    .select({
+      id: schema.tickets.id,
+      kind: schema.tickets.kind,
+      title: schema.tickets.title,
+      status: schema.tickets.status,
+      createdAt: schema.tickets.createdAt,
+      updatedAt: schema.tickets.updatedAt,
+      isPublicRoadmap: schema.tickets.isPublicRoadmap,
+      voteCount: voteCountExpr,
+    })
+    .from(schema.tickets)
+    .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
+    .where(
+      and(
+        eq(schema.tickets.projectId, project.id),
+        eq(schema.tickets.reporterId, userId),
+      ),
+    )
+    .groupBy(schema.tickets.id)
+    .orderBy(desc(schema.tickets.createdAt))
+    .limit(limit);
+
+  return ok(c, rows);
 });

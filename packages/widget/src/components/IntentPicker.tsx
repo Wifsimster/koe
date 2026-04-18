@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import { useKoe } from '../context/KoeContext';
 
-export type Intent = 'bug' | 'feature' | 'vote';
+export type Intent = 'bug' | 'feature' | 'vote' | 'my-requests';
 
 export interface IntentPickerProps {
   onPick: (intent: Intent) => void;
@@ -31,11 +31,18 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
     featureHint: 'New features, improvements',
     vote: 'Browse ideas',
     voteHint: 'Upvote requests from other users',
+    myRequests: 'My requests',
+    myRequestsHint: 'Follow the status of what you submitted',
   };
 
   const showBugs = features.bugs !== false;
   const showFeatures = features.features !== false;
   const showVote = features.vote !== false;
+  // Only surface "my requests" when the host has identified a real user.
+  // Anonymous sessions share a reporter id, so showing the tab would leak
+  // tickets from other anonymous visitors into a shared inbox.
+  const userId = config.user?.id;
+  const showMyRequests = Boolean(userId && userId !== 'anonymous');
 
   return (
     <div className="koe-flex koe-flex-col koe-gap-3">
@@ -69,6 +76,14 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
             title={picker.vote ?? 'Browse ideas'}
             hint={picker.voteHint ?? 'Upvote requests from other users'}
             onClick={() => onPick('vote')}
+          />
+        )}
+        {showMyRequests && (
+          <IntentCard
+            emoji="📬"
+            title={picker.myRequests ?? 'My requests'}
+            hint={picker.myRequestsHint ?? 'Follow the status of what you submitted'}
+            onClick={() => onPick('my-requests')}
           />
         )}
       </div>

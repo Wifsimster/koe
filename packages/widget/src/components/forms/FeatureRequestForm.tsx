@@ -22,7 +22,16 @@ const EMPTY: FormState = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const isValidEmail = (value: string) => EMAIL_RE.test(value);
 
-export function FeatureRequestForm() {
+export interface FeatureRequestFormProps {
+  /**
+   * Optional callback that switches the widget to the "my requests"
+   * screen so the reporter can see their just-submitted suggestion in
+   * context. Gated by the Panel on a verified user identity.
+   */
+  onViewMyRequests?: () => void;
+}
+
+export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps = {}) {
   const { locale, api, config } = useKoe();
   const [state, setState] = useState<FormState>(EMPTY);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
@@ -42,17 +51,24 @@ export function FeatureRequestForm() {
       <div className="koe-text-center koe-py-6">
         <div className="koe-mb-3 koe-text-2xl">✨</div>
         <p className="koe-text-sm koe-mb-4">{locale.featureForm.success}</p>
-        <Button
-          variant="ghost"
-          type="button"
-          onClick={() => {
-            setSuccess(false);
-            setState(EMPTY);
-            setErrors({});
-          }}
-        >
-          Submit another
-        </Button>
+        <div className="koe-flex koe-flex-col koe-items-center koe-gap-2">
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={() => {
+              setSuccess(false);
+              setState(EMPTY);
+              setErrors({});
+            }}
+          >
+            Submit another
+          </Button>
+          {onViewMyRequests && (
+            <Button variant="outline" type="button" onClick={onViewMyRequests}>
+              {locale.myRequests?.title ?? 'My requests'}
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
