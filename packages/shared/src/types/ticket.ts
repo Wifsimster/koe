@@ -1,16 +1,32 @@
 import type { WidgetUser } from './user';
 
-export type TicketKind = 'bug' | 'feature';
+export const TICKET_KINDS = ['bug', 'feature'] as const;
+export type TicketKind = (typeof TICKET_KINDS)[number];
 
-export type TicketStatus =
-  | 'open'
-  | 'in_progress'
-  | 'planned'
-  | 'resolved'
-  | 'closed'
-  | 'wont_fix';
+export const TICKET_STATUSES = [
+  'open',
+  'in_progress',
+  'planned',
+  'resolved',
+  'closed',
+  'wont_fix',
+] as const;
+export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
-export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
+export const TICKET_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
+export type TicketPriority = (typeof TICKET_PRIORITIES)[number];
+
+export function isTicketStatus(value: unknown): value is TicketStatus {
+  return typeof value === 'string' && (TICKET_STATUSES as readonly string[]).includes(value);
+}
+
+export function isTicketPriority(value: unknown): value is TicketPriority {
+  return typeof value === 'string' && (TICKET_PRIORITIES as readonly string[]).includes(value);
+}
+
+export function isTicketKind(value: unknown): value is TicketKind {
+  return typeof value === 'string' && (TICKET_KINDS as readonly string[]).includes(value);
+}
 
 /**
  * Client-captured environment attached to a submission so support can

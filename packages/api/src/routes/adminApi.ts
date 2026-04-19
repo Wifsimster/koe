@@ -1,7 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
-import type { TicketPriority, TicketStatus } from '@koe/shared';
+import {
+  isTicketPriority,
+  isTicketStatus,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  type TicketPriority,
+  type TicketStatus,
+} from '@koe/shared';
 import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
 import { ok, fail } from '../lib/response';
@@ -184,15 +191,8 @@ export function createAdminApiRoutes() {
     await next();
   };
 
-  const ticketStatusSchema = z.enum([
-    'open',
-    'in_progress',
-    'planned',
-    'resolved',
-    'closed',
-    'wont_fix',
-  ]);
-  const ticketPrioritySchema = z.enum(['low', 'medium', 'high', 'critical']);
+  const ticketStatusSchema = z.enum(TICKET_STATUSES);
+  const ticketPrioritySchema = z.enum(TICKET_PRIORITIES);
 
   const ticketQuerySchema = z.object({
     kind: z.enum(['bug', 'feature']).optional(),
@@ -677,19 +677,4 @@ export function createAdminApiRoutes() {
   );
 
   return api;
-}
-
-function isTicketStatus(v: string): v is TicketStatus {
-  return (
-    v === 'open' ||
-    v === 'in_progress' ||
-    v === 'planned' ||
-    v === 'resolved' ||
-    v === 'closed' ||
-    v === 'wont_fix'
-  );
-}
-
-function isTicketPriority(v: string): v is TicketPriority {
-  return v === 'low' || v === 'medium' || v === 'high' || v === 'critical';
 }
