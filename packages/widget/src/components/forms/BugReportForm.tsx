@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FocusEvent, type FormEvent } from 'react';
-import { captureBrowserMetadata } from '@koe/shared';
+import { captureBrowserMetadata, isValidEmail } from '@koe/shared';
 import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
 import { TextField, TextAreaField } from '../ui/Field';
@@ -18,11 +18,6 @@ const EMPTY: FormState = {
   reproduce: '',
   email: '',
 };
-
-// Minimal shape check. Empty strings are treated as "not provided" and
-// skipped by the caller — the email field is optional.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const isValidEmail = (value: string) => EMAIL_RE.test(value);
 
 export interface BugReportFormProps {
   /**
