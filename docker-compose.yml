@@ -56,6 +56,13 @@ services:
       # `/admin/*` requires an explicit `ENABLE_DASHBOARD=true` in `.env`
       # plus your own reverse-proxy / auth in front of the port.
       ENABLE_DASHBOARD: ${ENABLE_DASHBOARD:-false}
+      # Admin credentials. All three must be set in .env for the admin
+      # JSON API (`/v1/admin/*`) to mount — otherwise the dashboard
+      # renders but every login POST 404s because the route isn't
+      # registered. Leave them unset to boot without the admin surface.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-}
     ports:
       - '${KOE_SERVER_PORT:-8787}:8787'
     healthcheck:
