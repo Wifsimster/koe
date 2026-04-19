@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { deleteCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { ok, fail } from '../lib/response';
+import { parseJsonBody } from '../lib/validation';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { ADMIN_COOKIE_NAME, mintSessionCookie } from '../middleware/adminAuth';
 import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rateLimit';
@@ -59,13 +60,8 @@ export function createAuthRoutes(cfg: PasswordAuthConfig): Hono {
   });
 
   app.post('/login', rateGate, async (c) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = loginSchema.safeParse(body);
-    if (!parsed.success) {
-      return fail(c, 'validation_failed', 'Invalid login payload', 422, {
-        issues: parsed.error.issues,
-      });
-    }
+    const parsed = await parseJsonBody(c, loginSchema, 'Invalid login payload');
+    if (!parsed.ok) return parsed.response;
 
     const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
     const adminHash = process.env.ADMIN_PASSWORD_HASH;

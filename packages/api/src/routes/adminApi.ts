@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
 import { voteCountExpr } from '../db/queries';
 import { ok, fail } from '../lib/response';
+import { parseJsonBody, validateOrFail } from '../lib/validation';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
 import { requireAdmin, type AdminContext } from '../middleware/adminAuth';
 import type { MiddlewareHandler } from 'hono';
@@ -119,13 +120,8 @@ export function createAdminApiRoutes() {
    * the server encrypts it at rest and never returns it again.
    */
   api.post('/projects', async (c) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = createProjectSchema.safeParse(body);
-    if (!parsed.success) {
-      return fail(c, 'validation_failed', 'Invalid project payload', 422, {
-        issues: parsed.error.issues,
-      });
-    }
+    const parsed = await parseJsonBody(c, createProjectSchema, 'Invalid project payload');
+    if (!parsed.ok) return parsed.response;
     const { name, key, allowedOrigins, requireIdentityVerification } = parsed.data;
 
     const [existing] = await db
@@ -229,21 +225,22 @@ export function createAdminApiRoutes() {
 
   api.get('/projects/:key/tickets', resolveProject, async (c) => {
     const project = c.get('project');
-    const queryResult = ticketQuerySchema.safeParse({
-      kind: c.req.query('kind'),
-      status: c.req.query('status'),
-      priority: c.req.query('priority'),
-      verified: c.req.query('verified'),
-      search: c.req.query('search'),
-      limit: c.req.query('limit'),
-      cursor: c.req.query('cursor'),
-      sort: c.req.query('sort'),
-    });
-    if (!queryResult.success) {
-      return fail(c, 'validation_failed', 'Invalid query parameters', 422, {
-        issues: queryResult.error.issues,
-      });
-    }
+    const queryResult = validateOrFail(
+      c,
+      ticketQuerySchema,
+      {
+        kind: c.req.query('kind'),
+        status: c.req.query('status'),
+        priority: c.req.query('priority'),
+        verified: c.req.query('verified'),
+        search: c.req.query('search'),
+        limit: c.req.query('limit'),
+        cursor: c.req.query('cursor'),
+        sort: c.req.query('sort'),
+      },
+      'Invalid query parameters',
+    );
+    if (!queryResult.ok) return queryResult.response;
     const { kind, status, priority, verified, search, limit, cursor, sort } =
       queryResult.data;
 
@@ -343,13 +340,8 @@ export function createAdminApiRoutes() {
     const project = c.get('project');
     const id = c.req.param('id');
 
-    const body = await c.req.json().catch(() => null);
-    const parsed = patchTicketSchema.safeParse(body);
-    if (!parsed.success) {
-      return fail(c, 'validation_failed', 'Invalid patch payload', 422, {
-        issues: parsed.error.issues,
-      });
-    }
+    const parsed = await parseJsonBody(c, patchTicketSchema, 'Invalid patch payload');
+    if (!parsed.ok) return parsed.response;
 
     const result = await db.transaction(async (tx) => {
       const [before] = await tx
@@ -483,13 +475,8 @@ export function createAdminApiRoutes() {
   api.post('/projects/:key/tickets/bulk', resolveProject, async (c) => {
     const project = c.get('project');
 
-    const body = await c.req.json().catch(() => null);
-    const parsed = bulkPatchSchema.safeParse(body);
-    if (!parsed.success) {
-      return fail(c, 'validation_failed', 'Invalid bulk payload', 422, {
-        issues: parsed.error.issues,
-      });
-    }
+    const parsed = await parseJsonBody(c, bulkPatchSchema, 'Invalid bulk payload');
+    if (!parsed.ok) return parsed.response;
     const { ids, patch } = parsed.data;
 
     type Failure = { id: string; reason: 'not_found' };

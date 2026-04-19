@@ -5,6 +5,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, firstOrThrow, schema } from '../db';
 import { voteCountExpr } from '../db/queries';
 import { ok, fail } from '../lib/response';
+import { parseJsonBody, validateOrFail } from '../lib/validation';
 import { requireProject, type ProjectContext } from '../middleware/project';
 import { attachVerifier, type VerifyReporterFn } from '../middleware/identity';
 import { widgetCors } from '../middleware/cors';
@@ -111,13 +112,8 @@ widgetRoutes.use('*', requireProject);
 widgetRoutes.use('*', attachVerifier);
 
 widgetRoutes.post('/bugs', async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const parsed = createBugSchema.safeParse(body);
-  if (!parsed.success) {
-    return fail(c, 'validation_failed', 'Invalid bug report payload', 422, {
-      issues: parsed.error.issues,
-    });
-  }
+  const parsed = await parseJsonBody(c, createBugSchema, 'Invalid bug report payload');
+  if (!parsed.ok) return parsed.response;
   const input = parsed.data;
   const project = c.get('project');
 
@@ -149,13 +145,8 @@ widgetRoutes.post('/bugs', async (c) => {
 });
 
 widgetRoutes.post('/features', async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const parsed = createFeatureSchema.safeParse(body);
-  if (!parsed.success) {
-    return fail(c, 'validation_failed', 'Invalid feature request payload', 422, {
-      issues: parsed.error.issues,
-    });
-  }
+  const parsed = await parseJsonBody(c, createFeatureSchema, 'Invalid feature request payload');
+  if (!parsed.ok) return parsed.response;
   const input = parsed.data;
   const project = c.get('project');
 
@@ -220,11 +211,8 @@ widgetRoutes.get('/features', async (c) => {
 widgetRoutes.post('/features/:id/vote', async (c) => {
   const project = c.get('project');
   const id = c.req.param('id');
-  const body = await c.req.json().catch(() => null);
-  const parsed = voteSchema.safeParse(body);
-  if (!parsed.success) {
-    return fail(c, 'validation_failed', 'userId is required', 422);
-  }
+  const parsed = await parseJsonBody(c, voteSchema, 'userId is required');
+  if (!parsed.ok) return parsed.response;
   const { userId } = parsed.data;
 
   const verdict = await c.get('verifyReporter')(userId);
@@ -283,15 +271,13 @@ widgetRoutes.post('/features/:id/vote', async (c) => {
  */
 widgetRoutes.get('/my-requests', async (c) => {
   const project = c.get('project');
-  const parsed = myRequestsQuerySchema.safeParse({
-    userId: c.req.query('userId'),
-    limit: c.req.query('limit'),
-  });
-  if (!parsed.success) {
-    return fail(c, 'validation_failed', 'userId is required', 422, {
-      issues: parsed.error.issues,
-    });
-  }
+  const parsed = validateOrFail(
+    c,
+    myRequestsQuerySchema,
+    { userId: c.req.query('userId'), limit: c.req.query('limit') },
+    'userId is required',
+  );
+  if (!parsed.ok) return parsed.response;
   const { userId, limit } = parsed.data;
 
   const verdict = await c.get('verifyReporter')(userId);
