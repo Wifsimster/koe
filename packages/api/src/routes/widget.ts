@@ -1,10 +1,15 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { z } from 'zod';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, firstOrThrow, schema } from '../db';
 import { voteCountExpr } from '../db/queries';
 import { ok, fail } from '../lib/response';
+import {
+  createBugSchema,
+  createFeatureSchema,
+  myRequestsQuerySchema,
+  voteSchema,
+} from '../lib/schemas';
 import { parseJsonBody, validateOrFail } from '../lib/validation';
 import { requireProject, type ProjectContext } from '../middleware/project';
 import { attachVerifier, type VerifyReporterFn } from '../middleware/identity';
@@ -14,64 +19,6 @@ import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rat
 /** 256 KB hard cap on any widget payload. Screenshots go through a
  *  presigned upload flow, never inline base64 (see `screenshotUrl`). */
 const MAX_BODY_BYTES = 256 * 1024;
-
-const reporterSchema = z.object({
-  id: z.string().min(1).max(256),
-  name: z.string().max(200).optional(),
-  email: z.string().email().max(320).optional(),
-  avatarUrl: z
-    .string()
-    .url()
-    .max(2048)
-    // Block `javascript:` and `data:` scheme injection into the admin UI.
-    .refine((u) => /^https?:\/\//i.test(u), 'avatarUrl must be http(s)')
-    .optional(),
-  metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-});
-
-const metadataSchema = z.object({
-  userAgent: z.string().max(1024),
-  url: z.string().max(2048),
-  referrer: z.string().max(2048).optional(),
-  viewport: z.object({ width: z.number(), height: z.number() }),
-  screen: z.object({ width: z.number(), height: z.number() }),
-  language: z.string().max(32),
-  timezone: z.string().max(64),
-  devicePixelRatio: z.number(),
-  capturedAt: z.string().max(64),
-});
-
-const createBugSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().min(1).max(10_000),
-  stepsToReproduce: z.string().max(10_000).optional(),
-  expectedBehavior: z.string().max(10_000).optional(),
-  actualBehavior: z.string().max(10_000).optional(),
-  reporter: reporterSchema,
-  metadata: metadataSchema,
-  /**
-   * Reference to a screenshot uploaded via presigned URL. The actual
-   * upload never flows through this endpoint — that's what blew up
-   * Postgres row sizes in the jsonb-blob design.
-   */
-  screenshotUrl: z.string().url().max(2048).optional(),
-});
-
-const createFeatureSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().min(1).max(10_000),
-  reporter: reporterSchema,
-  metadata: metadataSchema,
-});
-
-const voteSchema = z.object({
-  userId: z.string().min(1).max(256),
-});
-
-const myRequestsQuerySchema = z.object({
-  userId: z.string().min(1).max(256),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-});
 
 type WidgetVariables = ProjectContext & { verifyReporter: VerifyReporterFn };
 

@@ -4,15 +4,18 @@ import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import {
   isTicketPriority,
   isTicketStatus,
-  TICKET_PRIORITIES,
-  TICKET_STATUSES,
   type TicketPriority,
   type TicketStatus,
 } from '@koe/shared';
-import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
 import { voteCountExpr } from '../db/queries';
 import { ok, fail } from '../lib/response';
+import {
+  bulkPatchSchema,
+  createProjectSchema,
+  patchTicketSchema,
+  ticketQuerySchema,
+} from '../lib/schemas';
 import { parseJsonBody, validateOrFail } from '../lib/validation';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
 import { requireAdmin, type AdminContext } from '../middleware/adminAuth';
@@ -103,18 +106,6 @@ export function createAdminApiRoutes() {
     });
   });
 
-  const createProjectSchema = z.object({
-    name: z.string().trim().min(1).max(120),
-    key: z
-      .string()
-      .trim()
-      .min(1)
-      .max(64)
-      .regex(/^[a-z0-9-]+$/, 'key must match /^[a-z0-9-]+$/'),
-    allowedOrigins: z.array(z.string().trim().min(1).max(512)).max(20).optional(),
-    requireIdentityVerification: z.boolean().optional(),
-  });
-
   /**
    * Create a project. Returns the plaintext `identitySecret` once —
    * the server encrypts it at rest and never returns it again.
@@ -187,20 +178,6 @@ export function createAdminApiRoutes() {
     c.set('project', row);
     await next();
   };
-
-  const ticketStatusSchema = z.enum(TICKET_STATUSES);
-  const ticketPrioritySchema = z.enum(TICKET_PRIORITIES);
-
-  const ticketQuerySchema = z.object({
-    kind: z.enum(['bug', 'feature']).optional(),
-    status: ticketStatusSchema.optional(),
-    priority: ticketPrioritySchema.optional(),
-    verified: z.enum(['true', 'false']).optional(),
-    search: z.string().trim().min(1).max(200).optional(),
-    limit: z.coerce.number().int().min(1).max(200).default(50),
-    cursor: z.string().max(200).optional(),
-    sort: z.enum(['recent', 'votes']).default('recent').optional(),
-  });
 
   /**
    * Cursor format: `${isoCreatedAt}|${ticketId}`, base64url-encoded.
@@ -308,33 +285,6 @@ export function createAdminApiRoutes() {
       pageInfo: { nextCursor, hasMore, limit },
     });
   });
-
-  /**
-   * Triage mutation. Partial update: every field is optional, at least
-   * one is required. `notes` is free-text admin-only scratch space;
-   * reporter-supplied columns (`reporter_email`, `metadata`, …) stay
-   * unwritable.
-   *
-   * Empty string on `notes` clears the field; `null` does too. The
-   * distinction doesn't matter to the operator — both read back as
-   * "no notes" — but accepting both lets the form submit a cleared
-   * textarea without a special case.
-   */
-  const patchTicketSchema = z
-    .object({
-      status: ticketStatusSchema.optional(),
-      priority: ticketPrioritySchema.optional(),
-      notes: z.string().max(10_000).nullable().optional(),
-      isPublicRoadmap: z.boolean().optional(),
-    })
-    .refine(
-      (v) =>
-        v.status !== undefined ||
-        v.priority !== undefined ||
-        v.notes !== undefined ||
-        v.isPublicRoadmap !== undefined,
-      { message: 'At least one of status, priority, notes, or isPublicRoadmap is required' },
-    );
 
   api.patch('/projects/:key/tickets/:id', resolveProject, async (c) => {
     const project = c.get('project');
@@ -460,18 +410,6 @@ export function createAdminApiRoutes() {
    * operator knows what they just bulk-changed; per-event undo on the
    * timeline covers mistakes.
    */
-  const bulkPatchSchema = z.object({
-    ids: z.array(z.string().uuid()).min(1).max(100),
-    patch: z
-      .object({
-        status: ticketStatusSchema.optional(),
-        priority: ticketPrioritySchema.optional(),
-      })
-      .refine((v) => v.status !== undefined || v.priority !== undefined, {
-        message: 'At least one of status or priority is required',
-      }),
-  });
-
   api.post('/projects/:key/tickets/bulk', resolveProject, async (c) => {
     const project = c.get('project');
 

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { deleteCookie, setCookie } from 'hono/cookie';
-import { z } from 'zod';
 import { ok, fail } from '../lib/response';
+import { loginSchema } from '../lib/schemas';
 import { parseJsonBody } from '../lib/validation';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { ADMIN_COOKIE_NAME, mintSessionCookie } from '../middleware/adminAuth';
@@ -22,11 +22,6 @@ export interface PasswordAuthConfig {
   sessionTtlDays: number;
   secureCookies: boolean;
 }
-
-const loginSchema = z.object({
-  email: z.string().trim().toLowerCase().email().max(320),
-  password: z.string().min(1).max(4096),
-});
 
 /**
  * Hashed form of a sentinel value, precomputed at module load so the
