@@ -4,6 +4,7 @@ import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
 import { TextField, TextAreaField } from '../ui/Field';
 import { Button } from '../ui/Button';
+import { SuccessMessage } from '../ui/SuccessMessage';
 
 interface FormState {
   title: string;
@@ -52,6 +53,7 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
   if (success) {
     return (
       <SuccessMessage
+        emoji="✓"
         message={locale.bugForm.success}
         onDismiss={() => {
           setSuccess(false);
@@ -195,33 +197,4 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
  */
 function FormFooter({ children }: { children: React.ReactNode }) {
   return <div className="koe-panel-form-footer">{children}</div>;
-}
-
-function SuccessMessage({
-  message,
-  onDismiss,
-  onViewMyRequests,
-  viewMyRequestsLabel,
-}: {
-  message: string;
-  onDismiss: () => void;
-  onViewMyRequests?: () => void;
-  viewMyRequestsLabel: string;
-}) {
-  return (
-    <div className="koe-text-center koe-py-6">
-      <div className="koe-mb-3 koe-text-2xl">✓</div>
-      <p className="koe-text-sm koe-mb-4">{message}</p>
-      <div className="koe-flex koe-flex-col koe-items-center koe-gap-2">
-        <Button variant="ghost" type="button" onClick={onDismiss}>
-          Submit another
-        </Button>
-        {onViewMyRequests && (
-          <Button variant="outline" type="button" onClick={onViewMyRequests}>
-            {viewMyRequestsLabel}
-          </Button>
-        )}
-      </div>
-    </div>
-  );
 }

@@ -4,6 +4,7 @@ import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
 import { TextField, TextAreaField } from '../ui/Field';
 import { Button } from '../ui/Button';
+import { SuccessMessage } from '../ui/SuccessMessage';
 
 interface FormState {
   title: string;
@@ -43,28 +44,17 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
 
   if (success) {
     return (
-      <div className="koe-text-center koe-py-6">
-        <div className="koe-mb-3 koe-text-2xl">✨</div>
-        <p className="koe-text-sm koe-mb-4">{locale.featureForm.success}</p>
-        <div className="koe-flex koe-flex-col koe-items-center koe-gap-2">
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={() => {
-              setSuccess(false);
-              setState(EMPTY);
-              setErrors({});
-            }}
-          >
-            Submit another
-          </Button>
-          {onViewMyRequests && (
-            <Button variant="outline" type="button" onClick={onViewMyRequests}>
-              {locale.myRequests?.title ?? 'My requests'}
-            </Button>
-          )}
-        </div>
-      </div>
+      <SuccessMessage
+        emoji="✨"
+        message={locale.featureForm.success}
+        onDismiss={() => {
+          setSuccess(false);
+          setState(EMPTY);
+          setErrors({});
+        }}
+        onViewMyRequests={onViewMyRequests}
+        viewMyRequestsLabel={locale.myRequests?.title ?? 'My requests'}
+      />
     );
   }
 
