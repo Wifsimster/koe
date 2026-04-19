@@ -56,7 +56,7 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
               Admin
             </span>
           </Link>
-          <ProjectSwitcher />
+          {isInbox && <ProjectSwitcher />}
         </SidebarHeader>
 
         <SidebarContent className="px-2">
