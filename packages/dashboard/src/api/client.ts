@@ -1,4 +1,10 @@
-import type { BrowserMetadata, TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
+import type {
+  ApiResponse,
+  BrowserMetadata,
+  TicketKind,
+  TicketPriority,
+  TicketStatus,
+} from '@koe/shared';
 
 export interface TicketPatch {
   status?: TicketStatus;
@@ -137,8 +143,6 @@ export interface WorkspaceOverview {
   projects: WorkspaceProjectSummary[];
 }
 
-type Envelope<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
-
 export class AdminApiError extends Error {
   constructor(
     public readonly status: number,
@@ -252,9 +256,9 @@ export class AdminApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    let payload: Envelope<T>;
+    let payload: ApiResponse<T>;
     try {
-      payload = (await res.json()) as Envelope<T>;
+      payload = (await res.json()) as ApiResponse<T>;
     } catch {
       throw new AdminApiError(res.status, 'malformed_response', `Non-JSON from ${path}`);
     }
