@@ -140,3 +140,35 @@ export interface CreateFeatureRequestInput {
   reporter: WidgetUser;
   metadata: BrowserMetadata;
 }
+
+/**
+ * Flat ticket row returned by the admin API (`GET /v1/admin/projects/:key/tickets`
+ * and friends). Mirrors the database row layout rather than the nested
+ * `TicketBase` shape because admin callers typically render each
+ * reporter field in its own column.
+ */
+export interface AdminTicket {
+  id: string;
+  projectId: string;
+  kind: TicketKind;
+  title: string;
+  description: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  reporterId: string;
+  reporterName: string | null;
+  reporterEmail: string | null;
+  reporterVerified: boolean;
+  stepsToReproduce: string | null;
+  expectedBehavior: string | null;
+  actualBehavior: string | null;
+  metadata: BrowserMetadata | null;
+  screenshotUrl: string | null;
+  /** Private admin notes. Never shown to the widget reporter. */
+  notes: string | null;
+  /** Whether this ticket appears on the public roadmap at `/r/:projectKey`. */
+  isPublicRoadmap: boolean;
+  createdAt: string;
+  updatedAt: string;
+  voteCount: number;
+}

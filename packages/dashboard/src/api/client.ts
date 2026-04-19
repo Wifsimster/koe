@@ -1,10 +1,6 @@
-import type {
-  ApiResponse,
-  BrowserMetadata,
-  TicketKind,
-  TicketPriority,
-  TicketStatus,
-} from '@koe/shared';
+import type { AdminTicket, ApiResponse, TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
+
+export type { AdminTicket };
 
 export interface TicketPatch {
   status?: TicketStatus;
@@ -67,32 +63,6 @@ export interface AdminProject {
   lastPingAt: string | null;
   lastPingOrigin: string | null;
   createdAt: string;
-}
-
-export interface AdminTicket {
-  id: string;
-  projectId: string;
-  kind: TicketKind;
-  title: string;
-  description: string;
-  status: TicketStatus;
-  priority: TicketPriority;
-  reporterId: string;
-  reporterName: string | null;
-  reporterEmail: string | null;
-  reporterVerified: boolean;
-  stepsToReproduce: string | null;
-  expectedBehavior: string | null;
-  actualBehavior: string | null;
-  metadata: BrowserMetadata | null;
-  screenshotUrl: string | null;
-  /** Private admin notes. Never shown to the widget reporter. */
-  notes: string | null;
-  /** Whether this ticket appears on the public roadmap at `/r/:projectKey`. */
-  isPublicRoadmap: boolean;
-  createdAt: string;
-  updatedAt: string;
-  voteCount: number;
 }
 
 export interface TicketListQuery {
