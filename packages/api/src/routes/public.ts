@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db, schema } from '../db';
+import { voteCountExpr } from '../db/queries';
 import { fail, ok } from '../lib/response';
 import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rateLimit';
 import {
@@ -111,8 +112,6 @@ async function loadProject(key: string) {
  * public roadmap — those live entirely inside the admin API.
  */
 async function loadPublicTickets(projectId: string): Promise<PublicRoadmapRow[]> {
-  const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
-
   const rows = await db
     .select({
       id: schema.tickets.id,

@@ -11,6 +11,7 @@ import {
 } from '@koe/shared';
 import { z } from 'zod';
 import { db, firstOrThrow, schema } from '../db';
+import { voteCountExpr } from '../db/queries';
 import { ok, fail } from '../lib/response';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
 import { requireAdmin, type AdminContext } from '../middleware/adminAuth';
@@ -283,8 +284,6 @@ export function createAdminApiRoutes() {
       );
     }
 
-    const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
-
     const rows = await db
       .select({
         ticket: schema.tickets,
@@ -423,7 +422,6 @@ export function createAdminApiRoutes() {
       return fail(c, 'not_found', 'Ticket not found', 404);
     }
 
-    const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
     const [withVotes] = await db
       .select({ ticket: schema.tickets, voteCount: voteCountExpr })
       .from(schema.tickets)
@@ -663,7 +661,6 @@ export function createAdminApiRoutes() {
         return fail(c, 'validation_failed', 'This event kind cannot be reverted', 422);
       }
 
-      const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
       const [withVotes] = await db
         .select({ ticket: schema.tickets, voteCount: voteCountExpr })
         .from(schema.tickets)

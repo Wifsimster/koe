@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, firstOrThrow, schema } from '../db';
+import { voteCountExpr } from '../db/queries';
 import { ok, fail } from '../lib/response';
 import { requireProject, type ProjectContext } from '../middleware/project';
 import { attachVerifier, type VerifyReporterFn } from '../middleware/identity';
@@ -189,7 +190,6 @@ widgetRoutes.get('/features', async (c) => {
   const project = c.get('project');
   const currentUserId = c.req.query('userId') ?? null;
 
-  const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
   const hasVotedExpr = currentUserId
     ? sql<boolean>`bool_or(${schema.ticketVotes.userId} = ${currentUserId})`
     : sql<boolean>`false`;
@@ -296,8 +296,6 @@ widgetRoutes.get('/my-requests', async (c) => {
 
   const verdict = await c.get('verifyReporter')(userId);
   if (!verdict.ok) return fail(c, 'unauthorized', verdict.reason, 401);
-
-  const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
 
   const rows = await db
     .select({
