@@ -1,9 +1,16 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { z } from 'zod';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, firstOrThrow, schema } from '../db';
+import { voteCountExpr } from '../db/queries';
 import { ok, fail } from '../lib/response';
+import {
+  createBugSchema,
+  createFeatureSchema,
+  myRequestsQuerySchema,
+  voteSchema,
+} from '../lib/schemas';
+import { parseJsonBody, validateOrFail } from '../lib/validation';
 import { requireProject, type ProjectContext } from '../middleware/project';
 import { attachVerifier, type VerifyReporterFn } from '../middleware/identity';
 import { widgetCors } from '../middleware/cors';
@@ -12,64 +19,6 @@ import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rat
 /** 256 KB hard cap on any widget payload. Screenshots go through a
  *  presigned upload flow, never inline base64 (see `screenshotUrl`). */
 const MAX_BODY_BYTES = 256 * 1024;
-
-const reporterSchema = z.object({
-  id: z.string().min(1).max(256),
-  name: z.string().max(200).optional(),
-  email: z.string().email().max(320).optional(),
-  avatarUrl: z
-    .string()
-    .url()
-    .max(2048)
-    // Block `javascript:` and `data:` scheme injection into the admin UI.
-    .refine((u) => /^https?:\/\//i.test(u), 'avatarUrl must be http(s)')
-    .optional(),
-  metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-});
-
-const metadataSchema = z.object({
-  userAgent: z.string().max(1024),
-  url: z.string().max(2048),
-  referrer: z.string().max(2048).optional(),
-  viewport: z.object({ width: z.number(), height: z.number() }),
-  screen: z.object({ width: z.number(), height: z.number() }),
-  language: z.string().max(32),
-  timezone: z.string().max(64),
-  devicePixelRatio: z.number(),
-  capturedAt: z.string().max(64),
-});
-
-const createBugSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().min(1).max(10_000),
-  stepsToReproduce: z.string().max(10_000).optional(),
-  expectedBehavior: z.string().max(10_000).optional(),
-  actualBehavior: z.string().max(10_000).optional(),
-  reporter: reporterSchema,
-  metadata: metadataSchema,
-  /**
-   * Reference to a screenshot uploaded via presigned URL. The actual
-   * upload never flows through this endpoint — that's what blew up
-   * Postgres row sizes in the jsonb-blob design.
-   */
-  screenshotUrl: z.string().url().max(2048).optional(),
-});
-
-const createFeatureSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().min(1).max(10_000),
-  reporter: reporterSchema,
-  metadata: metadataSchema,
-});
-
-const voteSchema = z.object({
-  userId: z.string().min(1).max(256),
-});
-
-const myRequestsQuerySchema = z.object({
-  userId: z.string().min(1).max(256),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-});
 
 type WidgetVariables = ProjectContext & { verifyReporter: VerifyReporterFn };
 
@@ -110,13 +59,8 @@ widgetRoutes.use('*', requireProject);
 widgetRoutes.use('*', attachVerifier);
 
 widgetRoutes.post('/bugs', async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const parsed = createBugSchema.safeParse(body);
-  if (!parsed.success) {
-    return fail(c, 'validation_failed', 'Invalid bug report payload', 422, {
-      issues: parsed.error.issues,
-    });
-  }
+  const parsed = await parseJsonBody(c, createBugSchema, 'Invalid bug report payload');
+  if (!parsed.ok) return parsed.response;
   const input = parsed.data;
   const project = c.get('project');
 
@@ -148,13 +92,8 @@ widgetRoutes.post('/bugs', async (c) => {
 });
 
 widgetRoutes.post('/features', async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const parsed = createFeatureSchema.safeParse(body);
-  if (!parsed.success) {
-    return fail(c, 'validation_failed', 'Invalid feature request payload', 422, {
-      issues: parsed.error.issues,
-    });
-  }
+  const parsed = await parseJsonBody(c, createFeatureSchema, 'Invalid feature request payload');
+  if (!parsed.ok) return parsed.response;
   const input = parsed.data;
   const project = c.get('project');
 
@@ -189,7 +128,6 @@ widgetRoutes.get('/features', async (c) => {
   const project = c.get('project');
   const currentUserId = c.req.query('userId') ?? null;
 
-  const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
   const hasVotedExpr = currentUserId
     ? sql<boolean>`bool_or(${schema.ticketVotes.userId} = ${currentUserId})`
     : sql<boolean>`false`;
@@ -220,11 +158,8 @@ widgetRoutes.get('/features', async (c) => {
 widgetRoutes.post('/features/:id/vote', async (c) => {
   const project = c.get('project');
   const id = c.req.param('id');
-  const body = await c.req.json().catch(() => null);
-  const parsed = voteSchema.safeParse(body);
-  if (!parsed.success) {
-    return fail(c, 'validation_failed', 'userId is required', 422);
-  }
+  const parsed = await parseJsonBody(c, voteSchema, 'userId is required');
+  if (!parsed.ok) return parsed.response;
   const { userId } = parsed.data;
 
   const verdict = await c.get('verifyReporter')(userId);
@@ -283,21 +218,17 @@ widgetRoutes.post('/features/:id/vote', async (c) => {
  */
 widgetRoutes.get('/my-requests', async (c) => {
   const project = c.get('project');
-  const parsed = myRequestsQuerySchema.safeParse({
-    userId: c.req.query('userId'),
-    limit: c.req.query('limit'),
-  });
-  if (!parsed.success) {
-    return fail(c, 'validation_failed', 'userId is required', 422, {
-      issues: parsed.error.issues,
-    });
-  }
+  const parsed = validateOrFail(
+    c,
+    myRequestsQuerySchema,
+    { userId: c.req.query('userId'), limit: c.req.query('limit') },
+    'userId is required',
+  );
+  if (!parsed.ok) return parsed.response;
   const { userId, limit } = parsed.data;
 
   const verdict = await c.get('verifyReporter')(userId);
   if (!verdict.ok) return fail(c, 'unauthorized', verdict.reason, 401);
-
-  const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
 
   const rows = await db
     .select({

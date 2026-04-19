@@ -5,3 +5,4 @@ export * from './types/chat';
 export * from './types/widget';
 export * from './types/api';
 export * from './metadata';
+export * from './validation';

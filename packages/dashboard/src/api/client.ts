@@ -1,4 +1,6 @@
-import type { BrowserMetadata, TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
+import type { AdminTicket, ApiResponse, TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
+
+export type { AdminTicket };
 
 export interface TicketPatch {
   status?: TicketStatus;
@@ -63,32 +65,6 @@ export interface AdminProject {
   createdAt: string;
 }
 
-export interface AdminTicket {
-  id: string;
-  projectId: string;
-  kind: TicketKind;
-  title: string;
-  description: string;
-  status: TicketStatus;
-  priority: TicketPriority;
-  reporterId: string;
-  reporterName: string | null;
-  reporterEmail: string | null;
-  reporterVerified: boolean;
-  stepsToReproduce: string | null;
-  expectedBehavior: string | null;
-  actualBehavior: string | null;
-  metadata: BrowserMetadata | null;
-  screenshotUrl: string | null;
-  /** Private admin notes. Never shown to the widget reporter. */
-  notes: string | null;
-  /** Whether this ticket appears on the public roadmap at `/r/:projectKey`. */
-  isPublicRoadmap: boolean;
-  createdAt: string;
-  updatedAt: string;
-  voteCount: number;
-}
-
 export interface TicketListQuery {
   kind?: TicketKind;
   status?: TicketStatus;
@@ -136,8 +112,6 @@ export interface WorkspaceProjectSummary {
 export interface WorkspaceOverview {
   projects: WorkspaceProjectSummary[];
 }
-
-type Envelope<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
 
 export class AdminApiError extends Error {
   constructor(
@@ -252,9 +226,9 @@ export class AdminApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    let payload: Envelope<T>;
+    let payload: ApiResponse<T>;
     try {
-      payload = (await res.json()) as Envelope<T>;
+      payload = (await res.json()) as ApiResponse<T>;
     } catch {
       throw new AdminApiError(res.status, 'malformed_response', `Non-JSON from ${path}`);
     }

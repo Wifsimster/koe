@@ -1,10 +1,22 @@
 import { randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
-import type { TicketPriority, TicketStatus } from '@koe/shared';
-import { z } from 'zod';
+import {
+  isTicketPriority,
+  isTicketStatus,
+  type TicketPriority,
+  type TicketStatus,
+} from '@koe/shared';
 import { db, firstOrThrow, schema } from '../db';
+import { voteCountExpr } from '../db/queries';
 import { ok, fail } from '../lib/response';
+import {
+  bulkPatchSchema,
+  createProjectSchema,
+  patchTicketSchema,
+  ticketQuerySchema,
+} from '../lib/schemas';
+import { parseJsonBody, validateOrFail } from '../lib/validation';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
 import { requireAdmin, type AdminContext } from '../middleware/adminAuth';
 import type { MiddlewareHandler } from 'hono';
@@ -94,30 +106,13 @@ export function createAdminApiRoutes() {
     });
   });
 
-  const createProjectSchema = z.object({
-    name: z.string().trim().min(1).max(120),
-    key: z
-      .string()
-      .trim()
-      .min(1)
-      .max(64)
-      .regex(/^[a-z0-9-]+$/, 'key must match /^[a-z0-9-]+$/'),
-    allowedOrigins: z.array(z.string().trim().min(1).max(512)).max(20).optional(),
-    requireIdentityVerification: z.boolean().optional(),
-  });
-
   /**
    * Create a project. Returns the plaintext `identitySecret` once —
    * the server encrypts it at rest and never returns it again.
    */
   api.post('/projects', async (c) => {
-    const body = await c.req.json().catch(() => null);
-    const parsed = createProjectSchema.safeParse(body);
-    if (!parsed.success) {
-      return fail(c, 'validation_failed', 'Invalid project payload', 422, {
-        issues: parsed.error.issues,
-      });
-    }
+    const parsed = await parseJsonBody(c, createProjectSchema, 'Invalid project payload');
+    if (!parsed.ok) return parsed.response;
     const { name, key, allowedOrigins, requireIdentityVerification } = parsed.data;
 
     const [existing] = await db
@@ -184,27 +179,6 @@ export function createAdminApiRoutes() {
     await next();
   };
 
-  const ticketStatusSchema = z.enum([
-    'open',
-    'in_progress',
-    'planned',
-    'resolved',
-    'closed',
-    'wont_fix',
-  ]);
-  const ticketPrioritySchema = z.enum(['low', 'medium', 'high', 'critical']);
-
-  const ticketQuerySchema = z.object({
-    kind: z.enum(['bug', 'feature']).optional(),
-    status: ticketStatusSchema.optional(),
-    priority: ticketPrioritySchema.optional(),
-    verified: z.enum(['true', 'false']).optional(),
-    search: z.string().trim().min(1).max(200).optional(),
-    limit: z.coerce.number().int().min(1).max(200).default(50),
-    cursor: z.string().max(200).optional(),
-    sort: z.enum(['recent', 'votes']).default('recent').optional(),
-  });
-
   /**
    * Cursor format: `${isoCreatedAt}|${ticketId}`, base64url-encoded.
    * Sort is `(created_at desc, id desc)` — the cursor predicate is
@@ -228,21 +202,22 @@ export function createAdminApiRoutes() {
 
   api.get('/projects/:key/tickets', resolveProject, async (c) => {
     const project = c.get('project');
-    const queryResult = ticketQuerySchema.safeParse({
-      kind: c.req.query('kind'),
-      status: c.req.query('status'),
-      priority: c.req.query('priority'),
-      verified: c.req.query('verified'),
-      search: c.req.query('search'),
-      limit: c.req.query('limit'),
-      cursor: c.req.query('cursor'),
-      sort: c.req.query('sort'),
-    });
-    if (!queryResult.success) {
-      return fail(c, 'validation_failed', 'Invalid query parameters', 422, {
-        issues: queryResult.error.issues,
-      });
-    }
+    const queryResult = validateOrFail(
+      c,
+      ticketQuerySchema,
+      {
+        kind: c.req.query('kind'),
+        status: c.req.query('status'),
+        priority: c.req.query('priority'),
+        verified: c.req.query('verified'),
+        search: c.req.query('search'),
+        limit: c.req.query('limit'),
+        cursor: c.req.query('cursor'),
+        sort: c.req.query('sort'),
+      },
+      'Invalid query parameters',
+    );
+    if (!queryResult.ok) return queryResult.response;
     const { kind, status, priority, verified, search, limit, cursor, sort } =
       queryResult.data;
 
@@ -283,8 +258,6 @@ export function createAdminApiRoutes() {
       );
     }
 
-    const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
-
     const rows = await db
       .select({
         ticket: schema.tickets,
@@ -313,44 +286,12 @@ export function createAdminApiRoutes() {
     });
   });
 
-  /**
-   * Triage mutation. Partial update: every field is optional, at least
-   * one is required. `notes` is free-text admin-only scratch space;
-   * reporter-supplied columns (`reporter_email`, `metadata`, …) stay
-   * unwritable.
-   *
-   * Empty string on `notes` clears the field; `null` does too. The
-   * distinction doesn't matter to the operator — both read back as
-   * "no notes" — but accepting both lets the form submit a cleared
-   * textarea without a special case.
-   */
-  const patchTicketSchema = z
-    .object({
-      status: ticketStatusSchema.optional(),
-      priority: ticketPrioritySchema.optional(),
-      notes: z.string().max(10_000).nullable().optional(),
-      isPublicRoadmap: z.boolean().optional(),
-    })
-    .refine(
-      (v) =>
-        v.status !== undefined ||
-        v.priority !== undefined ||
-        v.notes !== undefined ||
-        v.isPublicRoadmap !== undefined,
-      { message: 'At least one of status, priority, notes, or isPublicRoadmap is required' },
-    );
-
   api.patch('/projects/:key/tickets/:id', resolveProject, async (c) => {
     const project = c.get('project');
     const id = c.req.param('id');
 
-    const body = await c.req.json().catch(() => null);
-    const parsed = patchTicketSchema.safeParse(body);
-    if (!parsed.success) {
-      return fail(c, 'validation_failed', 'Invalid patch payload', 422, {
-        issues: parsed.error.issues,
-      });
-    }
+    const parsed = await parseJsonBody(c, patchTicketSchema, 'Invalid patch payload');
+    if (!parsed.ok) return parsed.response;
 
     const result = await db.transaction(async (tx) => {
       const [before] = await tx
@@ -423,7 +364,6 @@ export function createAdminApiRoutes() {
       return fail(c, 'not_found', 'Ticket not found', 404);
     }
 
-    const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
     const [withVotes] = await db
       .select({ ticket: schema.tickets, voteCount: voteCountExpr })
       .from(schema.tickets)
@@ -470,28 +410,11 @@ export function createAdminApiRoutes() {
    * operator knows what they just bulk-changed; per-event undo on the
    * timeline covers mistakes.
    */
-  const bulkPatchSchema = z.object({
-    ids: z.array(z.string().uuid()).min(1).max(100),
-    patch: z
-      .object({
-        status: ticketStatusSchema.optional(),
-        priority: ticketPrioritySchema.optional(),
-      })
-      .refine((v) => v.status !== undefined || v.priority !== undefined, {
-        message: 'At least one of status or priority is required',
-      }),
-  });
-
   api.post('/projects/:key/tickets/bulk', resolveProject, async (c) => {
     const project = c.get('project');
 
-    const body = await c.req.json().catch(() => null);
-    const parsed = bulkPatchSchema.safeParse(body);
-    if (!parsed.success) {
-      return fail(c, 'validation_failed', 'Invalid bulk payload', 422, {
-        issues: parsed.error.issues,
-      });
-    }
+    const parsed = await parseJsonBody(c, bulkPatchSchema, 'Invalid bulk payload');
+    if (!parsed.ok) return parsed.response;
     const { ids, patch } = parsed.data;
 
     type Failure = { id: string; reason: 'not_found' };
@@ -663,7 +586,6 @@ export function createAdminApiRoutes() {
         return fail(c, 'validation_failed', 'This event kind cannot be reverted', 422);
       }
 
-      const voteCountExpr = sql<number>`count(${schema.ticketVotes.ticketId})::int`;
       const [withVotes] = await db
         .select({ ticket: schema.tickets, voteCount: voteCountExpr })
         .from(schema.tickets)
@@ -677,19 +599,4 @@ export function createAdminApiRoutes() {
   );
 
   return api;
-}
-
-function isTicketStatus(v: string): v is TicketStatus {
-  return (
-    v === 'open' ||
-    v === 'in_progress' ||
-    v === 'planned' ||
-    v === 'resolved' ||
-    v === 'closed' ||
-    v === 'wont_fix'
-  );
-}
-
-function isTicketPriority(v: string): v is TicketPriority {
-  return v === 'low' || v === 'medium' || v === 'high' || v === 'critical';
 }
