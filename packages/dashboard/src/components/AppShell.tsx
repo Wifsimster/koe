@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Grid2x2, Inbox, LogOut } from 'lucide-react';
+import { Grid2x2, Inbox, LogOut, Plus } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { INBOX_DEFAULT_SEARCH } from '../router';
 import { ModeToggle } from './ModeToggle';
@@ -57,6 +57,12 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
             </span>
           </Link>
           {isInbox && <ProjectSwitcher />}
+          <Button asChild variant="outline" size="sm" className="justify-start">
+            <Link to="/onboarding">
+              <Plus />
+              New project
+            </Link>
+          </Button>
         </SidebarHeader>
 
         <SidebarContent className="px-2">

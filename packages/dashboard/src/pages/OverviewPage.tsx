@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Bug, Heart, Lightbulb } from 'lucide-react';
+import { Bug, Heart, Lightbulb, Plus } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import type { WorkspaceProjectSummary } from '../api/client';
+import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
 import { INBOX_DEFAULT_SEARCH } from '../router';
@@ -50,17 +51,33 @@ export function OverviewPage() {
 
   if (projects.length === 0) {
     return (
-      <div className="rounded-md border border-dashed px-6 py-10 text-center text-xs text-muted-foreground">
-        You have no projects yet. Create one from the project switcher.
+      <div className="rounded-md border border-dashed px-6 py-10 text-center">
+        <p className="text-xs text-muted-foreground">You have no projects yet.</p>
+        <Button asChild className="mt-4">
+          <Link to="/onboarding">
+            <Plus />
+            Create your first project
+          </Link>
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {projects.map((p) => (
-        <ProjectTile key={p.id} project={p} onPick={setActiveProject} />
-      ))}
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button asChild>
+          <Link to="/onboarding">
+            <Plus />
+            New project
+          </Link>
+        </Button>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {projects.map((p) => (
+          <ProjectTile key={p.id} project={p} onPick={setActiveProject} />
+        ))}
+      </div>
     </div>
   );
 }
