@@ -18,6 +18,7 @@ concurrency:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   deploy:
@@ -30,8 +31,23 @@ jobs:
       run:
         working-directory: /opt/docker/koe
     steps:
-      - name: Pull latest image(s)
-        run: docker compose pull
+      # Self-hosted runners don't persist GHCR credentials across jobs,
+      # and the host docker daemon may have never been logged in. Without
+      # this step, `docker compose pull` fails fast with 401/404 the first
+      # time the image is fetched (or after the cached token expires).
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pull only the api service. The db service uses `postgres:16-alpine`
+      # from Docker Hub, which is subject to anonymous pull rate limits
+      # (100/6h/IP) — pulling it every deploy risks throttling and offers
+      # no benefit since only the api image changes between runs.
+      - name: Pull latest api image
+        run: docker compose pull api
 
       - name: Reconcile stack
         run: docker compose up -d
@@ -40,5 +56,6 @@ jobs:
         run: docker compose ps
 
       - name: Prune dangling images
+        if: success()
         working-directory: /
         run: docker image prune -f
