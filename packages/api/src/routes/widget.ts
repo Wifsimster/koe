@@ -15,6 +15,7 @@ import { requireProject, type ProjectContext } from '../middleware/project';
 import { attachVerifier, type VerifyReporterFn } from '../middleware/identity';
 import { widgetCors } from '../middleware/cors';
 import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rateLimit';
+import { notifyNewTicket } from '../lib/notifications';
 
 /** 256 KB hard cap on any widget payload. Screenshots go through a
  *  presigned upload flow, never inline base64 (see `screenshotUrl`). */
@@ -88,6 +89,11 @@ widgetRoutes.post('/bugs', async (c) => {
       .returning(),
   );
 
+  // Fire-and-forget: never `await`. The widget response must not
+  // block on Resend latency or availability — `notifyNewTicket` swallows
+  // its own errors and no-ops when email is unconfigured.
+  void notifyNewTicket(row, project);
+
   return ok(c, row, 201);
 });
 
@@ -116,6 +122,8 @@ widgetRoutes.post('/features', async (c) => {
       })
       .returning(),
   );
+
+  void notifyNewTicket(row, project);
 
   return ok(c, { ...row, voteCount: 0, hasVoted: false }, 201);
 });
