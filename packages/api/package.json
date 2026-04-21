@@ -26,6 +26,7 @@
     "hono": "^4.6.10",
     "ioredis": "^5.10.1",
     "postgres": "^3.4.5",
+    "resend": "^6.12.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {
