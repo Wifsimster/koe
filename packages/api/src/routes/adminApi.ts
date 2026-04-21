@@ -14,10 +14,12 @@ import {
   bulkPatchSchema,
   createProjectSchema,
   patchTicketSchema,
+  testEmailSchema,
   ticketQuerySchema,
 } from '../lib/schemas';
 import { parseJsonBody, validateOrFail } from '../lib/validation';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
+import { sendTestEmail } from '../lib/notifications';
 import { requireAdmin, type AdminContext } from '../middleware/adminAuth';
 import type { MiddlewareHandler } from 'hono';
 
@@ -40,6 +42,83 @@ export function createAdminApiRoutes() {
   api.get('/me', async (c) => {
     const admin = c.get('admin');
     return ok(c, { email: admin.email });
+  });
+
+  /**
+   * Reports the current Resend configuration so the dashboard's
+   * "email setup" panel can show what's missing before the operator
+   * tries to send a test. Only booleans + the resolved (env-derived)
+   * sender / recipient strings — never the API key itself.
+   */
+  api.get('/notifications/email', async (c) => {
+    const apiKeySet = !!process.env.RESEND_API_KEY;
+    const from = process.env.RESEND_FROM_EMAIL?.trim() || null;
+    const ownerEmail = process.env.NOTIFY_OWNER_EMAIL?.trim() || null;
+    const adminEmail = process.env.ADMIN_EMAIL?.trim() || null;
+    const recipient = ownerEmail ?? adminEmail;
+    return ok(c, {
+      apiKeySet,
+      from,
+      recipient,
+      recipientSource: ownerEmail ? 'NOTIFY_OWNER_EMAIL' : adminEmail ? 'ADMIN_EMAIL' : null,
+      ready: apiKeySet && !!from && !!recipient,
+    });
+  });
+
+  /**
+   * Sends a one-off test email so the operator can verify Resend is
+   * reachable from this deploy without waiting for a real submission.
+   * Optional `to` lets them probe a personal inbox instead of the
+   * configured owner address.
+   *
+   * Maps the structured `TestEmailResult` to canonical envelopes:
+   * misconfiguration → 422, Resend rejection → 502, success → 200.
+   */
+  api.post('/notifications/email/test', async (c) => {
+    // Empty body is valid (no `to` override); only parse when we
+    // actually have JSON to consume so the dashboard can fire an
+    // empty POST without setting a Content-Type.
+    let to: string | undefined;
+    const raw = await c.req.text();
+    if (raw.trim().length > 0) {
+      let body: unknown;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        return fail(c, 'validation_failed', 'Body must be valid JSON', 422);
+      }
+      const parsed = validateOrFail(c, testEmailSchema, body, 'Invalid test email payload');
+      if (!parsed.ok) return parsed.response;
+      to = parsed.data.to;
+    }
+
+    const result = await sendTestEmail({ to });
+    if (result.ok) {
+      return ok(c, {
+        sent: true,
+        to: result.to,
+        from: result.from,
+        messageId: result.messageId,
+      });
+    }
+    if (result.reason === 'send_failed') {
+      return fail(
+        c,
+        'service_unavailable',
+        result.detail ?? 'Resend rejected the request',
+        502,
+        { reason: result.reason },
+      );
+    }
+    const messages = {
+      no_api_key: 'RESEND_API_KEY is not set on the server',
+      no_sender: 'RESEND_FROM_EMAIL is not set on the server',
+      no_recipient:
+        'No recipient configured — set NOTIFY_OWNER_EMAIL or pass a `to` field in the body',
+    } as const;
+    return fail(c, 'validation_failed', messages[result.reason], 422, {
+      reason: result.reason,
+    });
   });
 
   /**

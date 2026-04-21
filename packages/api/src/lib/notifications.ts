@@ -167,3 +167,88 @@ export async function notifyNewTicket(
     return false;
   }
 }
+
+/**
+ * Result of `sendTestEmail`. The discriminant lets the admin route map
+ * each case to the right HTTP status without leaking implementation
+ * details: `no_api_key`/`no_sender`/`no_recipient` map to 422 (operator
+ * needs to fix env), `send_failed` maps to 502 (Resend rejected us),
+ * `ok` maps to 200.
+ */
+export type TestEmailResult =
+  | { ok: true; to: string; from: string; messageId: string | null }
+  | {
+      ok: false;
+      reason: 'no_api_key' | 'no_sender' | 'no_recipient' | 'send_failed';
+      detail?: string;
+    };
+
+const TEST_EMAIL_SUBJECT = '[Koe] Test email — your Resend integration is working';
+
+function buildTestBody(): { html: string; text: string } {
+  const text = [
+    'This is a test email from Koe.',
+    '',
+    'If you can read this, your Resend integration is correctly',
+    'configured and new bug / feature submissions will reach this',
+    'inbox. You can safely delete this message.',
+  ].join('\n');
+  const html = [
+    '<p><strong>This is a test email from Koe.</strong></p>',
+    '<p>If you can read this, your Resend integration is correctly configured ',
+    'and new bug / feature submissions will reach this inbox. ',
+    'You can safely delete this message.</p>',
+  ].join('');
+  return { html, text };
+}
+
+/**
+ * Sends a one-off test email to verify Resend is correctly wired up.
+ * Driven by the admin "send test email" button — surfaces every
+ * common misconfiguration (missing API key, missing sender, missing
+ * recipient, Resend rejection) as a structured result instead of
+ * silent no-op, so the operator gets actionable feedback instead of
+ * "did anything happen?".
+ *
+ * Pass `to` to override the recipient resolver — useful when the admin
+ * wants to send a probe to their personal inbox rather than the
+ * configured owner address.
+ */
+export async function sendTestEmail(opts: { to?: string } = {}): Promise<TestEmailResult> {
+  const client = getResendFromEnv();
+  if (!client) return { ok: false, reason: 'no_api_key' };
+
+  const from = process.env.RESEND_FROM_EMAIL?.trim();
+  if (!from) return { ok: false, reason: 'no_sender' };
+
+  const to = opts.to?.trim() || resolveRecipient();
+  if (!to) return { ok: false, reason: 'no_recipient' };
+
+  const { html, text } = buildTestBody();
+
+  try {
+    const response = await client.emails.send({
+      from,
+      to,
+      subject: TEST_EMAIL_SUBJECT,
+      html,
+      text,
+    });
+    // Resend returns `{ data: { id }, error }`. A non-null `error` is a
+    // delivery rejection (bad sender domain, blocked recipient, …) and
+    // must surface as a failure even though `send()` resolved.
+    const data = (response as { data?: { id?: string } | null; error?: unknown }) ?? {};
+    if (data.error) {
+      const msg =
+        typeof data.error === 'object' && data.error && 'message' in data.error
+          ? String((data.error as { message: unknown }).message)
+          : 'Resend rejected the request';
+      return { ok: false, reason: 'send_failed', detail: msg };
+    }
+    return { ok: true, to, from, messageId: data.data?.id ?? null };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Unknown Resend error';
+    console.error('[koe/api] sendTestEmail failed', err);
+    return { ok: false, reason: 'send_failed', detail };
+  }
+}

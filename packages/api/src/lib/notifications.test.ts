@@ -5,6 +5,7 @@ import {
   __setResendForTest,
   getResendFromEnv,
   notifyNewTicket,
+  sendTestEmail,
 } from './notifications';
 
 type TicketRow = typeof schema.tickets.$inferSelect;
@@ -50,14 +51,21 @@ interface SentEmail {
   text?: string;
 }
 
-function makeFakeResend(opts: { throwOnSend?: boolean } = {}) {
+function makeFakeResend(opts: {
+  throwOnSend?: boolean;
+  resendError?: { message: string };
+  messageId?: string;
+} = {}) {
   const sent: SentEmail[] = [];
   const client = {
     emails: {
       send: async (payload: SentEmail) => {
         if (opts.throwOnSend) throw new Error('boom from Resend');
         sent.push(payload);
-        return { data: { id: 'fake-id' }, error: null };
+        if (opts.resendError) {
+          return { data: null, error: opts.resendError };
+        }
+        return { data: { id: opts.messageId ?? 'fake-id' }, error: null };
       },
     },
   };
@@ -237,5 +245,118 @@ describe('notifyNewTicket', () => {
     assert.ok(!email.html?.includes('<script>alert(1)</script>'));
     assert.ok(email.html?.includes('&lt;script&gt;'));
     assert.ok(email.html?.includes('a &lt; b &amp; c &gt; d'));
+  });
+});
+
+describe('sendTestEmail', () => {
+  it('reports no_api_key when RESEND_API_KEY is missing', async () => {
+    process.env.NOTIFY_OWNER_EMAIL = 'owner@example.com';
+    process.env.RESEND_FROM_EMAIL = 'koe@example.com';
+
+    const result = await sendTestEmail();
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, 'no_api_key');
+  });
+
+  it('reports no_sender when RESEND_FROM_EMAIL is missing', async () => {
+    process.env.NOTIFY_OWNER_EMAIL = 'owner@example.com';
+
+    const fake = makeFakeResend();
+    __setResendForTest(fake.client);
+
+    const result = await sendTestEmail();
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, 'no_sender');
+    assert.equal(fake.sent.length, 0);
+  });
+
+  it('reports no_recipient when no override and no env recipient', async () => {
+    process.env.RESEND_FROM_EMAIL = 'koe@example.com';
+
+    const fake = makeFakeResend();
+    __setResendForTest(fake.client);
+
+    const result = await sendTestEmail();
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, 'no_recipient');
+    assert.equal(fake.sent.length, 0);
+  });
+
+  it('sends a test email to the env-resolved recipient on the happy path', async () => {
+    process.env.NOTIFY_OWNER_EMAIL = 'owner@example.com';
+    process.env.RESEND_FROM_EMAIL = 'koe@example.com';
+
+    const fake = makeFakeResend({ messageId: 'msg_abc' });
+    __setResendForTest(fake.client);
+
+    const result = await sendTestEmail();
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.to, 'owner@example.com');
+    assert.equal(result.from, 'koe@example.com');
+    assert.equal(result.messageId, 'msg_abc');
+    assert.equal(fake.sent.length, 1);
+    assert.match(fake.sent[0]!.subject, /Test email/i);
+    assert.ok(fake.sent[0]!.text?.includes('test email from Koe'));
+  });
+
+  it('overrides the recipient when `to` is provided', async () => {
+    process.env.NOTIFY_OWNER_EMAIL = 'owner@example.com';
+    process.env.RESEND_FROM_EMAIL = 'koe@example.com';
+
+    const fake = makeFakeResend();
+    __setResendForTest(fake.client);
+
+    const result = await sendTestEmail({ to: 'me@personal.com' });
+
+    assert.equal(result.ok, true);
+    assert.equal(fake.sent[0]!.to, 'me@personal.com');
+  });
+
+  it('falls back to ADMIN_EMAIL when NOTIFY_OWNER_EMAIL is unset', async () => {
+    process.env.ADMIN_EMAIL = 'admin@example.com';
+    process.env.RESEND_FROM_EMAIL = 'koe@example.com';
+
+    const fake = makeFakeResend();
+    __setResendForTest(fake.client);
+
+    const result = await sendTestEmail();
+
+    assert.equal(result.ok, true);
+    assert.equal(fake.sent[0]!.to, 'admin@example.com');
+  });
+
+  it('reports send_failed with the error message when Resend throws', async () => {
+    process.env.NOTIFY_OWNER_EMAIL = 'owner@example.com';
+    process.env.RESEND_FROM_EMAIL = 'koe@example.com';
+
+    const fake = makeFakeResend({ throwOnSend: true });
+    __setResendForTest(fake.client);
+
+    const result = await sendTestEmail();
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, 'send_failed');
+    assert.match((result as { detail: string }).detail, /boom from Resend/);
+  });
+
+  it('reports send_failed when Resend returns an error envelope', async () => {
+    process.env.NOTIFY_OWNER_EMAIL = 'owner@example.com';
+    process.env.RESEND_FROM_EMAIL = 'koe@example.com';
+
+    const fake = makeFakeResend({
+      resendError: { message: 'Domain is not verified' },
+    });
+    __setResendForTest(fake.client);
+
+    const result = await sendTestEmail();
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, 'send_failed');
+    assert.match((result as { detail: string }).detail, /Domain is not verified/);
   });
 });

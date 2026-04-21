@@ -144,3 +144,11 @@ export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
   password: z.string().min(1).max(4096),
 });
+
+/**
+ * Optional override for the test-email endpoint. Empty body is valid
+ * and means "send to whatever the env-resolved recipient is".
+ */
+export const testEmailSchema = z.object({
+  to: z.string().trim().toLowerCase().email().max(320).optional(),
+});
