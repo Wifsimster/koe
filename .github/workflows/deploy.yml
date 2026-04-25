@@ -42,12 +42,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Pull only the api service. The db service uses `postgres:16-alpine`
+      # Pull only the koe service (local compose names it `koe`, not `api`). The db service uses `postgres:16-alpine`
       # from Docker Hub, which is subject to anonymous pull rate limits
       # (100/6h/IP) — pulling it every deploy risks throttling and offers
-      # no benefit since only the api image changes between runs.
-      - name: Pull latest api image
-        run: docker compose pull api
+      # no benefit since only the koe image changes between runs.
+      - name: Pull latest koe image
+        run: docker compose pull koe
 
       - name: Reconcile stack
         run: docker compose up -d
