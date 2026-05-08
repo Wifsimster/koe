@@ -62,7 +62,17 @@ export interface WidgetConfig {
      */
     vote?: boolean;
   };
-  /** Localization strings. */
+  /**
+   * Built-in language preset (BCP-47 base tag, e.g. `'fr'`, `'es'`,
+   * `'de'`). Selects one of the translations shipped in `LOCALES`.
+   * When omitted, the widget auto-detects from `<html lang>` and
+   * `navigator.language`, falling back to English. Unknown codes
+   * silently fall back to English. Strings passed via `locale` are
+   * still merged on top of the resolved preset, so a host can pick a
+   * language *and* override a few keys.
+   */
+  language?: string;
+  /** Localization strings. Override individual keys on top of `language`. */
   locale?: Partial<WidgetLocale>;
 }
 

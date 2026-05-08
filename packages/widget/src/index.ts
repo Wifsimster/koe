@@ -8,6 +8,7 @@ export type {
   WidgetPosition,
   WidgetTheme,
   WidgetLocale,
+  WidgetLanguage,
   WidgetUser,
   BugReport,
   FeatureRequest,
@@ -15,3 +16,4 @@ export type {
   TicketKind,
   TicketStatus,
 } from '@koe/shared';
+export { LOCALES, resolveLocale, detectBrowserLanguage } from '@koe/shared';
