@@ -55,16 +55,27 @@ export interface NonceCache {
   hasSeen(key: string): Promise<boolean>;
 }
 
+/**
+ * Reason returned to the caller. Granular kid/sig failures are collapsed
+ * to a single `signature_mismatch` so an attacker probing the endpoint
+ * can't tell unknown-kid from revoked-kid from bad-mac. The granular
+ * cause is exposed via `internalReason` for server-side logging only —
+ * callers MUST NOT include it in any client-facing payload.
+ */
 export type VerifyError =
   | 'malformed'
   | 'signature_mismatch'
-  | 'unknown_kid'
-  | 'revoked_kid'
   | 'token_expired'
   | 'token_in_future'
   | 'replayed_nonce'
   | 'project_mismatch'
   | 'reporter_mismatch';
+
+/** Granular failure detail for logs. Never returned to the client. */
+export type VerifyInternalReason =
+  | VerifyError
+  | 'unknown_kid'
+  | 'revoked_kid';
 
 export interface VerifyOptions {
   /** Accept `iat` within [now - maxAgeSeconds, now + clockSkewSeconds]. */
@@ -127,26 +138,53 @@ export function signIdentityToken(payload: IdentityTokenPayload, secret: string)
 }
 
 /**
+ * Fixed dummy secret used when the token's `kid` is unknown or revoked.
+ * Same length/shape as a real secret so the HMAC compare runs in the
+ * same time budget and the server's response time can't be used to
+ * fingerprint kid validity. The compare will never match (the dummy is
+ * not in any project's secret list), so the `signature_mismatch`
+ * branch always wins.
+ */
+const DUMMY_HMAC_SECRET =
+  'koe-dummy-secret-for-constant-time-hmac-compare-never-shipped';
+
+/**
  * Verifies a token against a project's known secrets. Returns the parsed
  * payload on success or a typed error on failure. Never throws on
  * attacker-controlled input.
+ *
+ * Failure-reason policy:
+ * - `reason` (callers may surface to client) collapses unknown-kid,
+ *   revoked-kid, and bad-mac into `signature_mismatch`. An attacker
+ *   probing the endpoint learns nothing they couldn't learn from a
+ *   garbage-byte attempt.
+ * - `internalReason` (logs only) keeps the granular cause for ops
+ *   debugging. Middleware MUST NOT echo it in the 401 body.
+ *
+ * Timing policy: the HMAC compare runs unconditionally even when the
+ * `kid` is unknown or revoked, with a fixed dummy secret of the same
+ * length so a timing oracle can't distinguish the kid-resolution
+ * outcome from a real signature-mismatch outcome.
  */
 export async function verifyIdentityToken(
   token: string,
   secretsByKid: Map<string, IdentitySecret>,
   opts: VerifyOptions,
 ): Promise<
-  { ok: true; payload: IdentityTokenPayload } | { ok: false; reason: VerifyError }
+  | { ok: true; payload: IdentityTokenPayload }
+  | { ok: false; reason: VerifyError; internalReason: VerifyInternalReason }
 > {
   const dot = token.indexOf('.');
   if (dot <= 0 || dot === token.length - 1) {
-    return { ok: false, reason: 'malformed' };
+    return { ok: false, reason: 'malformed', internalReason: 'malformed' };
   }
   const encoded = token.slice(0, dot);
   const mac = token.slice(dot + 1);
 
   const json = base64UrlDecode(encoded);
-  if (json === null) return { ok: false, reason: 'malformed' };
+  if (json === null) {
+    return { ok: false, reason: 'malformed', internalReason: 'malformed' };
+  }
 
   let payload: IdentityTokenPayload;
   try {
@@ -158,66 +196,162 @@ export async function verifyIdentityToken(
       typeof parsed.nonce !== 'string' ||
       typeof parsed.kid !== 'string'
     ) {
-      return { ok: false, reason: 'malformed' };
+      return { ok: false, reason: 'malformed', internalReason: 'malformed' };
     }
     payload = parsed as IdentityTokenPayload;
   } catch {
-    return { ok: false, reason: 'malformed' };
+    return { ok: false, reason: 'malformed', internalReason: 'malformed' };
   }
 
+  // Resolve the secret, but always run the HMAC compare. Unknown or
+  // revoked kids fall through with the dummy secret so the timing of
+  // the compare doesn't depend on the resolution outcome.
   const entry = secretsByKid.get(payload.kid);
-  if (!entry) return { ok: false, reason: 'unknown_kid' };
-  if (entry.status === 'revoked') return { ok: false, reason: 'revoked_kid' };
+  let secretToUse: string;
+  let kidIssue: 'unknown_kid' | 'revoked_kid' | null = null;
+  if (!entry) {
+    secretToUse = DUMMY_HMAC_SECRET;
+    kidIssue = 'unknown_kid';
+  } else if (entry.status === 'revoked') {
+    secretToUse = DUMMY_HMAC_SECRET;
+    kidIssue = 'revoked_kid';
+  } else {
+    secretToUse = entry.secret;
+  }
 
-  const expectedMac = sign(json, entry.secret);
-  if (!hexEquals(expectedMac, mac)) {
-    return { ok: false, reason: 'signature_mismatch' };
+  const expectedMac = sign(json, secretToUse);
+  const macOk = hexEquals(expectedMac, mac);
+
+  if (kidIssue) {
+    // Even if the dummy compare somehow matched (it cannot in practice),
+    // the kid is bad — collapse to signature_mismatch externally.
+    return { ok: false, reason: 'signature_mismatch', internalReason: kidIssue };
+  }
+  if (!macOk) {
+    return {
+      ok: false,
+      reason: 'signature_mismatch',
+      internalReason: 'signature_mismatch',
+    };
   }
 
   if (payload.projectId !== opts.expectedProjectId) {
-    return { ok: false, reason: 'project_mismatch' };
+    return {
+      ok: false,
+      reason: 'project_mismatch',
+      internalReason: 'project_mismatch',
+    };
   }
   if (payload.reporterId !== opts.expectedReporterId) {
-    return { ok: false, reason: 'reporter_mismatch' };
+    return {
+      ok: false,
+      reason: 'reporter_mismatch',
+      internalReason: 'reporter_mismatch',
+    };
   }
 
   const now = (opts.now ?? (() => Math.floor(Date.now() / 1000)))();
   const skew = opts.clockSkewSeconds ?? 30;
   if (payload.iat > now + skew) {
-    return { ok: false, reason: 'token_in_future' };
+    return {
+      ok: false,
+      reason: 'token_in_future',
+      internalReason: 'token_in_future',
+    };
   }
   if (payload.iat < now - opts.maxAgeSeconds) {
-    return { ok: false, reason: 'token_expired' };
+    return {
+      ok: false,
+      reason: 'token_expired',
+      internalReason: 'token_expired',
+    };
   }
 
   // Bind the nonce to the kid so collisions across rotated keys can't
   // mask a real replay.
   const nonceKey = `${payload.kid}:${payload.nonce}`;
   if (await opts.nonces.hasSeen(nonceKey)) {
-    return { ok: false, reason: 'replayed_nonce' };
+    return {
+      ok: false,
+      reason: 'replayed_nonce',
+      internalReason: 'replayed_nonce',
+    };
   }
 
   return { ok: true, payload };
 }
 
+export interface InMemoryNonceCacheOptions {
+  /**
+   * How long an entry is remembered before it can be evicted. Must be
+   * >= the verifier's `maxAgeSeconds` so a still-valid token can't
+   * replay after its dedup record expired. Default 900s (15 min)
+   * matches the Redis adapter and covers the 10-min default window.
+   */
+  ttlSeconds?: number;
+  /**
+   * Bounded sweep size per insert — we expire at most this many keys
+   * on any single `hasSeen` call so a flood of inserts can't degenerate
+   * into an O(n) walk of the entire map. Sweeping just a chunk keeps
+   * each insert O(1) amortised; expired-but-not-yet-swept entries take
+   * no extra memory beyond the entry itself.
+   */
+  sweepBatchSize?: number;
+  /** Injected clock for tests. Defaults to Date.now. */
+  now?: () => number;
+}
+
 /**
- * Bounded in-memory nonce cache. FIFO eviction at `capacity`. Good for
- * single-replica dev and small single-instance prod; swap for Redis in
- * the infra MR when we add a second replica.
+ * In-memory nonce cache with **TTL-based** eviction.
+ *
+ * Each insert records `{ key -> expiresAt }`. A small bounded sweep
+ * runs on every insert to retire already-expired entries; relying on
+ * insertion order in `Map` keeps the sweep an O(k) walk over the
+ * oldest entries. There is **no capacity cap** — a flood of fresh
+ * nonces cannot push out a still-valid replay-protection entry within
+ * its TTL window, which is the property an attacker would otherwise
+ * exploit to replay a captured token.
+ *
+ * Memory bound: at the steady-state insert rate `r` (nonces/sec) the
+ * map size stays around `r * ttlSeconds`. For the default 15-minute
+ * TTL, even 100 nonces/sec yields ~90k entries — small enough that
+ * the cap dropped from the previous FIFO implementation isn't a
+ * practical concern. If you do hit an unusually high steady rate,
+ * switch to the Redis adapter (which expires keys in the server).
  */
-export function createInMemoryNonceCache(capacity = 10_000): NonceCache {
-  const seen = new Set<string>();
-  const order: string[] = [];
+export function createInMemoryNonceCache(opts: InMemoryNonceCacheOptions = {}): NonceCache {
+  const ttlMs = (opts.ttlSeconds ?? 900) * 1000;
+  const sweepBatch = opts.sweepBatchSize ?? 32;
+  const now = opts.now ?? (() => Date.now());
+
+  // Map iteration order is insertion order, so iterating from the
+  // start finds the oldest (earliest-expiring) entries first.
+  const seen = new Map<string, number>();
+
+  function sweep(currentMs: number): void {
+    let swept = 0;
+    for (const [key, expiresAt] of seen) {
+      if (swept >= sweepBatch) break;
+      if (expiresAt > currentMs) break; // remaining entries are newer/younger
+      seen.delete(key);
+      swept++;
+    }
+  }
 
   return {
     async hasSeen(key) {
-      if (seen.has(key)) return true;
-      seen.add(key);
-      order.push(key);
-      if (order.length > capacity) {
-        const evicted = order.shift();
-        if (evicted !== undefined) seen.delete(evicted);
+      const currentMs = now();
+      sweep(currentMs);
+
+      const existing = seen.get(key);
+      if (existing !== undefined && existing > currentMs) {
+        return true;
       }
+      // Re-insert (or insert) so this key moves to the back of the
+      // insertion-order iteration — keeps the sweep walking from the
+      // genuinely-oldest end.
+      if (existing !== undefined) seen.delete(key);
+      seen.set(key, currentMs + ttlMs);
       return false;
     },
   };
@@ -292,8 +426,8 @@ export function createRedisNonceCache(
  */
 export function createNonceCacheFromEnv(
   redis: RedisSetNxClient | null,
-  opts: { capacity?: number; redisOpts?: RedisNonceCacheOptions } = {},
+  opts: { memoryOpts?: InMemoryNonceCacheOptions; redisOpts?: RedisNonceCacheOptions } = {},
 ): NonceCache {
   if (redis) return createRedisNonceCache(redis, opts.redisOpts);
-  return createInMemoryNonceCache(opts.capacity);
+  return createInMemoryNonceCache(opts.memoryOpts);
 }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type RefObject } from 'react';
 
 /**
  * Mirrors `window.visualViewport.height` into a CSS custom property on
@@ -16,9 +16,16 @@ import { useEffect } from 'react';
  *
  * Falls back to `100vh`-equivalent on browsers without visualViewport
  * (very old Safari), which matches the previous behavior.
+ *
+ * Takes a `RefObject` (rather than a raw element) so the hook can read
+ * `ref.current` *inside* the effect — by the time the effect runs, React
+ * has populated the ref with the attached DOM node. Passing the raw
+ * `ref.current` from the render body would always be `null` on first
+ * render and the dep array wouldn't pick up the eventual attach.
  */
-export function useVisualViewport(target: HTMLElement | null): void {
+export function useVisualViewport(targetRef: RefObject<HTMLElement | null>): void {
   useEffect(() => {
+    const target = targetRef.current;
     if (!target) return;
     const vv = typeof window !== 'undefined' ? window.visualViewport : null;
     if (!vv) return;
@@ -27,12 +34,6 @@ export function useVisualViewport(target: HTMLElement | null): void {
       target.style.setProperty('--koe-vvh', `${vv.height}px`);
     };
 
-    // Listeners live on `window.visualViewport` (not on `target`), and
-    // `[target]` as the dep array means React runs this cleanup with the
-    // same `vv` + `write` references captured on mount before re-running
-    // the effect with a new target. No leak across target identity
-    // changes: the old `write` is detached by reference before the new
-    // one is registered.
     write();
     vv.addEventListener('resize', write);
     vv.addEventListener('scroll', write);
@@ -40,5 +41,10 @@ export function useVisualViewport(target: HTMLElement | null): void {
       vv.removeEventListener('resize', write);
       vv.removeEventListener('scroll', write);
     };
-  }, [target]);
+    // The ref *object* is stable across renders, but `ref.current` is
+    // populated by React after the first commit. Depending on the ref
+    // identity is enough here because Panel mounts the shell only when
+    // open — the effect re-runs the next time the dialog opens with a
+    // fresh node attached.
+  }, [targetRef]);
 }

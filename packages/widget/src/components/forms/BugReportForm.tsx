@@ -84,6 +84,10 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    // A second submit while the first is in flight is almost always a
+    // double-click on the submit button — bail before doing anything that
+    // would let two POSTs race the API and produce duplicate tickets.
+    if (submitting) return;
     setApiError(null);
 
     const nextErrors: Partial<Record<keyof FormState, string>> = {};
@@ -94,6 +98,10 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
+    // Abort any previous in-flight request before assigning the new one.
+    // The early-return above covers most cases, but a stale controller
+    // can still linger if a previous submit threw asynchronously.
+    controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     setSubmitting(true);
@@ -118,8 +126,26 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
       setSuccess(true);
     } catch (err) {
       if (controller.signal.aborted) return;
-      if (err instanceof KoeApiError && err.code === 'network_error') {
-        setApiError(locale.errors.network);
+      if (err instanceof KoeApiError) {
+        if (err.code === 'network_error') {
+          setApiError(locale.errors.network);
+        } else if (err.code === 'rate_limited') {
+          // Surface the retry hint so the user knows the app is alive
+          // and just throttled — not crashed. Bare `0` means the server
+          // didn't send Retry-After, fall back to a generic phrasing.
+          const retryAfter = err.detail.retryAfter ?? 0;
+          setApiError(
+            retryAfter > 0
+              ? `Too many requests — please retry in ${retryAfter}s.`
+              : 'Too many requests — please wait a moment and try again.',
+          );
+        } else if (err.code === 'unauthorized') {
+          setApiError('Your session expired — please refresh the page and try again.');
+        } else if (err.code === 'server_error') {
+          setApiError('Koe is having trouble right now. Please try again in a minute.');
+        } else {
+          setApiError(err.message || locale.errors.generic);
+        }
       } else {
         setApiError(err instanceof Error ? err.message : locale.errors.generic);
       }

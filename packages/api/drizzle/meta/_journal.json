@@ -78,6 +78,13 @@
       "when": 1777200000000,
       "tag": "0010_add_public_roadmap",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777300000000,
+      "tag": "0011_admin_sessions",
+      "breakpoints": true
     }
   ]
 }

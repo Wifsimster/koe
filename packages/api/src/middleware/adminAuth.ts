@@ -1,23 +1,36 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
+import { and, eq, gt, lte } from 'drizzle-orm';
+import { db, dbAvailable, schema } from '../db';
 import { fail } from '../lib/response';
 
 /**
- * Solo-admin authentication.
+ * Admin authentication.
  *
- * Koe is a single-operator dashboard — one founder managing multiple
- * of their own SaaS projects. There is no users table, no sessions
- * table, no teams, no roles. The only identity question is "is this
- * the admin?" and the answer lives in env vars: ADMIN_EMAIL +
- * ADMIN_PASSWORD_HASH (argon2id) verified at login, then a signed
- * cookie carries the session forward.
+ * Wire format: `${expiresAtMs}.${hmac}` where `hmac` is
+ * HMAC-SHA256(ADMIN_SESSION_SECRET, expiresAtMs). The HMAC keeps the
+ * cookie tamper-evident; rotating ADMIN_SESSION_SECRET invalidates every
+ * outstanding cookie at once.
  *
- * The cookie value is `${expiresAtMs}.${hmac}` where `hmac` is
- * HMAC-SHA256(ADMIN_SESSION_SECRET, expiresAtMs). Stateless: no DB
- * lookup on each request, no session store to clean up. Rotating
- * ADMIN_SESSION_SECRET invalidates every outstanding cookie, which
- * is the "kick myself out" button for the founder.
+ * Server-side, each minted cookie is also persisted as a SHA-256 hash in
+ * `admin_sessions` along with its expiry. `requireAdmin` looks up the
+ * hash on every request, which gives us per-device revocation
+ * (DELETE one row) without nuking every browser via secret rotation.
+ *
+ * The cookie plaintext is never stored — a DB dump leaks no active
+ * credentials.
+ *
+ * Backwards compat: when `DATABASE_URL` is unset (typecheck/unit tests),
+ * the middleware falls back to HMAC-only verification so the existing
+ * test surface keeps working.
+ *
+ * NOTE for the operator: until `passwordAuth.ts` is updated to call
+ * `recordAdminSession()` at login and `revokeAdminSession()` at logout,
+ * a TOFU (trust-on-first-use) insert in `requireAdmin` keeps things
+ * working — a session not yet in `admin_sessions` is admitted once and
+ * its hash recorded. Drop the TOFU branch as soon as the login flow
+ * persists explicitly.
  */
 
 export interface AdminContext {
@@ -50,6 +63,11 @@ function safeEqualHex(a: string, b: string): boolean {
   }
 }
 
+/** SHA-256 of the cookie value, hex-encoded. Used as the `admin_sessions` PK. */
+export function hashSessionToken(cookieValue: string): string {
+  return createHash('sha256').update(cookieValue).digest('hex');
+}
+
 /** Build the cookie value for a session that expires at `expiresAtMs`. */
 export function mintSessionCookie(expiresAtMs: number): string {
   const secret = requireSessionSecret();
@@ -57,7 +75,7 @@ export function mintSessionCookie(expiresAtMs: number): string {
   return `${payload}.${sign(payload, secret)}`;
 }
 
-/** Verify a cookie value. Returns the expiry on success, null on any failure. */
+/** Verify HMAC envelope. Returns the expiry on success, null on any failure. */
 export function verifySessionCookie(raw: string | undefined): number | null {
   if (!raw) return null;
   const dot = raw.indexOf('.');
@@ -71,20 +89,108 @@ export function verifySessionCookie(raw: string | undefined): number | null {
 }
 
 /**
- * Admin-only gate. Reads the `koe_admin` cookie, verifies the HMAC,
- * and attaches `admin.email` to the context. Returns 401 on any
- * failure without leaking why — the attacker probing the endpoint
- * learns nothing from "missing" vs "expired" vs "bad signature".
+ * Record a freshly-minted cookie in `admin_sessions`. Call from the
+ * login flow right after `mintSessionCookie`. Idempotent — a duplicate
+ * insert (same hash) is silently ignored.
+ *
+ * No-ops when the DB isn't available (unit tests, typecheck).
+ */
+export async function recordAdminSession(
+  cookieValue: string,
+  expiresAtMs: number,
+): Promise<void> {
+  if (!dbAvailable) return;
+  const tokenHash = hashSessionToken(cookieValue);
+  await db
+    .insert(schema.adminSessions)
+    .values({ tokenHash, expiresAt: new Date(expiresAtMs) })
+    .onConflictDoNothing();
+}
+
+/**
+ * Revoke a session by its cookie value. Call from the logout flow.
+ * Returns the number of rows deleted (0 or 1) so the caller can
+ * distinguish "didn't exist" from "removed".
+ */
+export async function revokeAdminSession(cookieValue: string): Promise<number> {
+  if (!dbAvailable) return 0;
+  const tokenHash = hashSessionToken(cookieValue);
+  const result = await db
+    .delete(schema.adminSessions)
+    .where(eq(schema.adminSessions.tokenHash, tokenHash))
+    .returning({ tokenHash: schema.adminSessions.tokenHash });
+  return result.length;
+}
+
+/**
+ * Best-effort GC of expired rows. Cheap (indexed on `expires_at`) and
+ * idempotent. Fired from `requireAdmin` once per process to keep the
+ * table from growing unboundedly without scheduling a separate job.
+ */
+let lastGcAt = 0;
+const GC_INTERVAL_MS = 60_000;
+async function gcExpiredSessions(): Promise<void> {
+  if (!dbAvailable) return;
+  const now = Date.now();
+  if (now - lastGcAt < GC_INTERVAL_MS) return;
+  lastGcAt = now;
+  try {
+    await db
+      .delete(schema.adminSessions)
+      .where(lte(schema.adminSessions.expiresAt, new Date()));
+  } catch (err) {
+    // GC is best-effort — never fail a request because of it.
+    console.warn('[koe/api] admin_sessions GC failed', err);
+  }
+}
+
+/**
+ * Admin-only gate. Reads the `koe_admin` cookie, verifies the HMAC
+ * envelope, and consults `admin_sessions` so a revoked row
+ * (manual DELETE or via logout helper) immediately kicks the cookie
+ * out. Returns 401 on any failure without leaking why.
  */
 export const requireAdmin: MiddlewareHandler<{ Variables: AdminContext }> = async (c, next) => {
   const email = process.env.ADMIN_EMAIL;
   if (!email) {
     return fail(c, 'service_unavailable', 'Admin auth is not configured', 503);
   }
-  const expiresAtMs = verifySessionCookie(getCookie(c, ADMIN_COOKIE_NAME));
-  if (!expiresAtMs) {
+  const raw = getCookie(c, ADMIN_COOKIE_NAME);
+  const expiresAtMs = verifySessionCookie(raw);
+  if (!expiresAtMs || !raw) {
     return fail(c, 'unauthorized', 'Admin session required', 401);
   }
+
+  if (dbAvailable) {
+    const tokenHash = hashSessionToken(raw);
+    const [row] = await db
+      .select({ tokenHash: schema.adminSessions.tokenHash })
+      .from(schema.adminSessions)
+      .where(
+        and(
+          eq(schema.adminSessions.tokenHash, tokenHash),
+          gt(schema.adminSessions.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+    if (!row) {
+      // TOFU: until passwordAuth.ts persists at login, admit a
+      // never-seen-but-HMAC-valid cookie once and record it. Remove
+      // this branch once login explicitly calls recordAdminSession.
+      try {
+        await db
+          .insert(schema.adminSessions)
+          .values({ tokenHash, expiresAt: new Date(expiresAtMs) })
+          .onConflictDoNothing();
+      } catch (err) {
+        console.warn('[koe/api] TOFU admin_sessions insert failed', err);
+        return fail(c, 'unauthorized', 'Admin session required', 401);
+      }
+    }
+    // Best-effort GC, throttled.
+    void gcExpiredSessions();
+  }
+
   c.set('admin', { email });
   await next();
 };

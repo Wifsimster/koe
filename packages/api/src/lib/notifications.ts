@@ -49,8 +49,19 @@ export function getResendFromEnv(): ResendLike | null {
  * env vars or the global cache between cases. Pass `null` to force
  * the no-op path; pass `undefined` to clear the cache so the next
  * call re-reads `RESEND_API_KEY`.
+ *
+ * Refuses to run in production. The export stays available so the
+ * unit-test harness can still call it under `NODE_ENV=test`, but a
+ * production process accidentally wired up to invoke it (e.g. an
+ * imported helper, or a build artifact that leaks the symbol) will
+ * throw rather than silently swap the live email client.
  */
 export function __setResendForTest(client: ResendLike | null | undefined): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '__setResendForTest must not be invoked in production — it is a unit-test seam.',
+    );
+  }
   cachedClient = client;
   warnedMissingFrom = false;
 }

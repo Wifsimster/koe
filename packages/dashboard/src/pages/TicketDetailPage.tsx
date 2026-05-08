@@ -3,7 +3,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft, Bug, Lightbulb, ShieldAlert } from 'lucide-react';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
-import type { AdminTicket, TicketEvent, TicketPatch } from '../api/client';
+import { AdminApiError, type AdminTicket, type TicketEvent, type TicketPatch } from '../api/client';
 import { INBOX_DEFAULT_SEARCH } from '../router';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -32,24 +32,25 @@ export function TicketDetailPage() {
 
   useEffect(() => {
     if (!activeKey) return;
-    let alive = true;
+    const controller = new AbortController();
     api
-      .listTickets(activeKey, { limit: 200 })
-      .then((page) => {
-        if (!alive) return;
-        const found = page.items.find((t) => t.id === id);
-        if (!found) {
+      .getTicket(activeKey, id, controller.signal)
+      .then((row) => {
+        if (controller.signal.aborted) return;
+        setError(null);
+        setTicket(row);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (err instanceof AdminApiError && err.code === 'not_found') {
           setError('Ticket not found in this project.');
           return;
         }
-        setTicket(found);
-      })
-      .catch((err) => {
-        if (!alive) return;
         setError(err instanceof Error ? err.message : 'Failed to load ticket');
       });
     return () => {
-      alive = false;
+      controller.abort();
     };
   }, [activeKey, api, id]);
 

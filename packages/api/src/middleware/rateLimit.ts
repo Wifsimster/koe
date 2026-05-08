@@ -181,12 +181,30 @@ export interface RateLimitOptions extends RateLimiterConfig {
  * Rate-limit middleware. Preserves the original call shape so existing
  * routes don't need to change; the underlying limiter is now
  * swappable via `opts.limiter`.
+ *
+ * If the key resolves to `UNKNOWN_IP_SENTINEL` (conninfo failed and no
+ * trusted proxy header), every client would otherwise collapse into one
+ * shared bucket — a DoS bypass. In production we **fail closed** with
+ * 500; in dev we warn-and-admit so the test surface keeps working
+ * without per-test conninfo plumbing.
  */
 export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
   const limiter = opts.limiter ?? createInMemoryRateLimiter(opts);
 
   return async (c, next) => {
-    const decision = await limiter.consume(opts.key(c));
+    const key = opts.key(c);
+    if (key.includes(UNKNOWN_IP_SENTINEL)) {
+      if (IS_PRODUCTION) {
+        console.error(
+          '[koe/api] rate-limit key resolved to unknown IP — failing closed in production',
+        );
+        return fail(c, 'internal_error', 'Unable to identify client', 500);
+      }
+      console.warn(
+        '[koe/api] rate-limit key resolved to unknown IP — admitting in dev (set TRUST_PROXY_HEADERS=true behind a proxy in prod)',
+      );
+    }
+    const decision = await limiter.consume(key);
     if (!decision.allowed) {
       c.header('Retry-After', String(decision.retryAfter));
       return fail(c, 'rate_limited', 'Too many requests', 429);
@@ -215,6 +233,32 @@ export function createRateLimiterFromEnv(config: RateLimiterConfig & { prefix?: 
 }
 
 /**
+ * Cached at module load — re-reading the env on every request let a
+ * runtime toggle slip past, and rate-limit decisions wrap every public
+ * route, so the env hit was already pure overhead. If you need to
+ * change it, restart the process.
+ */
+const PROXY_HEADERS_TRUSTED =
+  (process.env.TRUST_PROXY_HEADERS ?? 'false').toLowerCase() === 'true';
+
+const IS_PRODUCTION = (process.env.NODE_ENV ?? '').toLowerCase() === 'production';
+
+/**
+ * Sentinel used in two distinct cases:
+ * 1. Test/edge runtime where `getConnInfo` throws — non-node, no
+ *    socket peer to read.
+ * 2. Production-direct deploy (no proxy) where conninfo *did* return
+ *    nothing, which is unusual but not exploitable in dev.
+ *
+ * Exported so the middleware factory can detect it and decide whether
+ * to fail closed in production (where a global `'unknown'` bucket
+ * collapses every client into one bypass-able shared pool) or admit
+ * the request in dev (where matching that path keeps the test surface
+ * working).
+ */
+export const UNKNOWN_IP_SENTINEL = 'unknown';
+
+/**
  * Extracts the client IP for rate-limit keying.
  *
  * Proxy headers (`X-Forwarded-For`, `X-Real-IP`) are **only** honored when
@@ -224,9 +268,13 @@ export function createRateLimiterFromEnv(config: RateLimiterConfig & { prefix?: 
  * request — defeating the limiter. When untrusted, we read the socket
  * remote address via `@hono/node-server`'s conninfo helper, which cannot
  * be spoofed by the client.
+ *
+ * Returns `UNKNOWN_IP_SENTINEL` if no IP can be derived. Caller decides
+ * what to do with that — `rateLimit` middleware fails closed in prod
+ * and warns-then-admits in dev.
  */
 export function clientIp(c: Context): string {
-  if (proxyHeadersTrusted()) {
+  if (PROXY_HEADERS_TRUSTED) {
     const forwarded = c.req.header('x-forwarded-for');
     if (forwarded) return forwarded.split(',')[0]!.trim();
     const real = c.req.header('x-real-ip');
@@ -240,9 +288,5 @@ export function clientIp(c: Context): string {
     // conninfo isn't available on non-node runtimes (tests, edge); fall
     // through to the sentinel below.
   }
-  return 'unknown';
-}
-
-function proxyHeadersTrusted(): boolean {
-  return (process.env.TRUST_PROXY_HEADERS ?? 'false').toLowerCase() === 'true';
+  return UNKNOWN_IP_SENTINEL;
 }

@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -34,6 +35,13 @@ export interface AuthContextValue {
   setActiveProject: (key: string) => void;
   /** Re-fetch /me + /projects. Used after creating a project. */
   refresh: () => Promise<void>;
+  /**
+   * True when the most recent refresh hit a transient error (network
+   * down, 5xx) but the user is still considered authenticated. UI can
+   * choose to surface a soft warning; we never log the user out for a
+   * transient blip — that would interrupt active work.
+   */
+  transientError: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -52,12 +60,22 @@ export interface AuthProviderProps {
  */
 export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
   const [state, setState] = useState<AuthState>({ status: 'loading' });
+  const [transientError, setTransientError] = useState(false);
 
   const api = useMemo(() => new AdminApiClient({ baseUrl }), [baseUrl]);
 
+  // Single in-flight refresh — navigation away aborts the previous
+  // call so a slow /me doesn't clobber state after we've moved on.
+  const refreshControllerRef = useRef<AbortController | null>(null);
+
   const refresh = useCallback(async () => {
+    refreshControllerRef.current?.abort();
+    const controller = new AbortController();
+    refreshControllerRef.current = controller;
     try {
       const [me, projects] = await Promise.all([api.me(), api.listProjects()]);
+      if (controller.signal.aborted) return;
+      setTransientError(false);
       setState({
         status: 'authenticated',
         me,
@@ -65,12 +83,42 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
         activeProjectKey: pickActiveProject(projects),
       });
     } catch (err) {
-      if (err instanceof AdminApiError && err.status === 401) {
-        setState({ status: 'unauthenticated' });
-        return;
+      if (controller.signal.aborted) return;
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      // Only flip to `unauthenticated` on a real auth failure. A
+      // transient network blip or a 5xx must NOT log the user out —
+      // that would punish them for the server's bad day.
+      if (err instanceof AdminApiError) {
+        if (
+          err.status === 401 ||
+          err.code === 'unauthorized' ||
+          err.code === 'forbidden'
+        ) {
+          setTransientError(false);
+          setState({ status: 'unauthenticated' });
+          return;
+        }
+        if (err.code === 'network_error' || err.code === 'server_error') {
+          console.warn('[koe/dashboard] auth refresh transient error', err);
+          setTransientError(true);
+          // Preserve current state. If we were already authenticated,
+          // stay there. If we were `loading`, downgrade to
+          // `unauthenticated` so the login screen still shows up (a
+          // first-load network failure isn't recoverable without an
+          // explicit user action).
+          setState((prev) =>
+            prev.status === 'loading' ? { status: 'unauthenticated' } : prev,
+          );
+          return;
+        }
       }
       console.warn('[koe/dashboard] auth refresh failed', err);
+      setTransientError(false);
       setState({ status: 'unauthenticated' });
+    } finally {
+      if (refreshControllerRef.current === controller) {
+        refreshControllerRef.current = null;
+      }
     }
   }, [api]);
 
@@ -79,9 +127,19 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status]);
 
+  // Cancel any in-flight refresh on unmount so it doesn't fight a
+  // remount in development (StrictMode) or a fast re-render.
+  useEffect(() => {
+    return () => {
+      refreshControllerRef.current?.abort();
+      refreshControllerRef.current = null;
+    };
+  }, []);
+
   const login = useCallback<AuthContextValue['login']>(
     async (email, password) => {
       await api.loginWithPassword(email, password);
+      setTransientError(false);
       setState({ status: 'loading' });
     },
     [api],
@@ -89,6 +147,7 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
 
   const logout = useCallback<AuthContextValue['logout']>(async () => {
     await api.logout();
+    setTransientError(false);
     setState({ status: 'unauthenticated' });
   }, [api]);
 
@@ -105,8 +164,8 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ state, api, login, logout, setActiveProject, refresh }),
-    [state, api, login, logout, setActiveProject, refresh],
+    () => ({ state, api, login, logout, setActiveProject, refresh, transientError }),
+    [state, api, login, logout, setActiveProject, refresh, transientError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

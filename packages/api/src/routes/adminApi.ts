@@ -365,6 +365,31 @@ export function createAdminApiRoutes() {
     });
   });
 
+  /**
+   * Single-ticket lookup. Returns the same row shape used in the list
+   * endpoint's `items[]` so the dashboard can swap list-and-find for
+   * get-by-id without changing types. 404 when the ticket exists in
+   * another project (or doesn't exist at all) — never leak existence
+   * across projects.
+   */
+  api.get('/projects/:key/tickets/:id', resolveProject, async (c) => {
+    const project = c.get('project');
+    const id = c.req.param('id');
+
+    const [row] = await db
+      .select({ ticket: schema.tickets, voteCount: voteCountExpr })
+      .from(schema.tickets)
+      .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
+      .where(and(eq(schema.tickets.id, id), eq(schema.tickets.projectId, project.id)))
+      .groupBy(schema.tickets.id)
+      .limit(1);
+
+    if (!row) {
+      return fail(c, 'not_found', 'Ticket not found', 404);
+    }
+    return ok(c, { ...row.ticket, voteCount: row.voteCount });
+  });
+
   api.patch('/projects/:key/tickets/:id', resolveProject, async (c) => {
     const project = c.get('project');
     const id = c.req.param('id');
