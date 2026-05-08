@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { WidgetConfig, WidgetLocale } from '@koe/shared';
-import { DEFAULT_LOCALE } from '@koe/shared';
+import { detectBrowserLanguage, resolveLocale } from '@koe/shared';
 import { KoeApiClient } from '../api/client';
 
 interface KoeContextValue {
@@ -33,7 +33,10 @@ export function KoeProvider({ config, children }: KoeProviderProps) {
     [apiUrl, projectKey, userHash, identityToken],
   );
 
-  const locale = useMemo(() => mergeLocale(config.locale), [config.locale]);
+  const locale = useMemo(
+    () => mergeLocale(resolveLocale(config.language ?? detectBrowserLanguage()), config.locale),
+    [config.language, config.locale],
+  );
 
   const value = useMemo<KoeContextValue>(
     () => ({ config, locale, api }),
@@ -81,33 +84,33 @@ export function useKoe(): KoeContextValue {
   return ctx;
 }
 
-function mergeLocale(override?: Partial<WidgetLocale>): WidgetLocale {
-  if (!override) return DEFAULT_LOCALE;
+function mergeLocale(base: WidgetLocale, override?: Partial<WidgetLocale>): WidgetLocale {
+  if (!override) return base;
   return {
-    ...DEFAULT_LOCALE,
+    ...base,
     ...override,
     // Nested groups are deep-merged so hosts can override a single key
-    // (e.g. just `picker.bug`) without losing the rest of the defaults.
+    // (e.g. just `picker.bug`) without losing the rest of the base preset.
     picker: override.picker
-      ? { ...(DEFAULT_LOCALE.picker as NonNullable<WidgetLocale['picker']>), ...override.picker }
-      : DEFAULT_LOCALE.picker,
+      ? { ...(base.picker as NonNullable<WidgetLocale['picker']>), ...override.picker }
+      : base.picker,
     browse: override.browse
-      ? { ...(DEFAULT_LOCALE.browse as NonNullable<WidgetLocale['browse']>), ...override.browse }
-      : DEFAULT_LOCALE.browse,
+      ? { ...(base.browse as NonNullable<WidgetLocale['browse']>), ...override.browse }
+      : base.browse,
     myRequests: override.myRequests
       ? {
-          ...(DEFAULT_LOCALE.myRequests as NonNullable<WidgetLocale['myRequests']>),
+          ...(base.myRequests as NonNullable<WidgetLocale['myRequests']>),
           ...override.myRequests,
           status: {
-            ...(DEFAULT_LOCALE.myRequests as NonNullable<WidgetLocale['myRequests']>).status,
+            ...(base.myRequests as NonNullable<WidgetLocale['myRequests']>).status,
             ...(override.myRequests.status ?? {}),
           },
         }
-      : DEFAULT_LOCALE.myRequests,
-    tabs: { ...DEFAULT_LOCALE.tabs, ...(override.tabs ?? {}) },
-    bugForm: { ...DEFAULT_LOCALE.bugForm, ...(override.bugForm ?? {}) },
-    featureForm: { ...DEFAULT_LOCALE.featureForm, ...(override.featureForm ?? {}) },
-    chat: { ...DEFAULT_LOCALE.chat, ...(override.chat ?? {}) },
-    errors: { ...DEFAULT_LOCALE.errors, ...(override.errors ?? {}) },
+      : base.myRequests,
+    tabs: { ...base.tabs, ...(override.tabs ?? {}) },
+    bugForm: { ...base.bugForm, ...(override.bugForm ?? {}) },
+    featureForm: { ...base.featureForm, ...(override.featureForm ?? {}) },
+    chat: { ...base.chat, ...(override.chat ?? {}) },
+    errors: { ...base.errors, ...(override.errors ?? {}) },
   };
 }

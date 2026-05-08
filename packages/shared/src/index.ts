@@ -4,5 +4,6 @@ export * from './types/ticket';
 export * from './types/chat';
 export * from './types/widget';
 export * from './types/api';
+export * from './locales';
 export * from './metadata';
 export * from './validation';
