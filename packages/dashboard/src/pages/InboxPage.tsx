@@ -27,7 +27,7 @@ export function InboxPage() {
   const [tickets, setTickets] = useState<AdminTicket[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { kind, status, q } = inboxRoute.useSearch();
+  const { kind, status, q, sort } = inboxRoute.useSearch();
   const navigate = useNavigate();
   const patch = useCallback(
     (update: Partial<InboxSearch>, opts?: { replace?: boolean }) =>
@@ -55,34 +55,59 @@ export function InboxPage() {
     setProject(state.projects.find((p) => p.key === activeKey) ?? null);
   }, [activeKey, state]);
 
-  const loadTickets = useCallback(async () => {
-    if (!activeKey) return;
-    setError(null);
-    try {
-      const page = await api.listTickets(activeKey, {
-        kind: kind === 'all' ? undefined : kind,
-        status: status === 'all' ? undefined : status,
-        search: q ? q : undefined,
-        sort: kind === 'feature' ? 'votes' : undefined,
-      });
-      setTickets(page.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load tickets');
-    }
-  }, [activeKey, api, kind, status, q]);
+  const loadTickets = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!activeKey) return;
+      setError(null);
+      try {
+        // URL state defines render state — when the user ships `sort`
+        // in the search params, honour it. Fall back to the previous
+        // ad-hoc default (votes when filtering ideas) only when the
+        // URL doesn't carry an explicit choice.
+        const effectiveSort: 'recent' | 'votes' | undefined =
+          sort === 'votes' ? 'votes' : kind === 'feature' && sort !== 'recent' ? 'votes' : sort;
+        const page = await api.listTickets(
+          activeKey,
+          {
+            kind: kind === 'all' ? undefined : kind,
+            status: status === 'all' ? undefined : status,
+            search: q ? q : undefined,
+            sort: effectiveSort,
+          },
+          signal,
+        );
+        if (signal?.aborted) return;
+        setTickets(page.items);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (signal?.aborted) return;
+        setError(err instanceof Error ? err.message : 'Failed to load tickets');
+      }
+    },
+    [activeKey, api, kind, status, q, sort],
+  );
 
   useEffect(() => {
-    void loadTickets();
+    const controller = new AbortController();
+    void loadTickets(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [loadTickets]);
 
   useEffect(() => {
     setSelected(new Set());
     setBulkError(null);
-  }, [activeKey, kind, status, q]);
+  }, [activeKey, kind, status, q, sort]);
 
   const applyBulk = useCallback(
     async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
       if (!activeKey || selected.size === 0) return;
+      // Single-flight guard: the chip-level status `Select` and the
+      // confirm-dialog can both call applyBulk; while one PATCH is
+      // already in flight, drop subsequent invocations rather than
+      // double-firing.
+      if (bulkSubmitting) return;
       setBulkError(null);
       setBulkSubmitting(true);
       try {
@@ -95,18 +120,21 @@ export function InboxPage() {
         setBulkSubmitting(false);
       }
     },
-    [activeKey, api, selected, loadTickets],
+    [activeKey, api, selected, loadTickets, bulkSubmitting],
   );
 
   const requestBulkStatus = useCallback(
     (next: TicketStatus) => {
+      // Mirror the destructive-confirm gate: while a non-destructive
+      // bulk PATCH is in flight, ignore further requests.
+      if (bulkSubmitting) return;
       if (next === 'closed' || next === 'wont_fix') {
         setPendingBulk({ status: next, count: selected.size });
         return;
       }
       void applyBulk({ status: next });
     },
-    [applyBulk, selected.size],
+    [applyBulk, selected.size, bulkSubmitting],
   );
 
   const toggleSelected = (id: string) => {

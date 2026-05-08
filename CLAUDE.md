@@ -59,18 +59,17 @@ node --test packages/api/src/lib/identityToken.test.ts
 - `src/index.ts` : montage conditionnel. Les routes admin `/v1/admin/*` ne sont montees **que si** `ADMIN_AUTH_MODE` est defini (`password`, `oidc`, ou `dev-session`). Sans cette var, l'API admin reste off — c'est le defaut sur.
 - `src/bin/` : entrypoints tsup (`serve.ts`, `migrate.ts`, `bootstrap.ts`, `hash-password.ts`, `rotate-secrets.ts`). L'image Docker expose `node dist/serve.js`, `dist/migrate.js`, `dist/bootstrap.js`.
 - `src/routes/` : `widget.ts` (public), `adminApi.ts` (JSON admin), `admin.ts` (pages HTML), `passwordAuth.ts` (login email+password), `health.ts`.
-- `src/middleware/` : `project.ts`, `identity.ts` (HMAC contributeurs), `cors.ts` (dynamique par projet), `rateLimit.ts`, `adminAuth.ts` (session cookie signe + garde-fous role). Pour toute route admin qui mute un ticket, toujours passer par `requireAdminSession`, `requireProjectMember`, `requireProjectWriter`, `requireProjectOwner` — ne jamais deduire l'autorisation de la seule session.
+- `src/middleware/` : `project.ts`, `identity.ts` (HMAC contributeurs), `cors.ts` (per-project, resolu via `X-Koe-Project-Key`), `rateLimit.ts`, `adminAuth.ts` (cookie HMAC + lookup `admin_sessions`). Le produit est **single-admin** : toute route admin passe par `requireAdmin`, et les routes scopees a un projet ajoutent `resolveProject`. Il n'y a pas de middleware `requireProjectMember/Writer/Owner` — ces roles n'existent pas dans le code (trimmes en migrations 0008/0009).
 - `src/db/` : `schema.ts` (modele central), `drizzle/` contient les migrations versionnees. Regenerer + commiter la migration a chaque change de schema.
 - `src/lib/` : `identityToken.ts` (token v2), `secretStore.ts` (lecture via `getSecretStoreFromEnv()` si `KOE_SECRET_KEYS` est actif), `notifications.ts` (Resend, envoi fire-and-forget a chaque nouveau ticket widget).
 - Enveloppe JSON commune : toujours utiliser `ok()` et `fail()`. Valider toute entree externe avec Zod pres de la route.
 
-### Auth admin — trois modes
+### Auth admin — single-admin via env
 
-- `password` : table `admin_users` (hash argon2id), login via `passwordAuth.ts`. Creer un utilisateur via CLI `admin-user`.
-- `oidc` : `openid-client` contre n'importe quel provider OIDC. Vars `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `OIDC_DASHBOARD_URL`, `OIDC_COOKIE_SECRET`, `OIDC_SCOPES`.
+- Single-admin : `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` (argon2id) en env. Login via `passwordAuth.ts`. Pas de table `admin_users`, pas de CLI de creation d'utilisateur. Hash genere via `pnpm --filter @koe/api hash-password '...'`.
 - `dev-session` : tokens bearer mintes via CLI `admin-session`. **L'API refuse de demarrer en production avec ce mode.**
-- Sessions stockees en base (`admin_sessions`) sous forme de hash SHA-256 — un dump DB ne fuite pas de credentials actifs.
-- Roles par projet : `owner` / `member` / `viewer` (pas un seul admin global ; le produit n'est plus mono-admin).
+- Sessions DB-backed : cookie HMAC envelope + lookup SHA-256 dans `admin_sessions`. Le login fait `recordAdminSession`, le logout fait `revokeAdminSession`. Un dump DB ne fuite pas de credentials actifs, et le logout invalide reellement la session cote serveur. Branche TOFU dans `requireAdmin` admet une fois un cookie HMAC-valide jamais vu — utile pour les sessions pre-existantes apres deploy de la migration 0011.
+- OIDC est mentionne dans le code mais n'est pas active dans la config actuelle ; le flux principal est password.
 
 ### Dashboard et CORS
 
@@ -84,7 +83,7 @@ Les mutations admin doivent emettre un evenement `admin_ticket_events` dans la *
 
 - `src/lib/notifications.ts` expose `notifyNewTicket(row, project)`. Client Resend lazy-init via `getResendFromEnv()` : sans `RESEND_API_KEY`, retourne `null` et `notifyNewTicket` no-op silencieusement (log une fois au demarrage).
 - Appele en fire-and-forget apres chaque insert reussi dans `routes/widget.ts` (bugs + features). **Jamais** `await` : le widget ne doit pas dependre de la latence/dispo de Resend. Toute erreur est logguee et swallowed.
-- Destinataire resolu dans cet ordre : `NOTIFY_OWNER_EMAIL` > `ADMIN_EMAIL` > skip. Adapte a un produit self-hosted mono-fondateur. Quand les tables `admin_users` / `project_members` existeront, remplacer le resolver par un lookup `role='owner'` par projet (signature `notifyNewTicket(row, project)` deja prete).
+- Destinataire resolu dans cet ordre : `NOTIFY_OWNER_EMAIL` > `ADMIN_EMAIL` > skip. Adapte au modele single-admin du produit. La signature `notifyNewTicket(row, project)` prend deja le projet : si le produit reintroduit un jour des roles par projet, le resolver pourra basculer sur un lookup `role='owner'` sans changer le call site.
 - Expediteur : `RESEND_FROM_EMAIL` (domaine verifie dans Resend). Optionnel : `DASHBOARD_PUBLIC_URL` pour inclure un lien `/admin/tickets/:id` dans l'email.
 - Tests : `src/lib/notifications.test.ts` (node --test) couvre no-op sans cle, happy path avec fake client injecte (`__setResendForTest`), fallback `ADMIN_EMAIL`, et resilience quand `send()` throw.
 

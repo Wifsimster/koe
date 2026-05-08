@@ -1,17 +1,23 @@
 import { Hono } from 'hono';
-import { deleteCookie, setCookie } from 'hono/cookie';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { ok, fail } from '../lib/response';
 import { loginSchema } from '../lib/schemas';
 import { parseJsonBody } from '../lib/validation';
 import { hashPassword, verifyPassword } from '../lib/password';
-import { ADMIN_COOKIE_NAME, mintSessionCookie } from '../middleware/adminAuth';
+import {
+  ADMIN_COOKIE_NAME,
+  mintSessionCookie,
+  recordAdminSession,
+  revokeAdminSession,
+} from '../middleware/adminAuth';
 import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rateLimit';
 
 /**
  * Login routes for the single admin. Mounted at `/v1/admin/auth/*`.
  *
- *   POST /login  → verifies ADMIN_EMAIL + ADMIN_PASSWORD_HASH, sets cookie
- *   POST /logout → clears cookie (stateless, no server-side revoke)
+ *   POST /login  → verifies ADMIN_EMAIL + ADMIN_PASSWORD_HASH, sets cookie,
+ *                  records the session in `admin_sessions` (DB-backed revoke)
+ *   POST /logout → clears cookie and deletes the matching `admin_sessions` row
  *
  * Credentials live in env vars only — no admin_users table. Rotating
  * the password is an env change + redeploy; rotating the session
@@ -24,16 +30,26 @@ export interface PasswordAuthConfig {
 }
 
 /**
- * Hashed form of a sentinel value, precomputed at module load so the
- * login endpoint's response time doesn't reveal whether the email
- * matched the admin. A lazy first-call compute would make the first
- * non-admin-email request measurably slower than the admin-email path;
- * warming the promise here makes both paths pay the same cost.
+ * Hashed form of a sentinel value, used so the login endpoint's
+ * response time doesn't reveal whether the email matched the admin.
+ *
+ * Lazy singleton: we used to kick off `hashPassword(...)` at module
+ * load, but a synchronous throw from `hashPassword` (native binding
+ * misload, missing wasm fallback, etc.) would crash the whole
+ * `passwordAuth` module import — which in turn cascades into the
+ * `/v1/admin/auth/*` mount and takes down the entire admin surface
+ * before the first request even arrives. Deferring the compute to the
+ * first login attempt isolates the failure mode to a single request,
+ * with a clean 401/500 path, and still amortises the cost across
+ * subsequent attempts via the cached promise.
  */
-const dummyHashPromise: Promise<string> = hashPassword(
-  'koe-login-dummy-' + Math.random().toString(36),
-);
+let dummyHashPromise: Promise<string> | null = null;
 function getDummyHash(): Promise<string> {
+  if (dummyHashPromise) return dummyHashPromise;
+  // Cache the promise (not the resolved value) so concurrent first
+  // requests share one argon2 invocation. Random salt input ensures
+  // the dummy hash isn't a stable target across deployments.
+  dummyHashPromise = hashPassword('koe-login-dummy-' + Math.random().toString(36));
   return dummyHashPromise;
 }
 
@@ -76,6 +92,7 @@ export function createAuthRoutes(cfg: PasswordAuthConfig): Hono {
 
     const expiresAtMs = Date.now() + cfg.sessionTtlDays * 24 * 60 * 60 * 1000;
     const cookieValue = mintSessionCookie(expiresAtMs);
+    await recordAdminSession(cookieValue, expiresAtMs);
 
     setCookie(c, ADMIN_COOKIE_NAME, cookieValue, {
       httpOnly: true,
@@ -89,6 +106,10 @@ export function createAuthRoutes(cfg: PasswordAuthConfig): Hono {
   });
 
   app.post('/logout', async (c) => {
+    const existing = getCookie(c, ADMIN_COOKIE_NAME);
+    if (existing) {
+      await revokeAdminSession(existing);
+    }
     deleteCookie(c, ADMIN_COOKIE_NAME, { path: '/', secure: cfg.secureCookies });
     return ok(c, { ok: true });
   });

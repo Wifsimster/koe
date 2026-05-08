@@ -139,11 +139,15 @@ export class AdminApiClient {
     return this.get<AdminProject[]>('/projects');
   }
 
-  workspaceOverview(): Promise<WorkspaceOverview> {
-    return this.get<WorkspaceOverview>('/overview');
+  workspaceOverview(signal?: AbortSignal): Promise<WorkspaceOverview> {
+    return this.get<WorkspaceOverview>('/overview', signal);
   }
 
-  listTickets(projectKey: string, query: TicketListQuery = {}): Promise<TicketListPage> {
+  listTickets(
+    projectKey: string,
+    query: TicketListQuery = {},
+    signal?: AbortSignal,
+  ): Promise<TicketListPage> {
     const params = new URLSearchParams();
     if (query.kind) params.set('kind', query.kind);
     if (query.status) params.set('status', query.status);
@@ -156,6 +160,19 @@ export class AdminApiClient {
     const qs = params.toString();
     return this.get<TicketListPage>(
       `/projects/${encodeURIComponent(projectKey)}/tickets${qs ? `?${qs}` : ''}`,
+      signal,
+    );
+  }
+
+  /**
+   * Single-ticket fetch. Used by the detail page so it doesn't have to
+   * page through the list to find an old ticket. 404 surfaces as an
+   * `AdminApiError` with code `not_found`.
+   */
+  getTicket(projectKey: string, id: string, signal?: AbortSignal): Promise<AdminTicket> {
+    return this.get<AdminTicket>(
+      `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}`,
+      signal,
     );
   }
 
@@ -215,22 +232,60 @@ export class AdminApiClient {
     });
   }
 
-  private get<T>(path: string): Promise<T> {
-    return this.send<T>('GET', path);
+  private get<T>(path: string, signal?: AbortSignal): Promise<T> {
+    return this.send<T>('GET', path, undefined, signal);
   }
 
-  private async send<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(this.opts.baseUrl + path, {
-      method,
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+  private async send<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetch(this.opts.baseUrl + path, {
+        method,
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal,
+      });
+    } catch (err) {
+      // True fetch rejection — DNS failure, offline, CORS preflight
+      // bounce, AbortError, etc. Do NOT collapse into auth failure.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
+      const message =
+        err instanceof Error && err.message ? err.message : `Network error talking to ${path}`;
+      throw new AdminApiError(0, 'network_error', message);
+    }
+
+    // 204 No Content / explicitly empty body — treat as a void OK so
+    // callers don't blow up trying to parse an empty buffer.
+    if (res.status === 204) {
+      return null as T;
+    }
+
+    const text = await res.text();
+    if (text.length === 0) {
+      if (res.ok) return null as T;
+      throw new AdminApiError(
+        res.status,
+        res.status >= 500 ? 'server_error' : 'http_error',
+        `Empty response (${res.status}) from ${path}`,
+      );
+    }
+
     let payload: ApiResponse<T>;
     try {
-      payload = (await res.json()) as ApiResponse<T>;
+      payload = JSON.parse(text) as ApiResponse<T>;
     } catch {
-      throw new AdminApiError(res.status, 'malformed_response', `Non-JSON from ${path}`);
+      // 5xx that didn't even render JSON (HTML error page from a proxy
+      // or origin) is a server-side problem, not a malformed-API bug.
+      const code = res.status >= 500 ? 'server_error' : 'malformed_response';
+      throw new AdminApiError(res.status, code, `Non-JSON from ${path}`);
     }
     if (!payload.ok) {
       throw new AdminApiError(res.status, payload.error.code, payload.error.message);

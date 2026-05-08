@@ -8,7 +8,15 @@ const pkg = JSON.parse(
   readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8'),
 ) as { version: string };
 
+// Default to `/admin/` because the production deploy embeds the SPA
+// under `/admin/` of the API server. The Dockerfile already passes
+// `--base=/admin/`, but a local `pnpm --filter @koe/dashboard build`
+// without overrides would otherwise emit assets at `/`. Override with
+// `BASE_URL=/` for standalone dev or to host at the root.
+const baseUrl = process.env.BASE_URL ?? '/admin/';
+
 export default defineConfig({
+  base: baseUrl,
   plugins: [react()],
   resolve: {
     alias: {

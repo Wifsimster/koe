@@ -24,10 +24,44 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootGate,
 });
 
-const loginRoute = createRoute({
+export interface LoginSearch {
+  redirectTo?: string;
+}
+
+/**
+ * Same-origin guard for the post-login `redirectTo`. The auth gate
+ * encodes the original pathname in the `/login?redirectTo=...` search
+ * param; an attacker who manages to land a victim on
+ * `/login?redirectTo=https://evil.com` must NOT bounce them off-site.
+ *
+ * The accepted shape is a relative path on this same origin: starts
+ * with a single `/`, never starts with `//` (protocol-relative URL),
+ * never embeds a scheme-like prefix (`http:`, `javascript:`, `data:`,
+ * etc). Anything else collapses to the inbox default.
+ */
+function sanitiseRedirectTo(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  if (raw.length === 0 || raw.length > 2048) return undefined;
+  // Must be a relative same-origin path.
+  if (!raw.startsWith('/')) return undefined;
+  // `//foo` and `/\foo` are protocol-relative URLs in some browsers.
+  if (raw.startsWith('//') || raw.startsWith('/\\')) return undefined;
+  // Catch any embedded scheme like `/javascript:` (rare) or accidental
+  // double-slashes after URL decoding.
+  if (/^\/+[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return undefined;
+  // Cheap defence-in-depth: reject any whitespace / control chars.
+  if (/\s/.test(raw)) return undefined;
+  return raw;
+}
+
+export const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
   component: LoginPage,
+  validateSearch: (raw: Record<string, unknown>): LoginSearch => {
+    const redirectTo = sanitiseRedirectTo(raw.redirectTo);
+    return redirectTo ? { redirectTo } : {};
+  },
 });
 
 const authenticatedLayoutRoute = createRoute({
@@ -108,6 +142,7 @@ const ticketDetailRoute = createRoute({
   getParentRoute: () => authenticatedLayoutRoute,
   path: '/tickets/$id',
   component: TicketDetailPage,
+  errorComponent: RouteErrorView,
 });
 
 const onboardingRoute = createRoute({
@@ -150,36 +185,43 @@ function AuthenticatedLayout() {
     }
   }, [state.status, navigate, pathname]);
 
+  // Pull the specific fields the effects below depend on. Depending on
+  // the whole `state` object would re-run them on every setState (the
+  // reference always changes) — including non-structural transitions
+  // like `setActiveProject`, which has nothing to do with redirects.
+  const authStatus = state.status;
+  const projectCount = state.status === 'authenticated' ? state.projects.length : 0;
+
   // Mid-session empty-projects → /onboarding (mirrors beforeLoad).
   useEffect(() => {
     if (
-      state.status === 'authenticated' &&
-      state.projects.length === 0 &&
+      authStatus === 'authenticated' &&
+      projectCount === 0 &&
       pathname !== '/onboarding'
     ) {
       void navigate({ to: '/onboarding' });
     }
-  }, [state, navigate, pathname]);
+  }, [authStatus, projectCount, navigate, pathname]);
 
   // Multi-project landing — fires once per auth transition.
   const didLandingRef = useRef(false);
   useEffect(() => {
-    if (state.status === 'unauthenticated') {
+    if (authStatus === 'unauthenticated') {
       didLandingRef.current = false;
       return;
     }
     if (
-      state.status === 'authenticated' &&
+      authStatus === 'authenticated' &&
       !didLandingRef.current &&
-      state.projects.length >= 2 &&
+      projectCount >= 2 &&
       pathname === '/'
     ) {
       didLandingRef.current = true;
       void navigate({ to: '/overview' });
-    } else if (state.status === 'authenticated') {
+    } else if (authStatus === 'authenticated') {
       didLandingRef.current = true;
     }
-  }, [state, pathname, navigate]);
+  }, [authStatus, projectCount, pathname, navigate]);
 
   if (state.status !== 'authenticated') {
     return <LoadingScreen />;
@@ -225,6 +267,56 @@ function LoadingScreen(): ReactNode {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background text-sm text-muted-foreground">
       Loading…
+    </div>
+  );
+}
+
+/**
+ * Catch-all for unknown routes. Without it, an unrecognised URL would
+ * render the route's empty children — i.e. a blank page — instead of
+ * something the operator can act on.
+ */
+export function NotFoundView(): ReactNode {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background p-6 text-center">
+      <div className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
+        Kōe · 404
+      </div>
+      <h1 className="font-heading text-3xl tracking-tight">Page not found</h1>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        That URL doesn't match anything in the dashboard.
+      </p>
+      <a
+        href="/"
+        className="text-sm underline underline-offset-4 hover:text-foreground"
+      >
+        Back to inbox
+      </a>
+    </div>
+  );
+}
+
+/**
+ * Top-level boundary for thrown loaders / route components. Without
+ * one, a thrown route loader would surface as a blank screen.
+ */
+export function RouteErrorView({ error }: { error?: unknown }): ReactNode {
+  const message =
+    error instanceof Error && error.message
+      ? error.message
+      : 'Something went wrong. Try reloading.';
+  return (
+    <div className="flex min-h-[40vh] flex-col items-start justify-center gap-3 p-6">
+      <div className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
+        Kōe · Error
+      </div>
+      <h2 className="font-heading text-2xl tracking-tight">Couldn't load this page</h2>
+      <p
+        role="alert"
+        className="max-w-prose border-l-2 border-destructive/70 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+      >
+        {message}
+      </p>
     </div>
   );
 }

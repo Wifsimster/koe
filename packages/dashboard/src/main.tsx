@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
-import { routeTree, type RouterContext } from './router';
+import { NotFoundView, RouteErrorView, routeTree, type RouterContext } from './router';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { ThemeProvider } from './components/theme-provider';
 import './styles.css';
@@ -18,6 +18,11 @@ const router = createRouter({
   routeTree,
   basepath,
   context: undefined as unknown as RouterContext,
+  // Without these, an unknown URL or a thrown route loader/component
+  // would render a blank page rather than something the operator can
+  // recover from.
+  defaultNotFoundComponent: NotFoundView,
+  defaultErrorComponent: RouteErrorView,
 });
 
 declare module '@tanstack/react-router' {

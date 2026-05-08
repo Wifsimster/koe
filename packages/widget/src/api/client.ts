@@ -183,9 +183,36 @@ export class KoeApiClient {
 
   private async unwrap<T>(res: Response): Promise<T> {
     let raw: unknown;
+    let parseFailed = false;
     try {
       raw = await res.json();
     } catch {
+      parseFailed = true;
+    }
+    // Reverse proxies, captive portals, CDN error pages, and rate
+    // limiters very often return HTML or an empty body on the same
+    // status codes the API would otherwise return JSON for. Map the
+    // common ones to typed codes the UI can render meaningfully —
+    // otherwise every 429 reads as the generic `invalid_response` code
+    // and the user sees a blank "something went wrong" toast.
+    if (parseFailed) {
+      if (res.status === 429) {
+        const retryAfter = parseInt(res.headers.get('Retry-After') ?? '0', 10);
+        throw new KoeApiError(
+          'rate_limited',
+          'Too many requests — please wait a moment and try again.',
+          { retryAfter: Number.isFinite(retryAfter) ? retryAfter : 0 },
+        );
+      }
+      if (res.status === 401 || res.status === 403) {
+        throw new KoeApiError('unauthorized', 'You are not authorized to make this request.');
+      }
+      if (res.status >= 500) {
+        throw new KoeApiError(
+          'server_error',
+          `Koe API server error (status ${res.status}${res.statusText ? ` ${res.statusText}` : ''}).`,
+        );
+      }
       throw new KoeApiError(
         'invalid_response',
         `Koe API returned non-JSON response (status ${res.status}${res.statusText ? ` ${res.statusText}` : ''})`,
@@ -203,12 +230,26 @@ export class KoeApiClient {
   }
 }
 
+/**
+ * Optional structured detail attached to a `KoeApiError`. Keeping this
+ * narrow means callers don't have to switch on a wide union — a
+ * `rate_limited` error carries `retryAfter` (seconds), other codes carry
+ * nothing.
+ */
+export interface KoeApiErrorDetail {
+  /** Seconds the client should wait before retrying. Only set on `rate_limited`. */
+  retryAfter?: number;
+}
+
 export class KoeApiError extends Error {
+  public readonly detail: KoeApiErrorDetail;
   constructor(
     public readonly code: string,
     message: string,
+    detail: KoeApiErrorDetail = {},
   ) {
     super(message);
     this.name = 'KoeApiError';
+    this.detail = detail;
   }
 }

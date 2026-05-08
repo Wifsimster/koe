@@ -263,3 +263,30 @@ export const adminTicketEventsRelations = relations(adminTicketEvents, ({ one })
     references: [tickets.id],
   }),
 }));
+
+/**
+ * Server-side admin session registry. Each row pairs the SHA-256 hash of
+ * a session cookie value with its expiry. The plaintext cookie itself is
+ * never stored — a DB dump never leaks an active credential.
+ *
+ * Lookup is by `tokenHash` (primary key). Revocation is a row delete.
+ * Expired rows are filtered out at read time and can be GC'd by a
+ * periodic sweep without affecting correctness.
+ *
+ * Why hash-store rather than stateless HMAC: lets the admin invalidate
+ * a session without rotating `ADMIN_SESSION_SECRET` (which would kick
+ * every browser at once). One-row delete = "kick this device."
+ */
+export const adminSessions = pgTable(
+  'admin_sessions',
+  {
+    /** SHA-256(cookieValue), hex-encoded. Primary key. */
+    tokenHash: text('token_hash').primaryKey(),
+    /** Mirrors the cookie's expiry — used to filter at lookup. */
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    expiresAtIdx: index('admin_sessions_expires_at_idx').on(t.expiresAt),
+  }),
+);

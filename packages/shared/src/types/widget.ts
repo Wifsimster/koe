@@ -36,8 +36,16 @@ export interface WidgetConfig {
    * (takes precedence over `userHash` when both are set).
    */
   identityToken?: string;
-  /** API base URL. Defaults to https://api.koe.dev */
-  apiUrl?: string;
+  /**
+   * API base URL of your self-hosted Koe service (e.g.
+   * `https://api.support.acme.com`). Required: the widget refuses to
+   * mount without it because identity headers would otherwise be sent
+   * to a misconfigured endpoint on first submission. The standalone
+   * IIFE entrypoint (`window.Koe.init`) defaults this to
+   * `window.location.origin` when the host omits it; library consumers
+   * (`<KoeWidget />`) must pass it explicitly.
+   */
+  apiUrl: string;
   position?: WidgetPosition;
   theme?: WidgetTheme;
   /** Features to enable. Defaults to all three. */

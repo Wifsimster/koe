@@ -120,6 +120,19 @@ export const attachVerifier: MiddlewareHandler<{
         nonces: nonceCache,
       });
       if (!result.ok) {
+        // Granular cause goes to logs only — clients learn just the
+        // collapsed `reason` (e.g. signature_mismatch covers
+        // unknown_kid / revoked_kid / bad-mac) so probing the endpoint
+        // can't fingerprint kid validity.
+        console.warn(
+          '[koe/api] identity token rejected',
+          JSON.stringify({
+            projectId: project.id,
+            reporterId,
+            reason: result.reason,
+            internalReason: result.internalReason,
+          }),
+        );
         return { ok: false, reason: `Identity token rejected: ${result.reason}` };
       }
       return { ok: true, verified: true };

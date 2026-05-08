@@ -1,13 +1,24 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
-import { INBOX_DEFAULT_SEARCH } from '../router';
+import { AdminApiError } from '../api/client';
+import { INBOX_DEFAULT_SEARCH, loginRoute } from '../router';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 
+const GENERIC_AUTH_ERROR = 'Invalid email or password.';
+const AUTH_ERROR_CODES = new Set([
+  'unauthorized',
+  'forbidden',
+  'invalid_credentials',
+  'not_found',
+  'validation_failed',
+]);
+
 export function LoginPage() {
   const { login, state } = useAuth();
+  const { redirectTo } = loginRoute.useSearch();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -22,12 +33,23 @@ export function LoginPage() {
   useEffect(() => {
     if (pendingNavRef.current && state.status === 'authenticated') {
       pendingNavRef.current = false;
-      void navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
+      // `redirectTo` was validated by `loginRoute.validateSearch` —
+      // it's guaranteed same-origin relative or undefined here. Falling
+      // back to `/` lets the existing landing logic (multi-project
+      // overview, single-project inbox) route the user.
+      if (redirectTo) {
+        void navigate({ to: redirectTo });
+      } else {
+        void navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
+      }
     }
-  }, [state.status, navigate]);
+  }, [state.status, navigate, redirectTo]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    // Hard early-return: while a previous submit is still in flight,
+    // ignore the second click (or Enter keypress).
+    if (submitting || pendingNavRef.current) return;
     setError(null);
     if (!email.trim() || !password) {
       setError('Email and password are required.');
@@ -38,11 +60,7 @@ export function LoginPage() {
       await login(email.trim(), password);
       pendingNavRef.current = true;
     } catch (err) {
-      setError(
-        err instanceof Error && err.message
-          ? err.message
-          : 'Sign-in failed. Check your credentials and try again.',
-      );
+      setError(formatLoginError(err));
     } finally {
       setSubmitting(false);
     }
@@ -99,6 +117,34 @@ export function LoginPage() {
       </form>
     </Shell>
   );
+}
+
+/**
+ * Map auth-related error codes to a single opaque string. The server
+ * may distinguish "no such email" from "wrong password" for its own
+ * logs, but echoing those distinctions to the browser would let an
+ * attacker enumerate which emails have an account. Network/server
+ * problems still surface verbatim so the operator can see what's
+ * broken.
+ */
+function formatLoginError(err: unknown): string {
+  if (err instanceof AdminApiError) {
+    if (AUTH_ERROR_CODES.has(err.code)) return GENERIC_AUTH_ERROR;
+    if (err.code === 'rate_limited') {
+      return err.message || 'Too many attempts. Please wait and try again.';
+    }
+    if (err.code === 'network_error') {
+      return err.message || 'Network error. Check your connection and try again.';
+    }
+    if (err.code === 'server_error') {
+      return err.message || 'The server is having trouble. Try again in a moment.';
+    }
+    // Unknown / non-auth: echo verbatim — useful for legitimate
+    // unexpected failures.
+    return err.message || GENERIC_AUTH_ERROR;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return 'Sign-in failed. Check your credentials and try again.';
 }
 
 function Shell({

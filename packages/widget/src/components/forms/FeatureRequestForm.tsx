@@ -76,6 +76,10 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    // Bail on double-submit (typical: two clicks on the primary button)
+    // before we set up a second AbortController and produce a duplicate
+    // ticket on the server.
+    if (submitting) return;
     setApiError(null);
 
     const nextErrors: Partial<Record<keyof FormState, string>> = {};
@@ -86,6 +90,11 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
+    // Abort any previous in-flight request before assigning the new one
+    // so we never leak a stale fetch — the early-return on `submitting`
+    // covers normal cases but a controller can linger after an async
+    // throw during a prior submit.
+    controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     setSubmitting(true);
@@ -107,8 +116,25 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
       setSuccess(true);
     } catch (err) {
       if (controller.signal.aborted) return;
-      if (err instanceof KoeApiError && err.code === 'network_error') {
-        setApiError(locale.errors.network);
+      if (err instanceof KoeApiError) {
+        if (err.code === 'network_error') {
+          setApiError(locale.errors.network);
+        } else if (err.code === 'rate_limited') {
+          // Surface the retry hint when the server provides one so the
+          // user knows the app isn't broken — just throttled.
+          const retryAfter = err.detail.retryAfter ?? 0;
+          setApiError(
+            retryAfter > 0
+              ? `Too many requests — please retry in ${retryAfter}s.`
+              : 'Too many requests — please wait a moment and try again.',
+          );
+        } else if (err.code === 'unauthorized') {
+          setApiError('Your session expired — please refresh the page and try again.');
+        } else if (err.code === 'server_error') {
+          setApiError('Koe is having trouble right now. Please try again in a minute.');
+        } else {
+          setApiError(err.message || locale.errors.generic);
+        }
       } else {
         setApiError(err instanceof Error ? err.message : locale.errors.generic);
       }

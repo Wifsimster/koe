@@ -80,6 +80,75 @@ export const myRequestsQuerySchema = z.object({
 /*  Admin — project + ticket mutations                                        */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Validates a single CORS origin entry. Must look like
+ * `scheme://host[:port]` with no path/query/fragment, and the scheme
+ * must be `http` or `https`. Rejects:
+ *
+ * - `*` (wildcard) — origin allowlists must be explicit; the
+ *   permissive behaviour is `allowedOrigins: []`, not a star entry.
+ * - `file://` — never a real cross-origin browser context for our
+ *   widget, and a footgun (`Origin: null` from sandboxed iframes).
+ * - Any entry with a trailing path / query / fragment — browsers
+ *   never send those in `Origin`, so storing them silently breaks
+ *   the per-project equality check at request time.
+ */
+export const allowedOriginSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(512)
+  .refine((v) => v !== '*', 'wildcard "*" is not allowed; leave allowedOrigins empty for permissive')
+  .refine((v) => !/^file:\/\//i.test(v), 'file:// origins are not allowed')
+  .superRefine((v, ctx) => {
+    let url: URL;
+    try {
+      url = new URL(v);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'must be a valid origin URL like https://example.com',
+      });
+      return;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'origin scheme must be http or https',
+      });
+      return;
+    }
+    if (url.username || url.password) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'origin must not include credentials',
+      });
+      return;
+    }
+    // `URL` parses an entry with no explicit path as `pathname === '/'`.
+    // Anything richer than that — query, fragment, or a real path
+    // segment — silently breaks the equality check we run against the
+    // browser's `Origin` header (which never contains them).
+    if ((url.pathname && url.pathname !== '/') || url.search || url.hash) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'origin must not include a path, query, or fragment',
+      });
+      return;
+    }
+    // Refuse trailing-slash inputs as well: the browser sends
+    // `Origin: https://x.example` (no slash), so storing
+    // `https://x.example/` would never match. Catching the shape at
+    // validation time avoids a confusing silent allowlist miss later.
+    if (v.endsWith('/')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'origin must not have a trailing slash',
+      });
+      return;
+    }
+  });
+
 export const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
   key: z
@@ -88,7 +157,7 @@ export const createProjectSchema = z.object({
     .min(1)
     .max(64)
     .regex(/^[a-z0-9-]+$/, 'key must match /^[a-z0-9-]+$/'),
-  allowedOrigins: z.array(z.string().trim().min(1).max(512)).max(20).optional(),
+  allowedOrigins: z.array(allowedOriginSchema).max(20).optional(),
   requireIdentityVerification: z.boolean().optional(),
 });
 

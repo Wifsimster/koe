@@ -80,8 +80,17 @@ export function OnboardingPage() {
     }
   };
 
+  const [secretSaved, setSecretSaved] = useState(false);
+  const [entering, setEntering] = useState(false);
+
   const enterDashboard = async () => {
-    await navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
+    if (entering) return;
+    setEntering(true);
+    try {
+      await navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
+    } finally {
+      setEntering(false);
+    }
   };
 
   if (created) {
@@ -132,13 +141,28 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
             </Field>
           </div>
 
+          <label className="flex items-start gap-3">
+            <Checkbox
+              id="secret-saved"
+              checked={secretSaved}
+              onCheckedChange={(v) => setSecretSaved(v === true)}
+              className="mt-0.5"
+            />
+            <span className="text-sm">
+              <span className="block font-medium">I've saved the identity secret</span>
+              <span className="block text-[11px] text-muted-foreground">
+                It's encrypted at rest and can't be shown again — only rotated.
+              </span>
+            </span>
+          </label>
           <Button
             type="button"
             size="lg"
             className="w-full"
+            disabled={!secretSaved || entering}
             onClick={() => void enterDashboard()}
           >
-            I saved everything — enter the dashboard
+            {entering ? 'Opening…' : 'Enter the dashboard'}
           </Button>
         </div>
       </Shell>

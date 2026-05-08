@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useKoe } from '../context/KoeContext';
 import { useVisualViewport } from '../hooks/useVisualViewport';
 import { BugReportForm } from './forms/BugReportForm';
@@ -43,7 +43,30 @@ export function Panel({ onClose }: PanelProps) {
   // Track visual viewport so the panel body follows the keyboard on
   // mobile. Writes a CSS variable; no React re-render per resize.
   const shellRef = useRef<HTMLDivElement>(null);
-  useVisualViewport(shellRef.current);
+  useVisualViewport(shellRef);
+
+  // Record the element that had focus before the dialog opened so we
+  // can hand focus back to it on close. Without this, a keyboard user
+  // who opened the panel with Enter on the launcher would be dumped at
+  // <body> when the panel closes — focus would have nowhere to land
+  // because the panel itself unmounts.
+  const lastFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const previouslyFocused = (typeof document !== 'undefined' ? document.activeElement : null) as
+      | HTMLElement
+      | null;
+    lastFocusRef.current = previouslyFocused;
+    return () => {
+      // Guard against the previously-focused node being detached (host
+      // app removed it while the panel was open) — `.focus()` on an
+      // orphan element silently no-ops in modern browsers but
+      // `isConnected` keeps us future-proof.
+      const el = lastFocusRef.current;
+      if (el && typeof el.focus === 'function' && el.isConnected) {
+        el.focus();
+      }
+    };
+  }, []);
 
   const back = locale.back ?? 'Back';
 
@@ -112,7 +135,11 @@ function soloEnabledIntent(features: { bugs?: boolean; features?: boolean; vote?
   if (features.bugs !== false) enabled.push('bug');
   if (features.features !== false) enabled.push('feature');
   if (features.vote !== false) enabled.push('vote');
-  return enabled.length === 1 ? enabled[0]! : null;
+  // `noUncheckedIndexedAccess` is on, so `enabled[0]` is `Intent | undefined`.
+  // The `length === 1` guard makes that safe at runtime, but a `!` assertion
+  // would mask a refactor that broke the invariant — `?? null` keeps the
+  // return type honest and falls back to the picker if the array is empty.
+  return enabled.length === 1 ? enabled[0] ?? null : null;
 }
 
 function headerTitle(screen: Intent | null, locale: ReturnType<typeof useKoe>['locale']): string {

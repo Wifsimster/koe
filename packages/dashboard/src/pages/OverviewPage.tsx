@@ -22,18 +22,22 @@ export function OverviewPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     let alive = true;
     api
-      .workspaceOverview()
+      .workspaceOverview(controller.signal)
       .then((res) => {
-        if (alive) setProjects(res.projects);
+        if (!alive || controller.signal.aborted) return;
+        setProjects(res.projects);
       })
       .catch((err) => {
-        if (!alive) return;
+        if (!alive || controller.signal.aborted) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         setError(err instanceof Error ? err.message : 'Failed to load overview');
       });
     return () => {
       alive = false;
+      controller.abort();
     };
   }, [api]);
 
