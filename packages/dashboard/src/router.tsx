@@ -1,20 +1,13 @@
-import { useEffect, useRef, type ReactNode } from 'react';
-import {
-  createRootRouteWithContext,
-  createRoute,
-  Outlet,
-  redirect,
-  useNavigate,
-  useRouterState,
-} from '@tanstack/react-router';
-import type { TicketKind, TicketStatus } from '@koe/shared';
+import { createRootRouteWithContext, createRoute, redirect } from '@tanstack/react-router';
 import { LoginPage } from './pages/LoginPage';
 import { InboxPage } from './pages/InboxPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { OverviewPage } from './pages/OverviewPage';
-import { AppShell } from './components/AppShell';
-import { useAuth, type AuthContextValue } from './auth/AuthContext';
+import { AuthenticatedLayout, RootGate } from './components/AppLayout';
+import type { AuthContextValue } from './auth/AuthContext';
+import { RouteErrorView } from './components/RouteFallbacks';
+import type { InboxSearch, LoginSearch } from './lib/searchParams';
 
 export interface RouterContext {
   auth: AuthContextValue;
@@ -23,10 +16,6 @@ export interface RouterContext {
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootGate,
 });
-
-export interface LoginSearch {
-  redirectTo?: string;
-}
 
 /**
  * Same-origin guard for the post-login `redirectTo`. The auth gate
@@ -90,13 +79,6 @@ const authenticatedLayoutRoute = createRoute({
   },
   component: AuthenticatedLayout,
 });
-
-export interface InboxSearch {
-  kind: TicketKind | 'all';
-  status: TicketStatus | 'all';
-  q: string;
-  sort: 'recent' | 'votes';
-}
 
 const VALID_KINDS: ReadonlySet<string> = new Set(['all', 'bug', 'feature']);
 const VALID_STATUSES: ReadonlySet<string> = new Set([
@@ -167,156 +149,3 @@ export const routeTree = rootRoute.addChildren([
   ]),
 ]);
 
-function RootGate() {
-  return <Outlet />;
-}
-
-function AuthenticatedLayout() {
-  const { state } = useAuth();
-  const navigate = useNavigate();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-
-  // Mid-session 401 → kick to /login. beforeLoad only runs on
-  // navigation, so this mirror catches the case where /me starts
-  // returning 401 after the route already matched.
-  useEffect(() => {
-    if (state.status === 'unauthenticated' && pathname !== '/login') {
-      void navigate({ to: '/login', search: { redirectTo: pathname } });
-    }
-  }, [state.status, navigate, pathname]);
-
-  // Pull the specific fields the effects below depend on. Depending on
-  // the whole `state` object would re-run them on every setState (the
-  // reference always changes) — including non-structural transitions
-  // like `setActiveProject`, which has nothing to do with redirects.
-  const authStatus = state.status;
-  const projectCount = state.status === 'authenticated' ? state.projects.length : 0;
-
-  // Mid-session empty-projects → /onboarding (mirrors beforeLoad).
-  useEffect(() => {
-    if (
-      authStatus === 'authenticated' &&
-      projectCount === 0 &&
-      pathname !== '/onboarding'
-    ) {
-      void navigate({ to: '/onboarding' });
-    }
-  }, [authStatus, projectCount, navigate, pathname]);
-
-  // Multi-project landing — fires once per auth transition.
-  const didLandingRef = useRef(false);
-  useEffect(() => {
-    if (authStatus === 'unauthenticated') {
-      didLandingRef.current = false;
-      return;
-    }
-    if (
-      authStatus === 'authenticated' &&
-      !didLandingRef.current &&
-      projectCount >= 2 &&
-      pathname === '/'
-    ) {
-      didLandingRef.current = true;
-      void navigate({ to: '/overview' });
-    } else if (authStatus === 'authenticated') {
-      didLandingRef.current = true;
-    }
-  }, [authStatus, projectCount, pathname, navigate]);
-
-  if (state.status !== 'authenticated') {
-    return <LoadingScreen />;
-  }
-  if (pathname === '/onboarding') {
-    return <Outlet />;
-  }
-  return (
-    <AppShell header={<RouteHeader />}>
-      <Outlet />
-    </AppShell>
-  );
-}
-
-function RouteHeader(): ReactNode {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  if (pathname === '/overview') {
-    return <Crumb label="Overview" caption="Every project at a glance." />;
-  }
-  if (pathname.startsWith('/tickets/')) {
-    return <Crumb label="Ticket" caption="Triage, route, respond." />;
-  }
-  return <Crumb label="Inbox" caption="Triage bugs and ideas as they arrive." />;
-}
-
-function Crumb({ label, caption }: { label: string; caption: string }) {
-  return (
-    <div className="flex items-baseline gap-3">
-      <span className="font-heading text-base tracking-tight">{label}</span>
-      <span className="hidden text-[11px] text-muted-foreground sm:inline">{caption}</span>
-    </div>
-  );
-}
-
-export const INBOX_DEFAULT_SEARCH: InboxSearch = {
-  kind: 'all',
-  status: 'open',
-  q: '',
-  sort: 'recent',
-};
-
-function LoadingScreen(): ReactNode {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background text-sm text-muted-foreground">
-      Loading…
-    </div>
-  );
-}
-
-/**
- * Catch-all for unknown routes. Without it, an unrecognised URL would
- * render the route's empty children — i.e. a blank page — instead of
- * something the operator can act on.
- */
-export function NotFoundView(): ReactNode {
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background p-6 text-center">
-      <div className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
-        Kōe · 404
-      </div>
-      <h1 className="font-heading text-3xl tracking-tight">Page not found</h1>
-      <p className="max-w-sm text-sm text-muted-foreground">
-        That URL doesn't match anything in the dashboard.
-      </p>
-      <a
-        href="/"
-        className="text-sm underline underline-offset-4 hover:text-foreground"
-      >
-        Back to inbox
-      </a>
-    </div>
-  );
-}
-
-/**
- * Top-level boundary for thrown loaders / route components. Without
- * one, a thrown route loader would surface as a blank screen.
- */
-export function RouteErrorView({ error }: { error?: unknown }): ReactNode {
-  const message =
-    error instanceof Error && error.message
-      ? error.message
-      : 'Something went wrong. Try reloading.';
-  return (
-    <div className="flex min-h-[40vh] flex-col items-start justify-center gap-3 p-6">
-      <div className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground">
-        Kōe · Error
-      </div>
-      <h2 className="font-heading text-2xl tracking-tight">Couldn't load this page</h2>
-      <p
-        role="alert"
-        className="max-w-prose border-l-2 border-destructive/70 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-      >
-        {message}
-      </p>
-    </div>
-  );
-}

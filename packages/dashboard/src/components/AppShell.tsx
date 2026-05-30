@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { Grid2x2, Inbox, LogOut, Plus } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
-import { INBOX_DEFAULT_SEARCH } from '../router';
+import { INBOX_DEFAULT_SEARCH } from '../lib/searchParams';
 import { ModeToggle } from './ModeToggle';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { Button } from './ui/button';

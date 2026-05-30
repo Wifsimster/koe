@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent, type FormEvent } from 'react';
+import { useEffect, useReducer, useRef, useState, type FocusEvent, type FormEvent } from 'react';
 import { captureBrowserMetadata, isValidEmail } from '@koe/shared';
 import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
@@ -18,6 +18,41 @@ const EMPTY: FormState = {
   email: '',
 };
 
+type FieldErrors = Partial<Record<keyof FormState, string>>;
+
+interface FormData {
+  values: FormState;
+  errors: FieldErrors;
+}
+
+const INITIAL_FORM: FormData = { values: EMPTY, errors: {} };
+
+type FormAction =
+  | { type: 'setValue'; key: keyof FormState; value: string }
+  | { type: 'setError'; key: keyof FormState; message: string | undefined }
+  | { type: 'setErrors'; errors: FieldErrors }
+  | { type: 'reset' };
+
+/**
+ * Field values and their validation errors travel together in one
+ * reducer — every edit and every (re)validation is a single immutable
+ * step, which keeps the form's hook count low and the two in sync.
+ */
+function formReducer(data: FormData, action: FormAction): FormData {
+  switch (action.type) {
+    case 'setValue':
+      return { ...data, values: { ...data.values, [action.key]: action.value } };
+    case 'setError':
+      return { ...data, errors: { ...data.errors, [action.key]: action.message } };
+    case 'setErrors':
+      return { ...data, errors: action.errors };
+    case 'reset':
+      return INITIAL_FORM;
+    default:
+      return data;
+  }
+}
+
 export interface FeatureRequestFormProps {
   /**
    * Optional callback that switches the widget to the "my requests"
@@ -29,18 +64,13 @@ export interface FeatureRequestFormProps {
 
 export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps = {}) {
   const { locale, api, config } = useKoe();
-  const [state, setState] = useState<FormState>(EMPTY);
-  const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
+  const [form, dispatchForm] = useReducer(formReducer, INITIAL_FORM);
+  const { values, errors } = form;
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const titleRef = useRef<HTMLInputElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => controllerRef.current?.abort(), []);
-
-  useEffect(() => {
-    if (!success) titleRef.current?.focus();
-  }, [success]);
 
   if (success) {
     return (
@@ -49,8 +79,7 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
         message={locale.featureForm.success}
         onDismiss={() => {
           setSuccess(false);
-          setState(EMPTY);
-          setErrors({});
+          dispatchForm({ type: 'reset' });
         }}
         onViewMyRequests={onViewMyRequests}
         viewMyRequestsLabel={locale.myRequests?.title ?? 'My requests'}
@@ -71,7 +100,7 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
 
   const onBlur = (key: keyof FormState) => (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const msg = validateField(key, e.target.value);
-    setErrors((prev) => ({ ...prev, [key]: msg }));
+    dispatchForm({ type: 'setError', key, message: msg });
   };
 
   const onSubmit = async (e: FormEvent) => {
@@ -82,12 +111,12 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
     if (submitting) return;
     setApiError(null);
 
-    const nextErrors: Partial<Record<keyof FormState, string>> = {};
+    const nextErrors: FieldErrors = {};
     (['title', 'description', 'email'] as const).forEach((k) => {
-      const msg = validateField(k, state[k]);
+      const msg = validateField(k, values[k]);
       if (msg) nextErrors[k] = msg;
     });
-    setErrors(nextErrors);
+    dispatchForm({ type: 'setErrors', errors: nextErrors });
     if (Object.keys(nextErrors).length > 0) return;
 
     // Abort any previous in-flight request before assigning the new one
@@ -100,20 +129,19 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
     setSubmitting(true);
     try {
       const baseReporter = config.user ?? { id: 'anonymous' };
-      const finalEmail = state.email.trim() || baseReporter.email;
+      const finalEmail = values.email.trim() || baseReporter.email;
       const reporter = finalEmail ? { ...baseReporter, email: finalEmail } : baseReporter;
 
       await api.submitFeatureRequest(
         {
-          title: state.title.trim(),
-          description: state.description.trim(),
+          title: values.title.trim(),
+          description: values.description.trim(),
           reporter,
           metadata: captureBrowserMetadata(),
         },
         { signal: controller.signal },
       );
-      if (controller.signal.aborted) return;
-      setSuccess(true);
+      if (!controller.signal.aborted) setSuccess(true);
     } catch (err) {
       if (controller.signal.aborted) return;
       if (err instanceof KoeApiError) {
@@ -146,14 +174,14 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
   const update =
     <K extends keyof FormState>(key: K) =>
     (value: string) =>
-      setState((s) => ({ ...s, [key]: value }));
+      dispatchForm({ type: 'setValue', key, value });
 
   return (
     <form onSubmit={onSubmit} noValidate>
       <TextField
-        ref={titleRef}
+        autoFocus
         label={locale.featureForm.title}
-        value={state.title}
+        value={values.title}
         onChange={(e) => update('title')(e.target.value)}
         onBlur={onBlur('title')}
         error={errors.title}
@@ -161,7 +189,7 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
       />
       <TextAreaField
         label={locale.featureForm.description}
-        value={state.description}
+        value={values.description}
         onChange={(e) => update('description')(e.target.value)}
         onBlur={onBlur('description')}
         error={errors.description}
@@ -174,7 +202,7 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
           type="email"
           autoComplete="email"
           inputMode="email"
-          value={state.email}
+          value={values.email}
           onChange={(e) => update('email')(e.target.value)}
           onBlur={onBlur('email')}
           error={errors.email}

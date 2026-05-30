@@ -48,7 +48,11 @@ export function MyRequestsList() {
 
   useEffect(() => {
     load();
-    return () => controllerRef.current?.abort();
+    // Copy the controller `load()` just stored so cleanup aborts *this*
+    // request — reading `controllerRef.current` in the cleanup would
+    // race a later `load()` that replaced it.
+    const controller = controllerRef.current;
+    return () => controller?.abort();
   }, [load]);
 
   if (loading && !items) {

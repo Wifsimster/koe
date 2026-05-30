@@ -1,0 +1,13 @@
+{
+  "ignore": {
+    "overrides": [
+      {
+        "files": [
+          "packages/widget/src/standalone-entry.ts",
+          "**/standalone-entry.ts"
+        ],
+        "rules": ["deslop/unused-file"]
+      }
+    ]
+  }
+}

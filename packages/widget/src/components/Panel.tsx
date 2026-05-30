@@ -42,7 +42,7 @@ export function Panel({ onClose }: PanelProps) {
 
   // Track visual viewport so the panel body follows the keyboard on
   // mobile. Writes a CSS variable; no React re-render per resize.
-  const shellRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDialogElement>(null);
   useVisualViewport(shellRef);
 
   // Record the element that had focus before the dialog opened so we
@@ -71,10 +71,9 @@ export function Panel({ onClose }: PanelProps) {
   const back = locale.back ?? 'Back';
 
   return (
-    <div
+    <dialog
       ref={shellRef}
-      role="dialog"
-      aria-modal="true"
+      open
       aria-labelledby="koe-panel-title"
       className="koe-panel-shell koe-mb-3 koe-bg-koe-bg koe-text-koe-text koe-shadow-koe koe-border koe-border-koe-border"
     >
@@ -126,7 +125,7 @@ export function Panel({ onClose }: PanelProps) {
         {screen === 'vote' && <BrowseList />}
         {screen === 'my-requests' && <MyRequestsList />}
       </div>
-    </div>
+    </dialog>
   );
 }
 

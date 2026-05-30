@@ -1,14 +1,80 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useReducer, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { TriangleAlert } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { AdminApiError, type CreateProjectResult } from '../api/client';
-import { INBOX_DEFAULT_SEARCH } from '../router';
+import { INBOX_DEFAULT_SEARCH } from '../lib/searchParams';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Checkbox } from '../components/ui/checkbox';
 import { Textarea } from '../components/ui/textarea';
+
+interface OnboardingForm {
+  name: string;
+  keyValue: string;
+  keyDirty: boolean;
+  origins: string;
+  requireVerification: boolean;
+  error: string | null;
+  submitting: boolean;
+  created: CreateProjectResult | null;
+  secretSaved: boolean;
+  entering: boolean;
+}
+
+const INITIAL_ONBOARDING: OnboardingForm = {
+  name: '',
+  keyValue: '',
+  keyDirty: false,
+  origins: '',
+  requireVerification: false,
+  error: null,
+  submitting: false,
+  created: null,
+  secretSaved: false,
+  entering: false,
+};
+
+type OnboardingAction =
+  | { type: 'setName'; value: string }
+  | { type: 'setKey'; value: string }
+  | { type: 'setOrigins'; value: string }
+  | { type: 'setRequireVerification'; value: boolean }
+  | { type: 'submitStart' }
+  | { type: 'error'; message: string }
+  | { type: 'created'; result: CreateProjectResult }
+  | { type: 'setSecretSaved'; value: boolean }
+  | { type: 'enterStart' }
+  | { type: 'enterEnd' };
+
+function onboardingReducer(state: OnboardingForm, action: OnboardingAction): OnboardingForm {
+  switch (action.type) {
+    case 'setName':
+      return { ...state, name: action.value };
+    case 'setKey':
+      // Editing the key field pins it: stop auto-deriving from the name.
+      return { ...state, keyValue: action.value, keyDirty: true };
+    case 'setOrigins':
+      return { ...state, origins: action.value };
+    case 'setRequireVerification':
+      return { ...state, requireVerification: action.value };
+    case 'submitStart':
+      return { ...state, error: null, submitting: true };
+    case 'error':
+      return { ...state, error: action.message, submitting: false };
+    case 'created':
+      return { ...state, created: action.result, submitting: false };
+    case 'setSecretSaved':
+      return { ...state, secretSaved: action.value };
+    case 'enterStart':
+      return { ...state, entering: true };
+    case 'enterEnd':
+      return { ...state, entering: false };
+    default:
+      return state;
+  }
+}
 
 /**
  * Project creation surface. Used both for the empty-state landing
@@ -21,14 +87,24 @@ export function OnboardingPage() {
   const { api, state, refresh, setActiveProject } = useAuth();
   const navigate = useNavigate();
 
-  const [name, setName] = useState('');
-  const [keyValue, setKeyValue] = useState('');
-  const [keyDirty, setKeyDirty] = useState(false);
-  const [origins, setOrigins] = useState('');
-  const [requireVerification, setRequireVerification] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [created, setCreated] = useState<CreateProjectResult | null>(null);
+  // The whole create flow — form fields, submission flags, and the
+  // post-create "secret saved / entering" gates — lives in one reducer.
+  // Folding them together also keeps every hook unconditional: the
+  // secret/entering state used to be declared *after* the early return
+  // below, which is a rules-of-hooks violation.
+  const [form, dispatch] = useReducer(onboardingReducer, INITIAL_ONBOARDING);
+  const {
+    name,
+    keyValue,
+    keyDirty,
+    origins,
+    requireVerification,
+    error,
+    submitting,
+    created,
+    secretSaved,
+    entering,
+  } = form;
 
   // Auto-derive the slug from the name until the operator edits the
   // key field themselves. Same rule the `bootstrap` CLI uses so the
@@ -41,24 +117,23 @@ export function OnboardingPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setError(null);
     const trimmedName = name.trim();
     const finalKey = (keyDirty ? keyValue : slugify(name)).trim();
     if (!trimmedName) {
-      setError('Name is required.');
+      dispatch({ type: 'error', message: 'Name is required.' });
       return;
     }
     if (!/^[a-z0-9-]+$/.test(finalKey)) {
-      setError('Key must contain only lowercase letters, digits, and dashes.');
+      dispatch({
+        type: 'error',
+        message: 'Key must contain only lowercase letters, digits, and dashes.',
+      });
       return;
     }
 
-    const allowedOrigins = origins
-      .split(/[\n,]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const allowedOrigins = origins.split(/[\n,]/).flatMap((s) => s.trim() || []);
 
-    setSubmitting(true);
+    dispatch({ type: 'submitStart' });
     try {
       const result = await api.createProject({
         name: trimmedName,
@@ -72,24 +147,19 @@ export function OnboardingPage() {
       // than showing a secret that the rest of the UI can't see.
       await refresh();
       setActiveProject(result.project.key);
-      setCreated(result);
+      dispatch({ type: 'created', result });
     } catch (err) {
-      setError(humaniseError(err));
-    } finally {
-      setSubmitting(false);
+      dispatch({ type: 'error', message: humaniseError(err) });
     }
   };
 
-  const [secretSaved, setSecretSaved] = useState(false);
-  const [entering, setEntering] = useState(false);
-
   const enterDashboard = async () => {
     if (entering) return;
-    setEntering(true);
+    dispatch({ type: 'enterStart' });
     try {
       await navigate({ to: '/', search: INBOX_DEFAULT_SEARCH });
     } finally {
-      setEntering(false);
+      dispatch({ type: 'enterEnd' });
     }
   };
 
@@ -109,7 +179,7 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
         subtitle={
           <>
             <strong className="text-foreground">{created.project.name}</strong> is ready. Save the
-            credentials below — the{' '}
+            credentials below; the{' '}
             <a
               href="https://github.com/Wifsimster/koe/blob/main/packages/widget/README.md"
               target="_blank"
@@ -125,7 +195,7 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
       >
         <div className="space-y-6">
           <Warning>
-            Copy the identity secret now. It's encrypted at rest and can't be retrieved later —
+            Copy the identity secret now. It's encrypted at rest and can't be retrieved later,
             only rotated.
           </Warning>
 
@@ -141,17 +211,17 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
             </Field>
           </div>
 
-          <label className="flex items-start gap-3">
+          <label htmlFor="secret-saved" className="flex items-start gap-3">
             <Checkbox
               id="secret-saved"
               checked={secretSaved}
-              onCheckedChange={(v) => setSecretSaved(v === true)}
+              onCheckedChange={(v) => dispatch({ type: 'setSecretSaved', value: v === true })}
               className="mt-0.5"
             />
             <span className="text-sm">
               <span className="block font-medium">I've saved the identity secret</span>
               <span className="block text-[11px] text-muted-foreground">
-                It's encrypted at rest and can't be shown again — only rotated.
+                It's encrypted at rest and can't be shown again, only rotated.
               </span>
             </span>
           </label>
@@ -189,7 +259,7 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
             id="name"
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => dispatch({ type: 'setName', value: e.target.value })}
             placeholder="Acme Web"
             disabled={submitting}
             required
@@ -204,10 +274,12 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
             id="key"
             type="text"
             value={suggestedKey}
-            onChange={(e) => {
-              setKeyDirty(true);
-              setKeyValue(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''));
-            }}
+            onChange={(e) =>
+              dispatch({
+                type: 'setKey',
+                value: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
+              })
+            }
             placeholder="acme-web"
             disabled={submitting}
             required
@@ -224,7 +296,7 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
           <Textarea
             id="origins"
             value={origins}
-            onChange={(e) => setOrigins(e.target.value)}
+            onChange={(e) => dispatch({ type: 'setOrigins', value: e.target.value })}
             placeholder={'https://app.acme.com\nhttps://acme.com'}
             disabled={submitting}
             rows={3}
@@ -233,11 +305,11 @@ KOE_IDENTITY_SECRET=${created.identitySecret}`;
             One per line. Leave empty in dev to accept any origin.
           </p>
         </div>
-        <label className="flex items-start gap-3 pt-2">
+        <label htmlFor="require-verification" className="flex items-start gap-3 pt-2">
           <Checkbox
             id="require-verification"
             checked={requireVerification}
-            onCheckedChange={(v) => setRequireVerification(v === true)}
+            onCheckedChange={(v) => dispatch({ type: 'setRequireVerification', value: v === true })}
             disabled={submitting}
           />
           <span className="text-sm">

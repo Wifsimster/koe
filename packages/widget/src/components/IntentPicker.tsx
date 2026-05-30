@@ -49,8 +49,7 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
       <p id="koe-picker-prompt" className="koe-sr-only">
         {picker.prompt}
       </p>
-      <div
-        role="group"
+      <fieldset
         aria-labelledby="koe-picker-prompt"
         className="koe-flex koe-flex-col koe-gap-2"
       >
@@ -86,7 +85,7 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
             onClick={() => onPick('my-requests')}
           />
         )}
-      </div>
+      </fieldset>
     </div>
   );
 }

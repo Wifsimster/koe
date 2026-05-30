@@ -61,6 +61,35 @@
 }
 
 /*
+ * The Panel renders as a native <dialog> and the IntentPicker as a
+ * <fieldset> for their built-in semantics. Preflight is off, so the UA
+ * box model (dialog: position:absolute + margin:auto + 1em padding +
+ * border; fieldset: min-width:min-content + border + margin) would
+ * fight the layout. Neutralise it in zero-specificity :where() so every
+ * `koe-*` utility and the `.koe-panel-shell` rules still win and the
+ * panel keeps rendering exactly as it did as a <div>. The panel is
+ * opened/closed by mount/unmount, not showModal(), so there is no
+ * top-layer or ::backdrop to account for.
+ */
+:where(.koe-root dialog) {
+  position: static;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  block-size: auto;
+  background: transparent;
+  color: inherit;
+}
+
+:where(.koe-root fieldset) {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/*
  * Panel shell — one component, two postures.
  * Default (desktop): floating card 360px wide, anchored to the launcher.
  * Mobile (@media max-width: 480px): bottom sheet that hugs the viewport

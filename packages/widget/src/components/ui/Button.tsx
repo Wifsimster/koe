@@ -14,10 +14,12 @@ export function Button({
   disabled,
   className,
   children,
+  type = 'button',
   ...rest
 }: ButtonProps) {
   return (
     <button
+      type={type}
       {...rest}
       disabled={disabled || loading}
       aria-busy={loading || undefined}

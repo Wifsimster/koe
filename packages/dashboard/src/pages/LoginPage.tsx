@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, getRouteApi } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
 import { AdminApiError } from '../api/client';
-import { INBOX_DEFAULT_SEARCH, loginRoute } from '../router';
+import { INBOX_DEFAULT_SEARCH } from '../lib/searchParams';
+
+const loginRoute = getRouteApi('/login');
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -175,7 +177,7 @@ function Shell({
           </p>
         </div>
         <div className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
-          声 — Koe
+          声 · Koe
         </div>
       </aside>
 

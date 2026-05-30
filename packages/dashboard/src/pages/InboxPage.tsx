@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useCallback, useEffect, useEffectEvent, useMemo, useReducer, useRef, useState } from 'react';
+import { Link, useNavigate, getRouteApi } from '@tanstack/react-router';
 import { Bug, Globe, Heart, Lightbulb, Search as SearchIcon, ShieldAlert } from 'lucide-react';
-import { inboxRoute, type InboxSearch } from '../router';
+import type { InboxSearch } from '../lib/searchParams';
 import type { TicketKind, TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
 import type { AdminProject, AdminTicket } from '../api/client';
@@ -21,6 +21,68 @@ import {
 import { Separator } from '../components/ui/separator';
 import { cn } from '../lib/utils';
 
+const inboxRoute = getRouteApi('/_authenticated/');
+
+/**
+ * Bulk-selection state lives in a reducer rather than four correlated
+ * `useState`s: a single dispatch advances selection, confirm-gating, and
+ * the in-flight/error flags in one immutable step, which keeps the
+ * single-flight guard and the destructive-confirm flow honest.
+ */
+interface BulkState {
+  selected: Set<string>;
+  error: string | null;
+  submitting: boolean;
+  pending: { status: TicketStatus; count: number } | null;
+}
+
+const INITIAL_BULK: BulkState = {
+  selected: new Set(),
+  error: null,
+  submitting: false,
+  pending: null,
+};
+
+type BulkAction =
+  | { type: 'toggle'; id: string }
+  | { type: 'selectAll'; ids: string[] }
+  | { type: 'clear' }
+  | { type: 'reset' }
+  | { type: 'submitStart' }
+  | { type: 'submitDone' }
+  | { type: 'submitError'; message: string }
+  | { type: 'requestConfirm'; status: TicketStatus; count: number }
+  | { type: 'cancelConfirm' };
+
+function bulkReducer(state: BulkState, action: BulkAction): BulkState {
+  switch (action.type) {
+    case 'toggle': {
+      const selected = new Set(state.selected);
+      if (selected.has(action.id)) selected.delete(action.id);
+      else selected.add(action.id);
+      return { ...state, selected };
+    }
+    case 'selectAll':
+      return { ...state, selected: new Set(action.ids) };
+    case 'clear':
+      return { ...state, selected: new Set() };
+    case 'reset':
+      return { ...state, selected: new Set(), error: null };
+    case 'submitStart':
+      return { ...state, error: null, submitting: true };
+    case 'submitDone':
+      return { ...state, selected: new Set(), submitting: false };
+    case 'submitError':
+      return { ...state, error: action.message, submitting: false };
+    case 'requestConfirm':
+      return { ...state, pending: { status: action.status, count: action.count } };
+    case 'cancelConfirm':
+      return { ...state, pending: null };
+    default:
+      return state;
+  }
+}
+
 export function InboxPage() {
   const { state, api } = useAuth();
   const [project, setProject] = useState<AdminProject | null>(null);
@@ -38,12 +100,7 @@ export function InboxPage() {
       }),
     [navigate],
   );
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [bulkError, setBulkError] = useState<string | null>(null);
-  const [bulkSubmitting, setBulkSubmitting] = useState(false);
-  const [pendingBulk, setPendingBulk] = useState<{ status: TicketStatus; count: number } | null>(
-    null,
-  );
+  const [bulk, dispatch] = useReducer(bulkReducer, INITIAL_BULK);
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
@@ -96,58 +153,49 @@ export function InboxPage() {
   }, [loadTickets]);
 
   useEffect(() => {
-    setSelected(new Set());
-    setBulkError(null);
+    dispatch({ type: 'reset' });
   }, [activeKey, kind, status, q, sort]);
 
   const applyBulk = useCallback(
     async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
-      if (!activeKey || selected.size === 0) return;
+      if (!activeKey || bulk.selected.size === 0) return;
       // Single-flight guard: the chip-level status `Select` and the
       // confirm-dialog can both call applyBulk; while one PATCH is
       // already in flight, drop subsequent invocations rather than
       // double-firing.
-      if (bulkSubmitting) return;
-      setBulkError(null);
-      setBulkSubmitting(true);
+      if (bulk.submitting) return;
+      dispatch({ type: 'submitStart' });
       try {
-        await api.bulkUpdateTickets(activeKey, Array.from(selected), patch);
-        setSelected(new Set());
+        await api.bulkUpdateTickets(activeKey, Array.from(bulk.selected), patch);
+        dispatch({ type: 'submitDone' });
         await loadTickets();
       } catch (err) {
-        setBulkError(err instanceof Error ? err.message : 'Bulk update failed');
-      } finally {
-        setBulkSubmitting(false);
+        dispatch({
+          type: 'submitError',
+          message: err instanceof Error ? err.message : 'Bulk update failed',
+        });
       }
     },
-    [activeKey, api, selected, loadTickets, bulkSubmitting],
+    [activeKey, api, bulk.selected, bulk.submitting, loadTickets],
   );
 
   const requestBulkStatus = useCallback(
     (next: TicketStatus) => {
       // Mirror the destructive-confirm gate: while a non-destructive
       // bulk PATCH is in flight, ignore further requests.
-      if (bulkSubmitting) return;
+      if (bulk.submitting) return;
       if (next === 'closed' || next === 'wont_fix') {
-        setPendingBulk({ status: next, count: selected.size });
+        dispatch({ type: 'requestConfirm', status: next, count: bulk.selected.size });
         return;
       }
       void applyBulk({ status: next });
     },
-    [applyBulk, selected.size, bulkSubmitting],
+    [applyBulk, bulk.selected.size, bulk.submitting],
   );
 
-  const toggleSelected = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const selectAll = (ids: string[]) => setSelected(new Set(ids));
-  const clearSelection = () => setSelected(new Set());
+  const toggleSelected = (id: string) => dispatch({ type: 'toggle', id });
+  const selectAll = (ids: string[]) => dispatch({ type: 'selectAll', ids });
+  const clearSelection = () => dispatch({ type: 'clear' });
 
   const counts = useMemo(() => {
     const map = { all: tickets?.length ?? 0, bug: 0, feature: 0 };
@@ -210,29 +258,29 @@ export function InboxPage() {
 
       {error && <ErrorLine>{error}</ErrorLine>}
 
-      {selected.size > 0 && (
+      {bulk.selected.size > 0 && (
         <BulkToolbar
-          count={selected.size}
-          submitting={bulkSubmitting}
-          error={bulkError}
+          count={bulk.selected.size}
+          submitting={bulk.submitting}
+          error={bulk.error}
           onStatus={requestBulkStatus}
           onPriority={(p) => void applyBulk({ priority: p })}
           onClear={clearSelection}
         />
       )}
 
-      {pendingBulk && (
+      {bulk.pending && (
         <ConfirmDialog
-          title={confirmTitleFor(pendingBulk.status, pendingBulk.count)}
-          body={confirmBodyFor(pendingBulk.status)}
-          confirmLabel={confirmLabelFor(pendingBulk.status)}
-          submitting={bulkSubmitting}
+          title={confirmTitleFor(bulk.pending.status, bulk.pending.count)}
+          body={confirmBodyFor(bulk.pending.status)}
+          confirmLabel={confirmLabelFor(bulk.pending.status)}
+          submitting={bulk.submitting}
           onConfirm={async () => {
-            const s = pendingBulk.status;
-            setPendingBulk(null);
+            const s = bulk.pending!.status;
+            dispatch({ type: 'cancelConfirm' });
             await applyBulk({ status: s });
           }}
-          onCancel={() => setPendingBulk(null)}
+          onCancel={() => dispatch({ type: 'cancelConfirm' })}
         />
       )}
 
@@ -246,9 +294,9 @@ export function InboxPage() {
             <div className="flex items-center gap-3 border-y py-3 text-[11px] tracking-[0.15em] uppercase text-muted-foreground">
               <Checkbox
                 checked={
-                  selected.size === tickets.length && tickets.length > 0
+                  bulk.selected.size === tickets.length && tickets.length > 0
                     ? true
-                    : selected.size > 0
+                    : bulk.selected.size > 0
                       ? 'indeterminate'
                       : false
                 }
@@ -259,8 +307,8 @@ export function InboxPage() {
                 aria-label="Select all tickets on this page"
               />
               <span>
-                {selected.size > 0
-                  ? `${selected.size} of ${tickets.length} selected`
+                {bulk.selected.size > 0
+                  ? `${bulk.selected.size} of ${tickets.length} selected`
                   : 'Select all'}
               </span>
             </div>
@@ -270,7 +318,7 @@ export function InboxPage() {
               <TicketRow
                 key={t.id}
                 ticket={t}
-                selected={selected.has(t.id)}
+                selected={bulk.selected.has(t.id)}
                 onToggleSelect={() => toggleSelected(t.id)}
               />
             ))}
@@ -334,24 +382,36 @@ function Chip({
 }
 
 function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => {
-    if (value !== draft) setDraft(value);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  // `draft` is fast local state; `value` is the committed URL param. We
+  // reconcile during render (React's "adjust state when a prop changes"
+  // pattern) instead of in an effect — that keeps the input focused
+  // while typing, since nothing remounts and no effect re-syncs. The
+  // last-seen `value` is tracked in a ref (not state): it's only read to
+  // detect a change, never rendered, so it shouldn't trigger renders.
+  const [draft, setDraft] = useState(() => value);
+  const lastValueRef = useRef(value);
+  if (value !== lastValueRef.current) {
+    lastValueRef.current = value;
+    setDraft(value);
+  }
+  // The debounce reads the latest `onChange` without re-subscribing when
+  // the parent re-creates it every render. Effect Events always see the
+  // current prop, so it stays out of the dependency array.
+  const onChangeEvent = useEffectEvent(onChange);
   useEffect(() => {
     if (draft === value) return;
-    const t = setTimeout(() => onChange(draft), 250);
+    const t = setTimeout(() => onChangeEvent(draft), 250);
     return () => clearTimeout(t);
-  }, [draft, value, onChange]);
+  }, [draft, value]);
   return (
-    <label className="relative block w-full md:max-w-sm">
+    <label htmlFor="inbox-search" className="relative block w-full md:max-w-sm">
       <span className="sr-only">Search tickets</span>
       <SearchIcon
         className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
         aria-hidden="true"
       />
       <Input
+        id="inbox-search"
         type="search"
         placeholder="Search title, description, email…"
         value={draft}
@@ -411,7 +471,10 @@ function TicketRow({
           className="absolute left-0 top-4 bottom-4 w-[2px] bg-primary"
         />
       )}
-      <label
+      {/* Not a <label>: the Checkbox carries its own aria-label, and this
+          wrapper exists only to stop a click in the checkbox gutter from
+          bubbling to the row's <Link>. */}
+      <div
         className="flex items-center pt-0.5 pl-3 pr-1"
         onClick={(e) => e.stopPropagation()}
       >
@@ -420,7 +483,7 @@ function TicketRow({
           onCheckedChange={onToggleSelect}
           aria-label={`Select ticket "${ticket.title}"`}
         />
-      </label>
+      </div>
       <Link
         to="/tickets/$id"
         params={{ id: ticket.id }}
@@ -623,7 +686,7 @@ function EmptyTickets({ project }: { project: AdminProject | null }) {
           <code className="border border-border bg-muted px-1 font-mono text-[11px]">
             &lt;script&gt;
           </code>{' '}
-          tag into your app and reload — you'll see a heartbeat within a minute.
+          tag into your app and reload, and you'll see a heartbeat within a minute.
         </p>
       )}
     </div>
