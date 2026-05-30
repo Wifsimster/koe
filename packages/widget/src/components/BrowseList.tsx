@@ -58,7 +58,11 @@ export function BrowseList() {
 
   useEffect(() => {
     load();
-    return () => controllerRef.current?.abort();
+    // Copy the controller `load()` just stored so cleanup aborts *this*
+    // request — reading `controllerRef.current` in the cleanup would
+    // race a later `load()` that replaced it.
+    const controller = controllerRef.current;
+    return () => controller?.abort();
   }, [load]);
 
   if (loading && !items) {
@@ -147,8 +151,7 @@ function VoteRow({ item, canVote, onToggle, onError }: VoteRowProps) {
     setPending(true);
     try {
       const next = await api.voteFeature(item.id, userId, { signal: controller.signal });
-      if (controller.signal.aborted) return;
-      onToggle(next);
+      if (!controller.signal.aborted) onToggle(next);
     } catch (err) {
       if (controller.signal.aborted) return;
       // Revert the optimistic flip so the UI matches the server again.

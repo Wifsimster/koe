@@ -16,7 +16,7 @@ export function HeartbeatBadge({
       <Shell variant={variant} tone="muted">
         <Dot tone="muted" />
         <span>
-          Waiting for the first widget ping — is the{' '}
+          Waiting for the first widget ping; is the{' '}
           <code className="rounded-none border border-border bg-muted px-1">
             &lt;script&gt;
           </code>{' '}

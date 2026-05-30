@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useReducer, useState, type ReactNode } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft, Bug, Lightbulb, ShieldAlert } from 'lucide-react';
 import type { TicketPriority, TicketStatus } from '@koe/shared';
 import { useAuth } from '../auth/AuthContext';
 import { AdminApiError, type AdminTicket, type TicketEvent, type TicketPatch } from '../api/client';
-import { INBOX_DEFAULT_SEARCH } from '../router';
+import { INBOX_DEFAULT_SEARCH } from '../lib/searchParams';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Checkbox } from '../components/ui/checkbox';
@@ -19,14 +19,65 @@ import { Separator } from '../components/ui/separator';
 import { Textarea } from '../components/ui/textarea';
 import { cn } from '../lib/utils';
 
+/**
+ * Load + mutation state for the detail page. A reducer keeps the
+ * optimistic-update / rollback / audit-refetch transitions as single
+ * immutable steps instead of a cascade of correlated `setState` calls.
+ */
+interface DetailState {
+  ticket: AdminTicket | null;
+  events: TicketEvent[] | null;
+  error: string | null;
+  mutError: string | null;
+  mutating: boolean;
+}
+
+const INITIAL_DETAIL: DetailState = {
+  ticket: null,
+  events: null,
+  error: null,
+  mutError: null,
+  mutating: false,
+};
+
+type DetailAction =
+  | { type: 'loaded'; ticket: AdminTicket }
+  | { type: 'loadError'; message: string }
+  | { type: 'eventsLoaded'; events: TicketEvent[] }
+  | { type: 'mutStart'; ticket: AdminTicket }
+  | { type: 'mutSettled'; ticket: AdminTicket }
+  | { type: 'mutFailed'; ticket: AdminTicket; message: string }
+  | { type: 'reverted'; ticket: AdminTicket }
+  | { type: 'revertFailed'; message: string };
+
+function detailReducer(state: DetailState, action: DetailAction): DetailState {
+  switch (action.type) {
+    case 'loaded':
+      return { ...state, ticket: action.ticket, error: null };
+    case 'loadError':
+      return { ...state, error: action.message };
+    case 'eventsLoaded':
+      return { ...state, events: action.events };
+    case 'mutStart':
+      return { ...state, ticket: action.ticket, mutError: null, mutating: true };
+    case 'mutSettled':
+      return { ...state, ticket: action.ticket, mutating: false };
+    case 'mutFailed':
+      return { ...state, ticket: action.ticket, mutError: action.message, mutating: false };
+    case 'reverted':
+      return { ...state, ticket: action.ticket };
+    case 'revertFailed':
+      return { ...state, mutError: action.message };
+    default:
+      return state;
+  }
+}
+
 export function TicketDetailPage() {
   const { id } = useParams({ from: '/_authenticated/tickets/$id' });
   const { state, api } = useAuth();
-  const [ticket, setTicket] = useState<AdminTicket | null>(null);
-  const [events, setEvents] = useState<TicketEvent[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [mutError, setMutError] = useState<string | null>(null);
-  const [mutating, setMutating] = useState(false);
+  const [detail, dispatch] = useReducer(detailReducer, INITIAL_DETAIL);
+  const { ticket, events, error, mutError, mutating } = detail;
 
   const activeKey = state.status === 'authenticated' ? state.activeProjectKey : null;
 
@@ -37,17 +88,19 @@ export function TicketDetailPage() {
       .getTicket(activeKey, id, controller.signal)
       .then((row) => {
         if (controller.signal.aborted) return;
-        setError(null);
-        setTicket(row);
+        dispatch({ type: 'loaded', ticket: row });
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
         if (err instanceof DOMException && err.name === 'AbortError') return;
         if (err instanceof AdminApiError && err.code === 'not_found') {
-          setError('Ticket not found in this project.');
+          dispatch({ type: 'loadError', message: 'Ticket not found in this project.' });
           return;
         }
-        setError(err instanceof Error ? err.message : 'Failed to load ticket');
+        dispatch({
+          type: 'loadError',
+          message: err instanceof Error ? err.message : 'Failed to load ticket',
+        });
       });
     return () => {
       controller.abort();
@@ -58,7 +111,7 @@ export function TicketDetailPage() {
     if (!activeKey) return;
     try {
       const rows = await api.listTicketEvents(activeKey, id);
-      setEvents(rows);
+      dispatch({ type: 'eventsLoaded', events: rows });
     } catch (err) {
       console.warn('[koe/dashboard] listTicketEvents failed', err);
     }
@@ -72,28 +125,32 @@ export function TicketDetailPage() {
     if (!activeKey) return;
     try {
       const next = await api.revertTicketEvent(activeKey, id, eventId);
-      setTicket(next);
+      dispatch({ type: 'reverted', ticket: next });
       void loadEvents();
     } catch (err) {
-      setMutError(err instanceof Error ? err.message : 'Revert failed');
+      dispatch({
+        type: 'revertFailed',
+        message: err instanceof Error ? err.message : 'Revert failed',
+      });
     }
   };
 
   const applyPatch = async (patch: TicketPatch) => {
     if (!activeKey || !ticket) return;
     const prev = ticket;
-    setMutError(null);
-    setMutating(true);
     // Optimistic update. `notes` normalises empty string to null so the
     // local ticket shape matches what the server returns.
-    setTicket({
-      ...ticket,
-      ...patch,
-      ...(patch.notes !== undefined ? { notes: patch.notes || null } : {}),
+    dispatch({
+      type: 'mutStart',
+      ticket: {
+        ...ticket,
+        ...patch,
+        ...(patch.notes !== undefined ? { notes: patch.notes || null } : {}),
+      },
     });
     try {
       const next = await api.updateTicket(activeKey, ticket.id, patch);
-      setTicket(next);
+      dispatch({ type: 'mutSettled', ticket: next });
       // Notes-only patches don't emit an audit event, so skip the refetch.
       if (
         patch.status !== undefined ||
@@ -103,11 +160,12 @@ export function TicketDetailPage() {
         void loadEvents();
       }
     } catch (err) {
-      setTicket(prev);
-      setMutError(err instanceof Error ? err.message : 'Update failed');
+      dispatch({
+        type: 'mutFailed',
+        ticket: prev,
+        message: err instanceof Error ? err.message : 'Update failed',
+      });
       throw err;
-    } finally {
-      setMutating(false);
     }
   };
 
@@ -207,6 +265,7 @@ export function TicketDetailPage() {
 
           <Section title="Notes">
             <NotesPanel
+              key={ticket.id}
               value={ticket.notes ?? ''}
               onSave={(notes) => applyPatch({ notes })}
             />
@@ -282,17 +341,16 @@ function NotesPanel({
   value: string;
   onSave: (notes: string) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState(value);
+  // `draft` is local edit state seeded from the saved notes once. The
+  // panel is keyed on the ticket id by the caller, so navigating to a
+  // different ticket remounts it with a fresh draft; within one ticket
+  // the only way `value` changes is the operator's own save, after
+  // which draft already equals it — so no prop-sync effect is needed
+  // (and a failed save keeps the unsaved text instead of clobbering it).
+  const [draft, setDraft] = useState(() => value);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-
-  // Keep the draft in sync with incoming props (e.g. after a revert
-  // refetches the ticket) as long as the operator isn't mid-edit.
-  useEffect(() => {
-    if (!submitting) setDraft(value);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
 
   const dirty = draft !== value;
 

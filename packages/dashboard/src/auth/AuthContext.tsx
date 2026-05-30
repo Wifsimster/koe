@@ -1,7 +1,7 @@
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -74,14 +74,15 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
     refreshControllerRef.current = controller;
     try {
       const [me, projects] = await Promise.all([api.me(), api.listProjects()]);
-      if (controller.signal.aborted) return;
-      setTransientError(false);
-      setState({
-        status: 'authenticated',
-        me,
-        projects,
-        activeProjectKey: pickActiveProject(projects),
-      });
+      if (!controller.signal.aborted) {
+        setTransientError(false);
+        setState({
+          status: 'authenticated',
+          me,
+          projects,
+          activeProjectKey: pickActiveProject(projects),
+        });
+      }
     } catch (err) {
       if (controller.signal.aborted) return;
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -122,27 +123,27 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
     }
   }, [api]);
 
+  // Probe the cookie once on mount; the browser may carry a session
+  // from a prior visit and only /me can confirm it's still valid. The
+  // controller is copied into a local so the cleanup aborts *this*
+  // probe rather than reading the ref (which a later refresh may have
+  // already replaced) on unmount.
   useEffect(() => {
-    if (state.status === 'loading') void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status]);
-
-  // Cancel any in-flight refresh on unmount so it doesn't fight a
-  // remount in development (StrictMode) or a fast re-render.
-  useEffect(() => {
-    return () => {
-      refreshControllerRef.current?.abort();
-      refreshControllerRef.current = null;
-    };
-  }, []);
+    void refresh();
+    const controller = refreshControllerRef.current;
+    return () => controller?.abort();
+  }, [refresh]);
 
   const login = useCallback<AuthContextValue['login']>(
     async (email, password) => {
       await api.loginWithPassword(email, password);
       setTransientError(false);
-      setState({ status: 'loading' });
+      // Re-fetch /me + /projects straight from the handler that caused
+      // the change, rather than flipping to a `loading` state and
+      // letting an effect react to it.
+      await refresh();
     },
-    [api],
+    [api, refresh],
   );
 
   const logout = useCallback<AuthContextValue['logout']>(async () => {
@@ -172,7 +173,7 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
 }
 
 export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
+  const ctx = use(AuthContext);
   if (!ctx) throw new Error('useAuth must be called inside <AuthProvider>');
   return ctx;
 }

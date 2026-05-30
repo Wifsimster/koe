@@ -1,7 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
-import { NotFoundView, RouteErrorView, routeTree, type RouterContext } from './router';
+import { routeTree, type RouterContext } from './router';
+import { NotFoundView, RouteErrorView } from './components/RouteFallbacks';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { ThemeProvider } from './components/theme-provider';
 import './styles.css';

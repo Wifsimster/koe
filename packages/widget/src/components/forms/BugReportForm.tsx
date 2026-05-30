@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent, type FormEvent } from 'react';
+import { useEffect, useReducer, useRef, useState, type FocusEvent, type FormEvent } from 'react';
 import { captureBrowserMetadata, isValidEmail } from '@koe/shared';
 import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
@@ -20,6 +20,41 @@ const EMPTY: FormState = {
   email: '',
 };
 
+type FieldErrors = Partial<Record<keyof FormState, string>>;
+
+interface FormData {
+  values: FormState;
+  errors: FieldErrors;
+}
+
+const INITIAL_FORM: FormData = { values: EMPTY, errors: {} };
+
+type FormAction =
+  | { type: 'setValue'; key: keyof FormState; value: string }
+  | { type: 'setError'; key: keyof FormState; message: string | undefined }
+  | { type: 'setErrors'; errors: FieldErrors }
+  | { type: 'reset' };
+
+/**
+ * Field values and their validation errors travel together in one
+ * reducer — every edit and every (re)validation is a single immutable
+ * step, which keeps the form's hook count low and the two in sync.
+ */
+function formReducer(data: FormData, action: FormAction): FormData {
+  switch (action.type) {
+    case 'setValue':
+      return { ...data, values: { ...data.values, [action.key]: action.value } };
+    case 'setError':
+      return { ...data, errors: { ...data.errors, [action.key]: action.message } };
+    case 'setErrors':
+      return { ...data, errors: action.errors };
+    case 'reset':
+      return INITIAL_FORM;
+    default:
+      return data;
+  }
+}
+
 export interface BugReportFormProps {
   /**
    * Optional callback that switches the widget to the "my requests"
@@ -33,22 +68,16 @@ export interface BugReportFormProps {
 
 export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
   const { locale, api, config } = useKoe();
-  const [state, setState] = useState<FormState>(EMPTY);
-  const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
+  const [form, dispatchForm] = useReducer(formReducer, INITIAL_FORM);
+  const { values, errors } = form;
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const titleRef = useRef<HTMLInputElement>(null);
   // Cancel the in-flight request if the widget closes mid-submit so we
   // don't update state on an unmounted component and don't waste bytes on
   // a response nobody will read.
   const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => controllerRef.current?.abort(), []);
-
-  // Autofocus the first field so users can start typing immediately.
-  useEffect(() => {
-    if (!success) titleRef.current?.focus();
-  }, [success]);
 
   if (success) {
     return (
@@ -57,8 +86,7 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
         message={locale.bugForm.success}
         onDismiss={() => {
           setSuccess(false);
-          setState(EMPTY);
-          setErrors({});
+          dispatchForm({ type: 'reset' });
         }}
         onViewMyRequests={onViewMyRequests}
         viewMyRequestsLabel={locale.myRequests?.title ?? 'My requests'}
@@ -79,7 +107,7 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
 
   const onBlur = (key: keyof FormState) => (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const msg = validateField(key, e.target.value);
-    setErrors((prev) => ({ ...prev, [key]: msg }));
+    dispatchForm({ type: 'setError', key, message: msg });
   };
 
   const onSubmit = async (e: FormEvent) => {
@@ -90,12 +118,12 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
     if (submitting) return;
     setApiError(null);
 
-    const nextErrors: Partial<Record<keyof FormState, string>> = {};
+    const nextErrors: FieldErrors = {};
     (['title', 'description', 'email'] as const).forEach((k) => {
-      const msg = validateField(k, state[k]);
+      const msg = validateField(k, values[k]);
       if (msg) nextErrors[k] = msg;
     });
-    setErrors(nextErrors);
+    dispatchForm({ type: 'setErrors', errors: nextErrors });
     if (Object.keys(nextErrors).length > 0) return;
 
     // Abort any previous in-flight request before assigning the new one.
@@ -109,21 +137,20 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
       // The host-supplied user object wins over a widget-collected email.
       // Only borrow the optional field when the host didn't give us one.
       const baseReporter = config.user ?? { id: 'anonymous' };
-      const email = state.email.trim() || baseReporter.email;
+      const email = values.email.trim() || baseReporter.email;
       const reporter = email ? { ...baseReporter, email } : baseReporter;
 
       await api.submitBugReport(
         {
-          title: state.title.trim(),
-          description: state.description.trim(),
-          stepsToReproduce: state.reproduce.trim() || undefined,
+          title: values.title.trim(),
+          description: values.description.trim(),
+          stepsToReproduce: values.reproduce.trim() || undefined,
           reporter,
           metadata: captureBrowserMetadata(),
         },
         { signal: controller.signal },
       );
-      if (controller.signal.aborted) return;
-      setSuccess(true);
+      if (!controller.signal.aborted) setSuccess(true);
     } catch (err) {
       if (controller.signal.aborted) return;
       if (err instanceof KoeApiError) {
@@ -157,14 +184,14 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
   const update =
     <K extends keyof FormState>(key: K) =>
     (value: string) =>
-      setState((s) => ({ ...s, [key]: value }));
+      dispatchForm({ type: 'setValue', key, value });
 
   return (
     <form onSubmit={onSubmit} noValidate>
       <TextField
-        ref={titleRef}
+        autoFocus
         label={locale.bugForm.title}
-        value={state.title}
+        value={values.title}
         onChange={(e) => update('title')(e.target.value)}
         onBlur={onBlur('title')}
         error={errors.title}
@@ -172,7 +199,7 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
       />
       <TextAreaField
         label={locale.bugForm.description}
-        value={state.description}
+        value={values.description}
         onChange={(e) => update('description')(e.target.value)}
         onBlur={onBlur('description')}
         error={errors.description}
@@ -180,7 +207,7 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
       />
       <TextAreaField
         label={locale.bugForm.reproduce}
-        value={state.reproduce}
+        value={values.reproduce}
         onChange={(e) => update('reproduce')(e.target.value)}
         rows={3}
       />
@@ -192,7 +219,7 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
           type="email"
           autoComplete="email"
           inputMode="email"
-          value={state.email}
+          value={values.email}
           onChange={(e) => update('email')(e.target.value)}
           onBlur={onBlur('email')}
           error={errors.email}

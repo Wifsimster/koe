@@ -6,7 +6,7 @@ import type { WorkspaceProjectSummary } from '../api/client';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
-import { INBOX_DEFAULT_SEARCH } from '../router';
+import { INBOX_DEFAULT_SEARCH } from '../lib/searchParams';
 import { cn } from '../lib/utils';
 
 /**
@@ -108,7 +108,7 @@ function ProjectTile({
           <CardTitle className="flex items-center gap-2 group-hover:underline">
             <span
               aria-hidden
-              className="inline-block h-2 w-2 rounded-full"
+              className="inline-block size-2 rounded-full"
               style={{ backgroundColor: project.accentColor }}
             />
             <span className="truncate">{project.name}</span>
@@ -121,7 +121,7 @@ function ProjectTile({
           to="/"
           search={{ ...INBOX_DEFAULT_SEARCH, kind: 'bug', status: 'open' }}
           onClick={pick}
-          icon={<Bug className="h-3.5 w-3.5" />}
+          icon={<Bug className="size-3.5" />}
           label="Open bugs"
           value={kpis.openBugs}
         />
@@ -129,7 +129,7 @@ function ProjectTile({
           to="/"
           search={{ ...INBOX_DEFAULT_SEARCH, kind: 'feature', status: 'open' }}
           onClick={pick}
-          icon={<Lightbulb className="h-3.5 w-3.5" />}
+          icon={<Lightbulb className="size-3.5" />}
           label="Open ideas"
           value={kpis.openFeatures}
         />
@@ -137,7 +137,7 @@ function ProjectTile({
           to="/"
           search={{ ...INBOX_DEFAULT_SEARCH, kind: 'feature', status: 'open', sort: 'votes' }}
           onClick={pick}
-          icon={<Heart className="h-3.5 w-3.5" />}
+          icon={<Heart className="size-3.5" />}
           label="Idea votes"
           value={kpis.openFeatureVotes}
         />
@@ -167,7 +167,7 @@ function KpiLink({
       to={to}
       search={search}
       onClick={onClick}
-      className="group flex items-center justify-between gap-3 rounded-sm px-1 py-1 outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
+      className="group flex items-center justify-between gap-3 rounded-sm p-1 outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
     >
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
         {icon}

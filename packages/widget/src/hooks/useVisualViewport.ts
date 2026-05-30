@@ -35,8 +35,11 @@ export function useVisualViewport(targetRef: RefObject<HTMLElement | null>): voi
     };
 
     write();
-    vv.addEventListener('resize', write);
-    vv.addEventListener('scroll', write);
+    // The handler only writes a CSS variable — it never calls
+    // preventDefault — so both listeners are safe to mark passive and
+    // keep the viewport scroll off the main thread.
+    vv.addEventListener('resize', write, { passive: true });
+    vv.addEventListener('scroll', write, { passive: true });
     return () => {
       vv.removeEventListener('resize', write);
       vv.removeEventListener('scroll', write);
