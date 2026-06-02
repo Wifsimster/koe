@@ -41,6 +41,25 @@ export function getRedisFromEnv(): RedisClient | null {
   return cached;
 }
 
+/**
+ * Close the shared Redis connection, if one was opened. Safe to call
+ * when Redis was never configured (no-op). Used by the graceful
+ * shutdown path so the open socket and ioredis reconnect timers don't
+ * keep the event loop alive and force a non-zero exit on SIGTERM.
+ */
+export async function closeRedis(): Promise<void> {
+  const client = cached;
+  cached = undefined;
+  if (!client) return;
+  try {
+    await client.quit();
+  } catch {
+    // `quit` can reject if the socket is already gone — fall back to a
+    // hard disconnect so we never hang shutdown on Redis.
+    client.disconnect();
+  }
+}
+
 /** Test-only hook to swap or reset the cached client. */
 export function __setRedisForTest(client: RedisClient | null): void {
   cached = client;

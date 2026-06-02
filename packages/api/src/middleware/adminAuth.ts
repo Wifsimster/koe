@@ -25,12 +25,12 @@ import { fail } from '../lib/response';
  * the middleware falls back to HMAC-only verification so the existing
  * test surface keeps working.
  *
- * NOTE for the operator: until `passwordAuth.ts` is updated to call
- * `recordAdminSession()` at login and `revokeAdminSession()` at logout,
- * a TOFU (trust-on-first-use) insert in `requireAdmin` keeps things
- * working — a session not yet in `admin_sessions` is admitted once and
- * its hash recorded. Drop the TOFU branch as soon as the login flow
- * persists explicitly.
+ * Login (`passwordAuth.ts`) persists every session via
+ * `recordAdminSession()` and logout removes it via
+ * `revokeAdminSession()`, so `requireAdmin` requires a live
+ * `admin_sessions` row — there is no trust-on-first-use fallback. A
+ * cookie with no matching row (logged out, revoked, or forged) is
+ * rejected, which is what makes server-side logout actually effective.
  */
 
 export interface AdminContext {
@@ -95,10 +95,7 @@ export function verifySessionCookie(raw: string | undefined): number | null {
  *
  * No-ops when the DB isn't available (unit tests, typecheck).
  */
-export async function recordAdminSession(
-  cookieValue: string,
-  expiresAtMs: number,
-): Promise<void> {
+export async function recordAdminSession(cookieValue: string, expiresAtMs: number): Promise<void> {
   if (!dbAvailable) return;
   const tokenHash = hashSessionToken(cookieValue);
   await db
@@ -135,9 +132,7 @@ async function gcExpiredSessions(): Promise<void> {
   if (now - lastGcAt < GC_INTERVAL_MS) return;
   lastGcAt = now;
   try {
-    await db
-      .delete(schema.adminSessions)
-      .where(lte(schema.adminSessions.expiresAt, new Date()));
+    await db.delete(schema.adminSessions).where(lte(schema.adminSessions.expiresAt, new Date()));
   } catch (err) {
     // GC is best-effort — never fail a request because of it.
     console.warn('[koe/api] admin_sessions GC failed', err);
@@ -174,18 +169,14 @@ export const requireAdmin: MiddlewareHandler<{ Variables: AdminContext }> = asyn
       )
       .limit(1);
     if (!row) {
-      // TOFU: until passwordAuth.ts persists at login, admit a
-      // never-seen-but-HMAC-valid cookie once and record it. Remove
-      // this branch once login explicitly calls recordAdminSession.
-      try {
-        await db
-          .insert(schema.adminSessions)
-          .values({ tokenHash, expiresAt: new Date(expiresAtMs) })
-          .onConflictDoNothing();
-      } catch (err) {
-        console.warn('[koe/api] TOFU admin_sessions insert failed', err);
-        return fail(c, 'unauthorized', 'Admin session required', 401);
-      }
+      // No live session row for this cookie. Login persists every
+      // session via `recordAdminSession`, so the only ways to reach
+      // here are a logout (row deleted), a manual revoke, or an
+      // expired/forged cookie — all of which must be rejected. (An
+      // earlier TOFU branch re-inserted such cookies "once"; that
+      // predated login-time persistence and silently defeated
+      // server-side logout, so it's been removed.)
+      return fail(c, 'unauthorized', 'Admin session required', 401);
     }
     // Best-effort GC, throttled.
     void gcExpiredSessions();
