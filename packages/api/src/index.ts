@@ -38,7 +38,7 @@ const adminSessionSecret = process.env.ADMIN_SESSION_SECRET;
 if (adminPasswordHash?.startsWith('REPLACE_ME')) {
   throw new Error(
     'ADMIN_PASSWORD_HASH still contains the placeholder value. Generate a real ' +
-      "hash with `docker compose run --rm api hash-password` and paste it into .env.",
+      'hash with `docker compose run --rm api hash-password` and paste it into .env.',
   );
 }
 if (adminSessionSecret?.startsWith('REPLACE_ME')) {
@@ -48,14 +48,32 @@ if (adminSessionSecret?.startsWith('REPLACE_ME')) {
   );
 }
 
-const adminConfigured =
-  !!process.env.ADMIN_EMAIL && !!adminPasswordHash && !!adminSessionSecret;
+const adminConfigured = !!process.env.ADMIN_EMAIL && !!adminPasswordHash && !!adminSessionSecret;
+
+// Resolve the session TTL with a NaN guard: a non-numeric
+// ADMIN_SESSION_TTL_DAYS would make `Number(...)` return NaN, and the
+// minted cookie's `expiresAt = Date.now() + NaN` is itself NaN — which
+// `verifySessionCookie` rejects, so every login would "succeed" (200)
+// yet the very next request is 401, with no obvious cause. Fall back to
+// the default instead.
+const DEFAULT_SESSION_TTL_DAYS = 7;
+function resolveSessionTtlDays(): number {
+  const raw = process.env.ADMIN_SESSION_TTL_DAYS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SESSION_TTL_DAYS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.warn(
+      `[koe/api] invalid ADMIN_SESSION_TTL_DAYS="${raw}", falling back to ${DEFAULT_SESSION_TTL_DAYS}`,
+    );
+    return DEFAULT_SESSION_TTL_DAYS;
+  }
+  return parsed;
+}
 
 if (adminConfigured) {
   const authRoutes = createAuthRoutes({
-    sessionTtlDays: Number(process.env.ADMIN_SESSION_TTL_DAYS ?? '7'),
-    secureCookies:
-      (process.env.ADMIN_COOKIES_SECURE ?? 'true').toLowerCase() !== 'false',
+    sessionTtlDays: resolveSessionTtlDays(),
+    secureCookies: (process.env.ADMIN_COOKIES_SECURE ?? 'true').toLowerCase() !== 'false',
   });
 
   const adminRoot = new Hono();

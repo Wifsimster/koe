@@ -72,9 +72,9 @@ export interface TicketListQuery {
   verified?: boolean;
   search?: string;
   /**
-   * Sort order. `recent` (default) orders by `updated_at` desc.
-   * `votes` orders by vote count desc and is incompatible with
-   * `cursor` (server returns 422).
+   * Sort order. `recent` (default) orders by `created_at` desc (newest
+   * tickets first, tie-broken by id). `votes` orders by vote count desc
+   * and is incompatible with `cursor` (server returns 422).
    */
   sort?: 'recent' | 'votes';
   limit?: number;

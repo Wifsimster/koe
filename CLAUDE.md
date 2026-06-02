@@ -68,7 +68,7 @@ node --test packages/api/src/lib/identityToken.test.ts
 
 - Single-admin : `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` (argon2id) en env. Login via `passwordAuth.ts`. Pas de table `admin_users`, pas de CLI de creation d'utilisateur. Hash genere via `pnpm --filter @koe/api hash-password '...'`.
 - `dev-session` : tokens bearer mintes via CLI `admin-session`. **L'API refuse de demarrer en production avec ce mode.**
-- Sessions DB-backed : cookie HMAC envelope + lookup SHA-256 dans `admin_sessions`. Le login fait `recordAdminSession`, le logout fait `revokeAdminSession`. Un dump DB ne fuite pas de credentials actifs, et le logout invalide reellement la session cote serveur. Branche TOFU dans `requireAdmin` admet une fois un cookie HMAC-valide jamais vu — utile pour les sessions pre-existantes apres deploy de la migration 0011.
+- Sessions DB-backed : cookie HMAC envelope + lookup SHA-256 dans `admin_sessions`. Le login fait `recordAdminSession`, le logout fait `revokeAdminSession`. Un dump DB ne fuite pas de credentials actifs, et le logout invalide reellement la session cote serveur. `requireAdmin` exige une ligne `admin_sessions` vivante : sans match (logout, revoke manuel, cookie expire/forge) → 401. L'ancienne branche TOFU (qui re-inserait un cookie HMAC-valide jamais vu) a ete retiree — elle annulait le logout cote serveur ; le login persiste desormais chaque session, donc un cookie legitime a toujours sa ligne.
 - OIDC est mentionne dans le code mais n'est pas active dans la config actuelle ; le flux principal est password.
 
 ### Dashboard et CORS

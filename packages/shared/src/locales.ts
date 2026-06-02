@@ -278,7 +278,10 @@ export function detectBrowserLanguage(): string | null {
     if (fromHtml) return fromHtml;
   }
   if (typeof navigator !== 'undefined') {
-    const navLang = navigator.language ?? (navigator.languages && navigator.languages[0]);
+    // Use `||` rather than `??`: some browsers expose `navigator.language`
+    // as an empty string (not nullish), which would short-circuit `??`
+    // and discard a perfectly good `navigator.languages[0]`.
+    const navLang = navigator.language || navigator.languages?.[0];
     const fromNav = normalizeLanguageTag(navLang ?? null);
     if (fromNav) return fromNav;
   }

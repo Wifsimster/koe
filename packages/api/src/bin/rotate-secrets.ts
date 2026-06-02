@@ -77,13 +77,21 @@ function classify(value: string, activeKid: string): Verdict {
 interface Stats {
   read: number;
   skippedActive: number;
+  skippedOtherKid: number;
   migrated: number;
   reencrypted: number;
   errors: number;
 }
 
 function emptyStats(): Stats {
-  return { read: 0, skippedActive: 0, migrated: 0, reencrypted: 0, errors: 0 };
+  return {
+    read: 0,
+    skippedActive: 0,
+    skippedOtherKid: 0,
+    migrated: 0,
+    reencrypted: 0,
+    errors: 0,
+  };
 }
 
 async function main(): Promise<void> {
@@ -143,7 +151,12 @@ async function rotateProjects(
       continue;
     }
     if (verdict === 'other-kid' && !args.reencryptAll) {
-      stats.skippedActive += 1;
+      // Encrypted under a retired kid but intentionally left alone
+      // (no --reencrypt-all). These are NOT on the active kid, so
+      // count them separately — folding them into skipped-active made
+      // the summary claim rotation was complete while rows still
+      // needed re-encryption.
+      stats.skippedOtherKid += 1;
       continue;
     }
 
@@ -208,7 +221,7 @@ async function rotateIdentitySecrets(
       continue;
     }
     if (verdict === 'other-kid' && !args.reencryptAll) {
-      stats.skippedActive += 1;
+      stats.skippedOtherKid += 1;
       continue;
     }
 
@@ -248,11 +261,12 @@ async function rotateIdentitySecrets(
 
 function report(label: string, stats: Stats): void {
   console.log(`  ${label}`);
-  console.log(`    read           ${stats.read}`);
-  console.log(`    skipped-active ${stats.skippedActive}`);
-  console.log(`    migrated       ${stats.migrated}`);
-  console.log(`    reencrypted    ${stats.reencrypted}`);
-  console.log(`    errors         ${stats.errors}`);
+  console.log(`    read             ${stats.read}`);
+  console.log(`    skipped-active   ${stats.skippedActive}`);
+  console.log(`    skipped-other    ${stats.skippedOtherKid}`);
+  console.log(`    migrated         ${stats.migrated}`);
+  console.log(`    reencrypted      ${stats.reencrypted}`);
+  console.log(`    errors           ${stats.errors}`);
 }
 
 try {
