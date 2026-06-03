@@ -147,6 +147,12 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
   );
 
   const logout = useCallback<AuthContextValue['logout']>(async () => {
+    // Abort any in-flight refresh first. Without this, a /me + /projects
+    // response that landed during the logout round-trip would resolve
+    // after the state flip and re-mark the user as authenticated — the
+    // dashboard would bounce back to the inbox instead of the login page.
+    refreshControllerRef.current?.abort();
+    refreshControllerRef.current = null;
     await api.logout();
     setTransientError(false);
     setState({ status: 'unauthenticated' });

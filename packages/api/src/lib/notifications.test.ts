@@ -226,6 +226,19 @@ describe('notifyNewTicket', () => {
     assert.ok(!email.html?.includes('Open in dashboard'));
   });
 
+  it('returns false and logs when Resend resolves with an error envelope', async () => {
+    process.env.NOTIFY_OWNER_EMAIL = 'owner@example.com';
+    process.env.RESEND_FROM_EMAIL = 'koe@example.com';
+
+    const fake = makeFakeResend({
+      resendError: { message: 'Domain is not verified' },
+    });
+    __setResendForTest(fake.client);
+
+    const sent = await notifyNewTicket(makeBugRow(), projectInfo);
+    assert.equal(sent, false);
+  });
+
   it('escapes HTML in the body', async () => {
     process.env.NOTIFY_OWNER_EMAIL = 'owner@example.com';
     process.env.RESEND_FROM_EMAIL = 'koe@example.com';
