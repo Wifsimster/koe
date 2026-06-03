@@ -144,7 +144,8 @@ function buildBody(row: TicketRow, project: ProjectInfo): { html: string; text: 
 /**
  * Sends a "new ticket" email to the configured owner. Returns `true`
  * when an email was dispatched, `false` when it was skipped (no client,
- * no recipient, no sender). Never throws — Resend errors are logged.
+ * no recipient, no sender) or Resend rejected the send. Never throws —
+ * Resend errors are logged.
  *
  * Always call as `void notifyNewTicket(row, project)` from request
  * handlers: the widget response must not wait on Resend.
@@ -165,13 +166,23 @@ export async function notifyNewTicket(
   const { html, text } = buildBody(row, project);
 
   try {
-    await client.emails.send({
+    const response = await client.emails.send({
       from,
       to,
       subject: buildSubject(row, project),
       html,
       text,
     });
+    // Resend's `send` resolves successfully even when the request is
+    // rejected — the failure surfaces as `{ data: null, error }` on the
+    // response envelope. Without this branch, an unverified sender or
+    // a blocked recipient looks like a successful send and the operator
+    // has no log to chase. Mirror the check `sendTestEmail` already does.
+    const data = (response as { data?: { id?: string } | null; error?: unknown }) ?? {};
+    if (data.error) {
+      console.error('[koe/api] notifyNewTicket rejected by Resend', data.error);
+      return false;
+    }
     return true;
   } catch (err) {
     console.error('[koe/api] notifyNewTicket failed', err);
