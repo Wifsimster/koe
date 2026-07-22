@@ -105,8 +105,8 @@ function IntentCard({ emoji, title, hint, onClick }: IntentCardProps) {
       className={clsx(
         'koe-flex koe-items-center koe-gap-3 koe-w-full koe-text-left',
         'koe-min-h-[64px] koe-px-4 koe-py-3',
-        'koe-border koe-border-koe-border koe-bg-koe-bg',
-        'hover:koe-border-koe-text focus:koe-outline-none focus-visible:koe-border-koe-text',
+        'koe-rounded-koe koe-border koe-border-koe-border koe-bg-koe-bg',
+        'hover:koe-border-koe-text focus:koe-outline-none focus-visible:koe-border-koe-accent',
         'koe-transition-colors',
       )}
     >

@@ -43,7 +43,7 @@ export function OverviewPage() {
 
   if (error) {
     return (
-      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+      <div className="rounded-none border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
         {error}
       </div>
     );
@@ -55,7 +55,7 @@ export function OverviewPage() {
 
   if (projects.length === 0) {
     return (
-      <div className="rounded-md border border-dashed px-6 py-10 text-center">
+      <div className="rounded-none border border-dashed px-6 py-10 text-center">
         <p className="text-xs text-muted-foreground">You have no projects yet.</p>
         <Button asChild className="mt-4">
           <Link to="/onboarding">
@@ -167,7 +167,7 @@ function KpiLink({
       to={to}
       search={search}
       onClick={onClick}
-      className="group flex items-center justify-between gap-3 rounded-sm p-1 outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
+      className="group flex items-center justify-between gap-3 rounded-none p-1 outline-none hover:bg-muted/60 focus-visible:bg-muted/60"
     >
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
         {icon}

@@ -75,7 +75,7 @@ export function Panel({ onClose }: PanelProps) {
       ref={shellRef}
       open
       aria-labelledby="koe-panel-title"
-      className="koe-panel-shell koe-mb-3 koe-bg-koe-bg koe-text-koe-text koe-shadow-koe koe-border koe-border-koe-border"
+      className="koe-panel-shell koe-mb-3 koe-rounded-koe koe-bg-koe-bg koe-text-koe-text koe-shadow-koe koe-border koe-border-koe-border"
     >
       {/* Grab handle, only visible in bottom-sheet mode (CSS-controlled). */}
       <div aria-hidden="true" className="koe-panel-grab" />

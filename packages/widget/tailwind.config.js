@@ -14,8 +14,12 @@ export default {
       },
       colors: {
         koe: {
-          accent: 'var(--koe-accent, #0a0a0a)',
-          'accent-hover': 'var(--koe-accent-hover, #262626)',
+          // Accent is an optional host tint. When the host doesn't pass
+          // `theme.accentColor`, it falls back to the neutral foreground
+          // so accent-tinted affordances stay visible in both light and
+          // dark mode (a hardcoded fallback would vanish on the dark bg).
+          accent: 'var(--koe-accent, var(--koe-text))',
+          'accent-hover': 'var(--koe-accent-hover, var(--koe-text-hover))',
           bg: 'var(--koe-bg)',
           'bg-muted': 'var(--koe-bg-muted)',
           border: 'var(--koe-border)',
@@ -23,6 +27,13 @@ export default {
           'text-muted': 'var(--koe-text-muted)',
           'text-hover': 'var(--koe-text-hover)',
         },
+      },
+      borderRadius: {
+        // Square by default (`--koe-radius` unset → 0). Hosts can opt into
+        // rounded chrome via `theme.radius`; every widget surface reads
+        // this token so the panel, launcher, buttons and fields round
+        // together instead of drifting apart.
+        koe: 'var(--koe-radius, 0)',
       },
       boxShadow: {
         // Subtle two-layer shadow — matches the editorial feel without

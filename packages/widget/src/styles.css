@@ -10,7 +10,13 @@
  * Visual language mirrors the @koe/dashboard admin: editorial mono type,
  * hairline rules, square corners, neutral palette. No heavy primary
  * accents — the theme API still accepts `accentColor` but only paints
- * focus rings so host apps can tint without fighting the chrome.
+ * the subtle affordances (focus rings, inline links) so host apps can
+ * tint without fighting the chrome. Unset, accents fall back to the
+ * neutral foreground.
+ *
+ * Corners are square by default; a host can opt into rounded chrome via
+ * `theme.radius`, which every surface reads through `--koe-radius`
+ * (Tailwind `koe-rounded-koe`, defaulting to 0).
  */
 .koe-root {
   --koe-bg: #ffffff;
@@ -243,6 +249,7 @@
   min-height: 44px;
   padding: 4px 8px;
   border: 1px solid var(--koe-field-border, #c4c4c4);
+  border-radius: var(--koe-radius, 0);
   background: var(--koe-bg);
   color: var(--koe-text);
   font-size: 11px;
