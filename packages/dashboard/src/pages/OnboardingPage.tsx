@@ -405,14 +405,14 @@ function CodeBlock({ value, lang }: { value: string; lang?: string }) {
   };
   return (
     <div className="relative group">
-      <pre className="overflow-x-auto rounded-sm border border-border bg-muted/40 p-4 text-[11px] leading-relaxed font-mono">
+      <pre className="overflow-x-auto rounded-none border border-border bg-muted/40 p-4 text-[11px] leading-relaxed font-mono">
         <code>{value}</code>
       </pre>
       <button
         type="button"
         onClick={() => void onCopy()}
         aria-label={lang ? `Copy ${lang} snippet` : 'Copy snippet'}
-        className="absolute top-2 right-2 rounded-sm border border-border bg-background px-2 py-1 text-[10px] uppercase tracking-wide opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+        className="absolute top-2 right-2 rounded-none border border-border bg-background px-2 py-1 text-[10px] uppercase tracking-wide opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
       >
         {copied ? 'Copied' : 'Copy'}
       </button>

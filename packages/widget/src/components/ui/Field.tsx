@@ -11,8 +11,9 @@ const inputClasses =
   // on focus, which ruins the panel layout.
   // `koe-field` applies a stronger rest border (see styles.css) so the
   // input reads as interactive, not editorial text. Focus lifts to the
-  // full foreground color + ring.
-  'koe-field koe-w-full koe-px-3 koe-py-2 koe-text-base koe-border koe-bg-koe-bg focus:koe-outline-none focus:koe-border-koe-text focus:koe-ring-1 focus:koe-ring-koe-text';
+  // accent color + ring — `koe-accent` falls back to the neutral
+  // foreground when the host passes no `theme.accentColor`.
+  'koe-field koe-w-full koe-rounded-koe koe-px-3 koe-py-2 koe-text-base koe-border koe-bg-koe-bg focus:koe-outline-none focus:koe-border-koe-accent focus:koe-ring-1 focus:koe-ring-koe-accent';
 
 export function TextField({
   label,

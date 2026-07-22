@@ -7,11 +7,19 @@ export type WidgetPosition =
   | 'top-left';
 
 export interface WidgetTheme {
-  /** Hex color, e.g. "#4f46e5". Used for the launcher and primary buttons. */
+  /**
+   * Optional host tint, e.g. "#4f46e5". Paints the subtle accents only —
+   * input focus rings and inline links — while the launcher and primary
+   * buttons stay monochrome so the tint never fights the chrome. When
+   * omitted, accents fall back to the neutral foreground.
+   */
   accentColor?: string;
   /** Force light/dark mode. Defaults to `auto` (follows prefers-color-scheme). */
   mode?: 'light' | 'dark' | 'auto';
-  /** Border radius in px for the widget panel and launcher. */
+  /**
+   * Border radius in px applied to the widget chrome (panel, launcher,
+   * buttons, fields, vote controls). Defaults to 0 (square corners).
+   */
   radius?: number;
 }
 

@@ -26,7 +26,7 @@ export function Button({
       className={clsx(
         // `min-h-[44px]` enforces WCAG 2.5.5 / Apple HIG minimum target
         // so mobile users don't fat-finger the submit or close button.
-        'koe-inline-flex koe-items-center koe-justify-center koe-gap-2 koe-min-h-[44px] koe-px-4 koe-py-2 koe-text-sm koe-font-medium koe-transition-colors disabled:koe-opacity-60 disabled:koe-cursor-not-allowed',
+        'koe-inline-flex koe-items-center koe-justify-center koe-gap-2 koe-min-h-[44px] koe-rounded-koe koe-px-4 koe-py-2 koe-text-sm koe-font-medium koe-transition-colors disabled:koe-opacity-60 disabled:koe-cursor-not-allowed',
         block && 'koe-w-full',
         // Primary = foreground-on-background, inverts automatically via
         // `--koe-text` / `--koe-bg` in dark mode.
