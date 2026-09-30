@@ -45,7 +45,7 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 - `pnpm --filter @koe/api db:studio`
 - `pnpm --filter @koe/api bootstrap` : CLI interactif de creation de projet
 - `pnpm --filter @koe/api hash-password '...'` : argon2id CLI
-- `pnpm --filter @koe/api rotate-secrets` : rotation des `identitySecret` (schema v2 : `iat`, `nonce`, `kid`)
+- `pnpm --filter @koe/api exec tsx src/bin/rotate-secrets.ts` : re-chiffrement au repos des `identitySecret` sous le kid `KOE_SECRET_ACTIVE_KID` (dry-run par defaut, `--apply` pour ecrire, `--reencrypt-all` pour une rotation de cle maitre). Pas de script `package.json` ni d'entree tsup.
 - `pnpm --filter @koe/dashboard dev`
 - `pnpm --filter @wifsimster/koe dev`
 
@@ -58,7 +58,7 @@ node --test packages/api/src/lib/identityToken.test.ts
 ## Architecture API (`packages/api`)
 
 - `src/index.ts` : montage conditionnel. Les routes admin `/v1/admin/*` ne sont montees **que si** `ADMIN_AUTH_MODE` est defini (`password`, `oidc`, ou `dev-session`). Sans cette var, l'API admin reste off — c'est le defaut sur.
-- `src/bin/` : entrypoints tsup (`serve.ts`, `migrate.ts`, `bootstrap.ts`, `hash-password.ts`, `rotate-secrets.ts`). L'image Docker expose `node dist/serve.js`, `dist/migrate.js`, `dist/bootstrap.js`.
+- `src/bin/` : entrypoints tsup (`serve.ts`, `migrate.ts`, `bootstrap.ts`, `hash-password.ts`) ; `rotate-secrets.ts` n'est pas bundle (lance via `tsx`). L'image Docker expose `node dist/serve.js`, `dist/migrate.js`, `dist/bootstrap.js`.
 - `src/routes/` : `widget.ts` (public), `adminApi.ts` (JSON admin), `admin.ts` (pages HTML), `passwordAuth.ts` (login email+password), `health.ts`.
 - `src/middleware/` : `project.ts`, `identity.ts` (HMAC contributeurs), `cors.ts` (per-project, resolu via `X-Koe-Project-Key`), `rateLimit.ts`, `adminAuth.ts` (cookie HMAC + lookup `admin_sessions`). Le produit est **single-admin** : toute route admin passe par `requireAdmin`, et les routes scopees a un projet ajoutent `resolveProject`. Il n'y a pas de middleware `requireProjectMember/Writer/Owner` — ces roles n'existent pas dans le code (trimmes en migrations 0008/0009). Ne jamais deduire l'autorisation de la seule session : une route admin sans `requireAdmin`, ou une route scopee a un projet sans `resolveProject`, est un trou d'autorisation.
 - `src/db/` : `schema.ts` (modele central), `drizzle/` contient les migrations versionnees. Regenerer + commiter la migration a chaque change de schema.
