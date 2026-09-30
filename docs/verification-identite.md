@@ -75,11 +75,11 @@ Format de transport : `base64url(payloadJson).hex(hmacSha256(secret, payloadJson
 
 Le schema v2 permet de faire tourner le secret sans downtime :
 
-1. Ajouter un nouveau `kid` via le CLI : `rotate-secrets --new-kid v2 --apply`.
+1. Ajouter un nouveau `kid` : inserer une ligne dans `project_identity_secrets` (`project_id`, `kid`, `secret`, `status` a `active` par defaut). Aucun CLI ni route admin ne cree de `kid` aujourd'hui. Si `KOE_SECRET_KEYS` est actif, stocker le secret chiffre (`getSecretStoreFromEnv().encrypt(...)`) ; une ligne en clair reste lisible et peut etre migree ensuite par `rotate-secrets`.
 2. Basculer les nouvelles signatures sur ce `kid` cote backend hote.
 3. Une fois toutes les sessions expirees, marquer l'ancien `kid` comme `retiring` puis `revoked`.
 
-Les secrets en base peuvent aussi etre chiffres au repos via `KOE_SECRET_KEYS` (AES-256-GCM enveloppe).
+Les secrets en base peuvent aussi etre chiffres au repos via `KOE_SECRET_KEYS` (AES-256-GCM enveloppe). Le CLI `rotate-secrets` (`pnpm --filter @koe/api exec tsx src/bin/rotate-secrets.ts`) ne gere que ce chiffrement au repos, pas les `kid` du token : dry-run par defaut, `--apply` pour ecrire, `--reencrypt-all` pour re-chiffrer sous un nouveau `KOE_SECRET_ACTIVE_KID`.
 
 ## Cas de rejet frequents
 
