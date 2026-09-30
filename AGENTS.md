@@ -13,7 +13,7 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 | Package           | Depend de     | Role                                                                       | Publication                            |
 | ----------------- | ------------- | -------------------------------------------------------------------------- | -------------------------------------- |
 | `@wifsimster/koe` | `@koe/shared` | Widget React (build lib ESM / npm + build IIFE autonome avec React inline) | Tags git `v*` + npm (semantic-release) |
-| `@koe/api`        | `@koe/shared` | API Hono : widget public + admin JSON + auth admin (password / oidc / dev) | Image Docker (bundle tsup)             |
+| `@koe/api`        | `@koe/shared` | API Hono : widget public + admin JSON + auth admin (password)              | Image Docker (bundle tsup)             |
 | `@koe/dashboard`  | `@koe/shared` | SPA React TanStack Router : inbox, ticket detail, batches, membres         | Embarquee dans l'image API (`/admin/`) |
 | `@koe/shared`     | -             | Types metier et helpers transverses (`captureBrowserMetadata`)             | Prive au workspace                     |
 
@@ -22,7 +22,7 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 - Node `>=20.8.1`, `pnpm@9.12.0`, TypeScript `5.6.x`, Turbo `2.3.x`, Prettier `3.3.x`
 - React `19.x`, Vite `6.x`, Tailwind `3.4.x`, TanStack Router `1.82.x`
 - Hono `4.6.x`, Drizzle ORM `0.36.x`, `postgres` `3.4.x`, Zod `3.23.x`
-- Auth admin : `@node-rs/argon2` `2.0.x`, `openid-client` (OIDC), cookies HMAC
+- Auth admin : `@node-rs/argon2` `2.0.x`, cookies HMAC
 - Optionnel : `ioredis` `5.10.x` (rate limit + anti-rejeu multi-replicas)
 - Release : `semantic-release` `24.x`
 
@@ -35,7 +35,7 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 - `pnpm dev`
 - `pnpm typecheck`
 - `pnpm lint` (soft-fail en CI, seul le widget a un script `lint` defini)
-- `pnpm test` : Node `--test` sur les fichiers `packages/api/src/{lib,middleware}/*.test.ts`. Pas de vitest/jest. Pas de suites cote widget/dashboard.
+- `pnpm test` : `turbo run test`, seul `@koe/api` a un script `test` (`node --import tsx --test src/lib/*.test.ts`). Couvre uniquement `packages/api/src/lib/*.test.ts` ; aucun test de middleware ni de route. Pas de vitest/jest. Pas de suites cote widget/dashboard/shared. En CI l'etape test est en `continue-on-error`.
 - `pnpm release:dry` : verification semantic-release
 
 ### Par package
@@ -52,12 +52,12 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 ### Lancer un test API isole
 
 ```
-node --test packages/api/src/lib/identityToken.test.ts
+pnpm --filter @koe/api exec node --import tsx --test src/lib/identityToken.test.ts
 ```
 
 ## Architecture API (`packages/api`)
 
-- `src/index.ts` : montage conditionnel. Les routes admin `/v1/admin/*` ne sont montees **que si** `ADMIN_AUTH_MODE` est defini (`password`, `oidc`, ou `dev-session`). Sans cette var, l'API admin reste off — c'est le defaut sur.
+- `src/index.ts` : montage conditionnel. Les routes admin `/v1/admin/*` ne sont montees **que si** `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` et `ADMIN_SESSION_SECRET` sont tous definis. Sans elles, l'API admin reste off — c'est le defaut sur. Une config partielle (`ADMIN_EMAIL` ou `ADMIN_PASSWORD_HASH` sans les trois) fait refuser le demarrage.
 - `src/bin/` : entrypoints tsup (`serve.ts`, `migrate.ts`, `bootstrap.ts`, `hash-password.ts`) ; `rotate-secrets.ts` n'est pas bundle (lance via `tsx`). L'image Docker expose `node dist/serve.js`, `dist/migrate.js`, `dist/bootstrap.js`.
 - `src/routes/` : `widget.ts` (public), `adminApi.ts` (JSON admin), `admin.ts` (pages HTML), `passwordAuth.ts` (login email+password), `health.ts`.
 - `src/middleware/` : `project.ts`, `identity.ts` (HMAC contributeurs), `cors.ts` (per-project, resolu via `X-Koe-Project-Key`), `rateLimit.ts`, `adminAuth.ts` (cookie HMAC + lookup `admin_sessions`). Le produit est **single-admin** : toute route admin passe par `requireAdmin`, et les routes scopees a un projet ajoutent `resolveProject`. Il n'y a pas de middleware `requireProjectMember/Writer/Owner` — ces roles n'existent pas dans le code (trimmes en migrations 0008/0009). Ne jamais deduire l'autorisation de la seule session : une route admin sans `requireAdmin`, ou une route scopee a un projet sans `resolveProject`, est un trou d'autorisation.
@@ -68,13 +68,12 @@ node --test packages/api/src/lib/identityToken.test.ts
 ### Auth admin — single-admin via env
 
 - Single-admin : `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` (argon2id) en env. Login via `passwordAuth.ts`. Pas de table `admin_users`, pas de CLI de creation d'utilisateur. Hash genere via `pnpm --filter @koe/api hash-password '...'`.
-- `dev-session` : tokens bearer mintes via CLI `admin-session`. **L'API refuse de demarrer en production avec ce mode.**
 - Sessions DB-backed : cookie HMAC envelope + lookup SHA-256 dans `admin_sessions`. Le login fait `recordAdminSession`, le logout fait `revokeAdminSession`. Un dump DB ne fuite pas de credentials actifs, et le logout invalide reellement la session cote serveur. `requireAdmin` exige une ligne `admin_sessions` vivante : sans match (logout, revoke manuel, cookie expire/forge) → 401. L'ancienne branche TOFU (qui re-inserait un cookie HMAC-valide jamais vu) a ete retiree — elle annulait le logout cote serveur ; le login persiste desormais chaque session, donc un cookie legitime a toujours sa ligne.
-- OIDC est mentionne dans le code mais n'est pas active dans la config actuelle ; le flux principal est password.
+- Pas d'OIDC ni de mode `dev-session` / tokens bearer : retires par `acbab66` (auth admin ramenee au single-admin env). Il n'y a pas de variable `ADMIN_AUTH_MODE` : le seul flux est email + password.
 
 ### Dashboard et CORS
 
-`ENABLE_DASHBOARD` est `false` par defaut. Passer a `true` pour servir la SPA a `/admin/`. Le build Vite utilise `base=/admin/` dans le Dockerfile. `ADMIN_DASHBOARD_ORIGIN` regle le CORS si le dashboard est heberge sur une autre origine.
+`ENABLE_DASHBOARD` est `false` par defaut via `docker-compose.yml` ; hors compose, le code le traite comme `true` s'il n'est pas defini. Mettre `true` pour servir la SPA a `/admin/`. Le build Vite utilise `base=/admin/` dans le Dockerfile. `ADMIN_DASHBOARD_ORIGIN` regle le CORS si le dashboard est heberge sur une autre origine.
 
 ### Audit et actions en lot
 
@@ -129,8 +128,8 @@ TanStack Router, shadcn/ui sur Tailwind. Pages : `InboxPage`, `TicketDetailPage`
 
 - `DATABASE_URL` : obligatoire, sinon l'API refuse de demarrer.
 - `MIGRATE_ON_START` : `true` par defaut. Passer a `false` en multi-replicas et lancer `docker compose run --rm api migrate` avant le scale-up.
-- `ENABLE_DASHBOARD` : `false` par defaut.
-- `ADMIN_AUTH_MODE` : non defini = pas d'API admin (defaut sur). Sinon `password`, `oidc`, `dev-session`.
+- `ENABLE_DASHBOARD` : `false` par defaut dans `docker-compose.yml`, `true` si non defini hors compose.
+- `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` + `ADMIN_SESSION_SECRET` : les trois non definis = pas d'API admin (defaut sur). Tous definis = API admin montee. Une valeur `REPLACE_ME...` fait refuser le demarrage.
 - `KOE_SECRET_KEYS` (+ `KOE_SECRET_ACTIVE_KID`) : active le chiffrement AES-256-GCM au repos des `identitySecret`. Passer par `getSecretStoreFromEnv()` — ne **jamais** stocker ces secrets en clair une fois actif.
 - `REDIS_URL` : indispensable des qu'on scale au-dela d'un replica. Sans Redis, le rate limiter et l'anti-rejeu sont par-pod.
 - `RESEND_API_KEY` : optionnel. Non defini = notifications email desactivees (no-op silencieux). Defini = envoi d'un email a chaque nouveau ticket widget.
@@ -144,8 +143,7 @@ TanStack Router, shadcn/ui sur Tailwind. Pages : `InboxPage`, `TicketDetailPage`
 - `pnpm install` ne suffit pas avant `pnpm dev` : lancer d'abord `pnpm turbo run build` pour que `@koe/shared/dist` existe.
 - Toute modif de deps oblige a regenerer `pnpm-lock.yaml` — la CI `--frozen-lockfile` echoue sinon.
 - Ne **pas** documenter le chat temps reel comme fonctionnalite active.
-- Ne **pas** ressusciter `better-auth` (abandonne au profit de `openid-client` + argon2id). Les vars `BETTER_AUTH_*` n'existent plus.
-- Ne **pas** activer `ADMIN_AUTH_MODE=dev-session` en production : l'API refuse de demarrer.
+- Ne **pas** ressusciter `better-auth` (abandonne au profit d'argon2id + cookie HMAC). Les vars `BETTER_AUTH_*` n'existent plus.
 - Le script `lint` du widget reference `eslint` mais aucune config eslint n'est installee — la CI tourne `lint` avec `continue-on-error: true`.
 - Le `projectKey` est **public**, ce n'est pas un secret. Le vrai secret est `identitySecret`.
 
