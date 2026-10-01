@@ -54,7 +54,7 @@ Liste les tickets dont `reporterId` correspond a l'appelant. Alimente l'onglet �
 
 ### `/r/:projectKey` et `/v1/public/:projectKey/roadmap`
 
-Surface publique non authentifiee, montee sans dependre de `ADMIN_AUTH_MODE` — activable meme sur une instance qui n'expose pas l'API admin.
+Surface publique non authentifiee, montee sans dependre de la configuration admin (`ADMIN_*`) — activable meme sur une instance qui n'expose pas l'API admin.
 
 - Seuls les tickets ou `is_public_roadmap = true` sont inclus, et uniquement dans les statuts `planned`, `in_progress`, `resolved`.
 - L'admin opte-in ticket par ticket via le dashboard (switch « Public roadmap »). Defaut : masque.

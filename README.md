@@ -119,12 +119,12 @@ docker run --rm -p 8787:8787 \
 | `PORT`                   | Non         | Port d'écoute HTTP. Par défaut `8787`.                                                                                                   |
 | `HOST`                   | Non         | Interface d'écoute. Par défaut `0.0.0.0`.                                                                                                |
 | `MIGRATE_ON_START`       | Non         | `true` (défaut) applique les migrations au boot. `false` en multi-réplicas.                                                              |
-| `ENABLE_DASHBOARD`       | Non         | `false` (défaut). Passer à `true` pour servir la SPA d'administration sur `/admin/`.                                                     |
-| `ADMIN_AUTH_MODE`        | Non         | Monte l'API admin `/v1/admin/*`. Valeurs : `password`, `oidc`, `dev-session`. Non défini : pas d'API admin (défaut sûr).                 |
+| `ENABLE_DASHBOARD`       | Non         | Sert la SPA d'administration sur `/admin/`. `false` par défaut via `docker-compose.yml` ; hors compose, traité comme `true` s'il n'est pas défini. |
+| `ADMIN_EMAIL`            | Pour l'admin | Email de l'unique administrateur. Avec `ADMIN_PASSWORD_HASH` et `ADMIN_SESSION_SECRET`, monte l'API admin `/v1/admin/*`. Aucune des trois : pas d'API admin (défaut sûr). |
+| `ADMIN_PASSWORD_HASH`    | Pour l'admin | Hash argon2id du mot de passe admin, généré via `docker compose run --rm api hash-password`.                                            |
+| `ADMIN_SESSION_SECRET`   | Pour l'admin | Clé HMAC des cookies de session (`openssl rand -hex 32`). La faire tourner invalide toutes les sessions en cours.                        |
 | `ADMIN_DASHBOARD_ORIGIN` | Non         | Origine CORS de la SPA admin. À laisser vide en déploiement mono-origine (dashboard servi par la même API).                              |
-| `OIDC_*`                 | En mode OIDC | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `OIDC_DASHBOARD_URL`, `OIDC_COOKIE_SECRET`, `OIDC_SCOPES`. |
-| `ADMIN_SESSION_COOKIE`   | Non         | Nom du cookie de session admin. Par défaut `koe_admin`.                                                                                  |
-| `ADMIN_SESSION_TTL_DAYS` | Non         | Durée de vie du cookie en jours. Par défaut `30`.                                                                                        |
+| `ADMIN_SESSION_TTL_DAYS` | Non         | Durée de vie du cookie en jours. Par défaut `7`.                                                                                         |
 | `ADMIN_COOKIES_SECURE`   | Non         | `true` (défaut). Passer à `false` uniquement en développement HTTP local.                                                                |
 | `KOE_SECRET_KEYS`        | Non         | Active le chiffrement au repos des secrets d'identité (AES-256-GCM enveloppé). Format `kid:base64,kid2:base64`.                          |
 | `KOE_SECRET_ACTIVE_KID`  | Si `KOE_SECRET_KEYS` | `kid` utilisé pour chiffrer les nouveaux secrets. Les autres `kid` restent acceptés pour le déchiffrement pendant la rotation. |
@@ -132,22 +132,19 @@ docker run --rm -p 8787:8787 \
 
 ### Dashboard admin
 
-Le dashboard est **embarqué dans l'image mais désactivé par défaut**. Pour un déploiement complet avec administration, il faut activer deux flags distincts :
+Le dashboard est **embarqué dans l'image mais désactivé par défaut** dans `docker-compose.yml`. Pour un déploiement complet avec administration, il faut activer deux réglages distincts :
 
 | Flag                                    | Rôle                                                              |
 | --------------------------------------- | ----------------------------------------------------------------- |
 | `ENABLE_DASHBOARD=true`                 | Sert la SPA à `/admin/`.                                          |
-| `ADMIN_AUTH_MODE=password` ou `oidc`    | Monte l'API JSON d'administration à `/v1/admin/*` avec auth.      |
+| `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` + `ADMIN_SESSION_SECRET` | Monte l'API JSON d'administration à `/v1/admin/*` avec auth. |
 
-Trois modes d'authentification sont disponibles :
-
-- **`password`** : email + mot de passe (argon2id). Les utilisateurs sont créés via le CLI `docker compose run --rm api admin-user --email … --project-key …`.
-- **`oidc`** : login via n'importe quel fournisseur OpenID Connect (Auth0, Clerk, Keycloak, Google, WorkOS, etc.). Configure les variables `OIDC_*`.
-- **`dev-session`** : tokens bearer mintés via le CLI `admin-session`. Refusé en production. Pratique pour le local et le staging.
+Koe est **single-admin** : un seul flux d'authentification, email + mot de passe (argon2id), avec des identifiants portés par l'environnement. Il n'y a ni table d'utilisateurs, ni CLI de création de compte, ni rôles par projet. Générez le hash avec `docker compose run --rm api hash-password` (saisie masquée) et collez-le dans `ADMIN_PASSWORD_HASH`.
 
 Points d'attention :
 
-- Sans `ADMIN_AUTH_MODE`, l'API admin n'est pas montée : c'est le défaut sûr. Aucune route `/v1/admin/*` n'existe.
+- Sans `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` et `ADMIN_SESSION_SECRET`, l'API admin n'est pas montée : c'est le défaut sûr. Aucune route `/v1/admin/*` n'existe.
+- Une configuration partielle (`ADMIN_EMAIL` ou `ADMIN_PASSWORD_HASH` défini sans les trois) fait refuser le démarrage, tout comme une valeur `REPLACE_ME…` laissée dans `ADMIN_PASSWORD_HASH` ou `ADMIN_SESSION_SECRET`.
 - Sans `ENABLE_DASHBOARD`, la SPA n'est pas servie : vous pouvez utiliser l'API admin depuis un front hébergé ailleurs en renseignant `ADMIN_DASHBOARD_ORIGIN`.
 - Les sessions sont stockées en base (`admin_sessions`) sous forme de hash SHA-256 ; un dump DB ne fuite pas de credentials actifs.
 
@@ -289,7 +286,7 @@ Points importants :
 
 Deux surfaces exploitent les tickets déjà stockés, sans nouveau module à déployer :
 
-- **`/r/:projectKey`** — page HTML SSR servie par le même process que l'API. Monte automatiquement, sans dépendre de `ADMIN_AUTH_MODE`. Les admins opt-in chaque ticket depuis le dashboard (case « Public roadmap » sur le détail) ; la page n'expose jamais `reporterEmail`, `reporterName`, `screenshotUrl`, `metadata` ou `notes`, et la `description` y est tronquée. Un JSON équivalent est disponible à `/v1/public/:projectKey/roadmap` avec `Access-Control-Allow-Origin: *`.
+- **`/r/:projectKey`** — page HTML SSR servie par le même process que l'API. Monte automatiquement, sans dépendre de la configuration admin (`ADMIN_*`). Les admins opt-in chaque ticket depuis le dashboard (case « Public roadmap » sur le détail) ; la page n'expose jamais `reporterEmail`, `reporterName`, `screenshotUrl`, `metadata` ou `notes`, et la `description` y est tronquée. Un JSON équivalent est disponible à `/v1/public/:projectKey/roadmap` avec `Access-Control-Allow-Origin: *`.
 - **Onglet « My requests » du widget** — disponible dès que l'application hôte renseigne un `user.id` non anonyme. Le widget appelle `GET /v1/widget/my-requests` et affiche l'état de chaque ticket soumis ; lorsqu'un ticket est publié sur la roadmap, une ancre deep-link ouvre sa carte sur `/r/:projectKey#t-<id>`.
 
 Les bascules admin émettent un événement d'audit `roadmap_toggled` dans la même transaction que le PATCH — réversible depuis la timeline du ticket au même titre que `status_changed` et `priority_changed`.
@@ -329,7 +326,7 @@ const userHash = createHmac('sha256', process.env.KOE_IDENTITY_SECRET)
 - **Mes demandes (widget)** : chaque utilisateur identifié retrouve dans le widget la liste des tickets qu'il a soumis, avec statut à jour et lien vers la roadmap publique lorsque le ticket y est publié.
 - **Roadmap publique** : page SSR partagée à `/r/:projectKey` (colonnes *Planned* / *In progress* / *Shipped*), doublée d'un JSON CORS-ouvert à `/v1/public/:projectKey/roadmap`. Les admins publient les tickets ticket par ticket depuis le dashboard — défaut off, page curatée.
 - **Chat** : onglet visible, mais conversation encore locale et sans temps réel.
-- **Dashboard admin** : inbox des tickets, détail, modifications de statut/priorité, notes privées, bascule « Public roadmap » par ticket, historique d'audit et revert ponctuel des événements. Trois modes d'authentification branchés : `password`, `oidc`, `dev-session`.
+- **Dashboard admin** : inbox des tickets, détail, modifications de statut/priorité, notes privées, bascule « Public roadmap » par ticket, historique d'audit et revert ponctuel des événements. Authentification single-admin par email + mot de passe.
 - **Rotation des secrets d'identité** : CLI `rotate-secrets` avec schéma v2 (signature liée à `iat`, `nonce`, `kid`). Permet un renouvellement sans casser les intégrations existantes.
 - **Chiffrement des secrets au repos** : AES-256-GCM enveloppé, activable via `KOE_SECRET_KEYS`.
 
@@ -353,7 +350,7 @@ Les commits suivent **Conventional Commits**. Consultez `CONTRIBUTING.md` pour l
 ## Stack technique
 
 - **Widget** : React 19, TypeScript, Vite, Tailwind CSS.
-- **Service Koe (API)** : Hono, Zod, Drizzle ORM, PostgreSQL. Auth admin via `openid-client` (OIDC) et argon2id (`@node-rs/argon2`). Redis optionnel (ioredis) pour rate limiting et anti-rejeu. Bundlé avec tsup et publié en image Docker multi-arch.
+- **Service Koe (API)** : Hono, Zod, Drizzle ORM, PostgreSQL. Auth admin par email + mot de passe : argon2id (`@node-rs/argon2`) et cookie de session HMAC. Redis optionnel (ioredis) pour rate limiting et anti-rejeu. Bundlé avec tsup et publié en image Docker multi-arch.
 - **Dashboard** : React 19, TanStack Router, shadcn/ui sur Tailwind CSS.
 - **Monorepo** : `pnpm` workspaces et Turborepo.
 - **Release** : deux pistes indépendantes sur `main`. Widget via `semantic-release` (tags `v*` + GitHub Releases). Image serveur via workflow `Server image` (tags roulants `:edge` + `:sha-*` à chaque push, tags stables `:latest` + `:x.y.z` sur push d'un tag git `server-v*`).

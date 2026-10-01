@@ -6,7 +6,7 @@ touche ce dépôt.
 
 ## Vue d'ensemble
 
-Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-hosted destine aux produits SaaS (bugs, demandes d'evolution, vote public) et son back-office. Produit auto-heberge : aucune instance geree. Distribue sous forme d'image Docker `ghcr.io/wifsimster/koe-server` (API + dashboard bundles) et de tags git `v*` pour le widget (consomme via `github:Wifsimster/koe#vX.Y.Z` ou jsDelivr, ou via npm). Le widget (bugs, demandes d'evolution, vote) et l'API d'administration (inbox, bulk actions, membres, audit) sont branches. Le chat temps reel existe comme onglet de preview local mais n'est pas branche.
+Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-hosted destine aux produits SaaS (bugs, demandes d'evolution, vote public) et son back-office. Produit auto-heberge : aucune instance geree. Distribue sous forme d'image Docker `ghcr.io/wifsimster/koe-server` (API + dashboard bundles) et de tags git `v*` pour le widget (consomme via `github:Wifsimster/koe#vX.Y.Z` ou jsDelivr, ou via npm). Le widget (bugs, demandes d'evolution, vote) et l'API d'administration (inbox, bulk actions, audit) sont branches. Le chat temps reel existe comme onglet de preview local mais n'est pas branche.
 
 ## Packages
 
@@ -14,7 +14,7 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 | ----------------- | ------------- | -------------------------------------------------------------------------- | -------------------------------------- |
 | `@wifsimster/koe` | `@koe/shared` | Widget React (build lib ESM / npm + build IIFE autonome avec React inline) | Tags git `v*` + npm (semantic-release) |
 | `@koe/api`        | `@koe/shared` | API Hono : widget public + admin JSON + auth admin (password)              | Image Docker (bundle tsup)             |
-| `@koe/dashboard`  | `@koe/shared` | SPA React TanStack Router : inbox, ticket detail, batches, membres         | Embarquee dans l'image API (`/admin/`) |
+| `@koe/dashboard`  | `@koe/shared` | SPA React TanStack Router : inbox, ticket detail, overview, onboarding     | Embarquee dans l'image API (`/admin/`) |
 | `@koe/shared`     | -             | Types metier et helpers transverses (`captureBrowserMetadata`)             | Prive au workspace                     |
 
 ## Stack et versions
@@ -77,7 +77,7 @@ pnpm --filter @koe/api exec node --import tsx --test src/lib/identityToken.test.
 
 ### Audit et actions en lot
 
-Les mutations admin doivent emettre un evenement `admin_ticket_events` dans la **meme transaction** que la mutation. Les actions en lot correlent leurs evenements via un `batchId` commun (permet le revert).
+Les mutations admin doivent emettre un evenement `admin_ticket_events` dans la **meme transaction** que la mutation. Les actions en lot emettent un evenement par ticket, sans correlation (`batch_id` retire en migration 0009) ; le revert se fait evenement par evenement.
 
 ### Notifications email (Resend)
 

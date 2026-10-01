@@ -17,16 +17,13 @@ graph TD
     P[projects] --> T[tickets]
     T --> V[ticket_votes]
     T --> AE[admin_ticket_events]
-    T --> AC[admin_ticket_comments]
     P --> C[conversations]
     C --> M[messages]
     P --> PIS[project_identity_secrets]
-    P --> PM[project_members]
-    AU[admin_users] --> PM
-    AU --> AS[admin_sessions]
+    AS[admin_sessions]
 ```
 
-Un projet regroupe tickets, conversations, secrets d'identite et membres admin. Les utilisateurs admin sont globaux ; leur appartenance a un projet est portee par `project_members`.
+Un projet regroupe tickets, conversations et secrets d'identite. Le produit est single-admin : l'identite de l'admin vit en variables d'environnement (`ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`), pas en base. Il n'y a ni table d'utilisateurs, ni appartenance ou role par projet ; `admin_sessions` est la seule table d'authentification et n'est rattachee a aucun projet.
 
 ## Tables principales
 
@@ -44,11 +41,8 @@ Un projet regroupe tickets, conversations, secrets d'identite et membres admin. 
 
 | Table                    | Role                                                      | Champs marquants                                       |
 | ------------------------ | --------------------------------------------------------- | ------------------------------------------------------ |
-| `admin_users`            | Identites humaines du dashboard (globales, multi-projet)  | `email`, `passwordHash` (argon2id, NULL en OIDC)       |
-| `admin_sessions`         | Sessions admin                                            | `tokenHash` (SHA-256 du token), `expiresAt`            |
-| `project_members`        | Appartenance projet-utilisateur + role                    | `(projectId, userId)`, `role: owner / member / viewer` |
-| `admin_ticket_events`    | Trail d'audit des mutations de ticket                     | `kind`, `payload` (JSON), `batchId` (bulk)             |
-| `admin_ticket_comments`  | Commentaires internes non exposes au reporter             | `authorUserId`, `body`                                 |
+| `admin_sessions`         | Sessions admin (revoquees par delete de ligne)            | `tokenHash` (SHA-256 du cookie), `expiresAt`           |
+| `admin_ticket_events`    | Trail d'audit des mutations de ticket                     | `kind`, `payload` (JSON)                               |
 
 ## Decisions metier importantes
 
@@ -57,8 +51,8 @@ Un projet regroupe tickets, conversations, secrets d'identite et membres admin. 
 - **Rotation des secrets** : plusieurs `kid` peuvent etre actifs en parallele. Le verifier essaye chacun pendant la fenetre de rotation.
 - **Audit transactionnel** : un `PATCH /tickets/:id` ecrit l'update et l'evenement d'audit dans la meme transaction. Les valeurs possibles de `ticket_event_kind` sont `status_changed`, `priority_changed` et `roadmap_toggled` — cette derniere est emise quand un admin bascule `is_public_roadmap` et reste reversible depuis la timeline comme les deux autres.
 - **Roadmap publique opt-in** : `tickets.is_public_roadmap` (defaut `false`) controle la visibilite sur `/r/:projectKey`. Un index partiel `tickets_project_public_roadmap_idx` sur `(project_id, status) WHERE is_public_roadmap = true` garde la page rapide meme quand la table grossit.
-- **Correlation des actions en lot** : tous les evenements issus d'un meme bulk partagent le meme `batchId`. Un revert s'effectue par `batchId`.
-- **Suppression d'un admin** : `ON DELETE SET NULL` sur `assignedToUserId`, `actorUserId` et `authorUserId`. L'historique survit au depart d'une personne.
+- **Actions en lot** : un bulk emet un evenement par ticket, sans correlation (pas de `batchId`). Le revert se fait evenement par evenement depuis la timeline.
+- **Notes privees** : `tickets.notes` (texte libre, jamais expose au reporter) remplace l'ancienne table de commentaires.
 - **Screenshots** : seule une URL est stockee, jamais l'image binaire.
 - **Secrets au repos** : `identitySecret` et `project_identity_secrets.secret` sont chiffrables via `KOE_SECRET_KEYS` (AES-256-GCM enveloppe).
 
