@@ -47,3 +47,11 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+
+# Claude Code: track project skills only; other local agent state stays untracked
+.claude/*
+!.claude/skills/
+
+# Verification skill (.claude/skills/verify) run state and evidence
+.verify-run/
+.verify-evidence/
