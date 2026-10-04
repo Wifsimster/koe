@@ -277,9 +277,10 @@
   font-weight: 600;
 }
 
-/* Bottom-sheet posture on narrow viewports. */
+/* Bottom-sheet posture on narrow viewports. Only the opened panel flips
+ * posture: the closed launcher keeps its configured corner. */
 @media (max-width: 480px) {
-  .koe-root {
+  .koe-root[data-open='true'] {
     /* Override the anchored position set by the positionToClasses
      * helper — the sheet pins to the bottom of the viewport regardless
      * of the widget's configured position. */
@@ -307,11 +308,9 @@
     background: var(--koe-border);
   }
 
-  /* The launcher stays in its own spot — only the opened panel flips
-   * posture. Apply a bit of right padding so it doesn't kiss the edge. */
-  .koe-root .koe-panel-shell ~ button[aria-expanded] {
-    margin-right: 16px;
-    margin-bottom: calc(16px + env(safe-area-inset-bottom));
+  /* Keep the closed launcher clear of the iPhone home indicator. */
+  .koe-root[data-open='false'] {
+    margin-bottom: env(safe-area-inset-bottom);
   }
 }
 

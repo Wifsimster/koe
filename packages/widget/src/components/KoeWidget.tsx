@@ -37,6 +37,7 @@ export function KoeWidget(props: KoeWidgetProps) {
       <div
         className={clsx('koe-root koe-fixed koe-z-[2147483000]', positionToClasses(position))}
         data-mode={mode}
+        data-open={open ? 'true' : 'false'}
         style={themeVars(config.theme)}
       >
         {open && <Panel onClose={() => setOpen(false)} />}
