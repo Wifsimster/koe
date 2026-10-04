@@ -8,6 +8,7 @@ A user of a customer's SaaS app opens the Koe launcher (bottom-right "Support" b
 - `bug-form`: fields "Title" and "What happened?" (required), "How to reproduce", "What did you expect?" (`expected_behavior`), and "Email · optional" (hidden when the host passed `user.email`).
 - `bug-validation`: an empty title or description shows "Please fill this out" under the field, and nothing is sent.
 - `bug-metadata`: the row's `metadata` jsonb holds `userAgent`, `url` (query values redacted except `capture.keepQueryParams`), `referrer`, `viewport`, `screen`, `language`, `timezone`, `devicePixelRatio`, `capturedAt`, `pageLoadedAt`, `widgetVersion`, `app`, `input` (touch capability), `redaction: "query-values"` and `reporterMetadata` (the host's `user.metadata`).
+- `bug-trail`: `metadata.breadcrumbs` (navigation, `click` by role and name, `input` naming the field only), `metadata.console` (errors and warnings) and `metadata.network` (failed requests), recorded while the widget is mounted. Clicks inside the widget are not recorded. Opt out with `capture: { trail: false }`.
 - `bug-screenshot`: the host's `captureScreenshot` hook returns an http(s) URL, stored as `screenshot_url`. The harness host page returns `/fake-screenshots/<ts>.png`.
 - `bug-identity`: `X-Koe-User-Hash` (v1 HMAC) or `X-Koe-Identity-Token` (v2) sets `reporter_verified=true`. With `requireIdentityVerification=true`, an unsigned call returns 401.
 - `bug-success`: the success state, with a "My requests" call to action for identified users.

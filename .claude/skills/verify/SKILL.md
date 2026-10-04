@@ -98,7 +98,7 @@ Drive by role and accessible name. The widget's names come from `DEFAULT_LOCALE`
 | Inbox, checked against the admin API | `$C inbox --expect <ticketId\|title regex> [--status all]` |
 | Ticket detail; change status through the Status select | `$C ticket <id> [--set-status resolved]` |
 | DB view (second read) | `$C tickets [--kind bug]`, `$C tickets --id <id>` |
-| Replay a stored bug report | `$C repro <ticketId> [--steps-file steps.json]`, `$C repro --from-file report.json` |
+| Replay a stored bug report from its action trail, with a `reproduced` verdict | `$C repro <ticketId> [--steps-file steps.json]`, `$C repro --from-file report.json` |
 | Navigate | `$C goto /projects?tab=export` (host), `$C goto /onboarding --app dashboard` |
 | Generic click, fill and keyboard | `$C click --role button --name "^Support$"`, `$C fill --label "^Title$" --value "x"`, `$C key Escape` |
 | ARIA tree and PNG | `$C snapshot [--selector dialog]`, `$C screenshot --name x [--full-page]` |

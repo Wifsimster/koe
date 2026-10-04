@@ -34,12 +34,12 @@ L'equipe choisit un mode d'integration. L'application hote initialise ensuite le
 | `features`   | Non             | Active ou masque les onglets bugs, evolutions et chat.              |
 | `locale`     | Non             | Remplace les textes d'interface.                                    |
 | `app`        | Non             | `{ version, release }` de l'application hote, joint a chaque rapport. |
-| `capture`    | Non             | `keepQueryParams` : parametres d'URL dont la valeur est conservee ; toutes les autres valeurs sont masquees. |
+| `capture`    | Non             | `keepQueryParams` : parametres d'URL dont la valeur est conservee ; toutes les autres valeurs sont masquees. `trail: false` desactive l'historique d'actions, de console et de requetes. |
 | `captureScreenshot` | Non      | Hook appele a l'envoi d'un bug : televerse une capture sur votre stockage et renvoie son URL http(s) (`screenshotUrl`). Ignore apres 5 s ou en cas d'erreur. |
 
 ### Contexte capture et confidentialite
 
-Chaque rapport joint l'environnement du navigateur, la version du widget (`widgetVersion`), `app`, la capacite tactile (`input`) et `user.metadata` (stocke sous `reporterMetadata`). Les valeurs de query et de hash des URL sont masquees par le widget puis a nouveau par l'API, tout comme les jetons (JWT, `Bearer`, `token=...`) et les adresses e-mail dans le texte capture.
+Chaque rapport joint l'environnement du navigateur, la version du widget (`widgetVersion`), `app`, la capacite tactile (`input`) et `user.metadata` (stocke sous `reporterMetadata`). Les rapports de bug joignent aussi l'historique recent, borne : 30 actions (clics par role et nom accessible, champs modifies sans leur contenu, navigations), 20 erreurs ou avertissements console et 20 requetes `fetch`/XHR en echec. Le widget enregistre cet historique tant qu'il est monte, en enveloppant `console.error/warn`, `fetch` et `XMLHttpRequest` ; `capture: { trail: false }` le desactive. Aucune frappe clavier n'est lue. Les valeurs de query et de hash des URL sont masquees par le widget puis a nouveau par l'API, tout comme les jetons (JWT, `Bearer`, `token=...`) et les adresses e-mail dans le texte capture.
 
 ## Exemple React
 

@@ -145,7 +145,7 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
       const reporter = email ? { ...baseReporter, email } : baseReporter;
 
       // Capture the context at submit time, before the hook can change the page.
-      const metadata = buildMetadata(config);
+      const metadata = buildMetadata(config, { withTrail: true });
       const screenshotUrl = await hostScreenshot(config);
       if (controller.signal.aborted) return;
       await api.submitBugReport(

@@ -282,7 +282,7 @@ Points importants :
 | `features`   | Non                  | toutes activées       | Active ou masque les onglets bugs, évolutions et chat.   |
 | `locale`     | Non                  | anglais               | Remplace les textes d'interface.                         |
 | `app`        | Non                  | -                     | `{ version, release }` de l'application hôte, joint à chaque rapport. |
-| `capture`    | Non                  | toutes les valeurs masquées | `keepQueryParams` : paramètres d'URL dont la valeur est conservée. |
+| `capture`    | Non                  | toutes les valeurs masquées | `keepQueryParams` : paramètres d'URL dont la valeur est conservée. `trail: false` désactive l'historique d'actions, de console et de requêtes en échec. |
 | `captureScreenshot` | Non           | -                     | Hook qui téléverse une capture chez vous et renvoie son URL http(s). |
 
 ### Roadmap publique et « Mes demandes »
