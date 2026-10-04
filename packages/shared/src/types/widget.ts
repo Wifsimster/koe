@@ -92,6 +92,14 @@ export interface WidgetConfig {
      * values are dropped even when listed.
      */
     keepQueryParams?: string[];
+    /**
+     * Record the last user actions (clicks, which fields changed — never
+     * their contents), console errors and warnings, and failed requests,
+     * and attach them to bug reports. Patches `console.error/warn`,
+     * `fetch` and `XMLHttpRequest` while the widget is mounted. Default
+     * `true`; set `false` to opt out.
+     */
+    trail?: boolean;
   };
   /**
    * Called when a bug report is submitted. Upload a screenshot to your

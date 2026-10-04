@@ -294,6 +294,7 @@ function hostPageHtml(state, reqPath, asUser) {
     <tr><td>Apollo (fake)</td><td>Active</td></tr>
     <tr><td>Borealis (fake)</td><td>Paused</td></tr>
   </table>
+  <p><label>Search projects <input type="search" id="host-search" /></label></p>
   <p><button type="button" id="export-csv">Export CSV</button> <span id="export-result" role="status"></span></p>
 </main>
 <script>
@@ -301,6 +302,8 @@ function hostPageHtml(state, reqPath, asUser) {
   // Deliberately broken host feature, so a bug report has something to describe
   // and repro has a console error to observe.
   document.getElementById('export-csv').addEventListener('click', function () {
+    // The planted bug: the export endpoint fails, then the page chokes on the error body.
+    fetch('/api/export?format=csv&token=fake-session-token-123').catch(function () {});
     console.error('[acme] Export CSV failed: TypeError: rows.map is not a function');
     document.getElementById('export-result').textContent = 'Nothing happened?';
   });
@@ -340,6 +343,11 @@ async function hostd() {
         res.end();
       });
       req.pipe(up);
+      return;
+    }
+    if (url.pathname === '/api/export') {
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end('{"error":"export worker unavailable (fake)"}');
       return;
     }
     if (url.pathname.startsWith('/fake-screenshots/')) {
@@ -754,7 +762,7 @@ Side effect: one admin_sessions row. The auth route allows 5 attempts/minute per
 COMMANDS.widget = {
   summary: 'Drive the embedded widget on the host page: open | bug | feature | vote | my-requests.',
   help: `control-koe widget open [--path /projects]
-control-koe widget bug --title <t> --description <d> [--steps <s>] [--expected <e>] [--path /projects?tab=export] [--trigger-error] [--dry-run]
+control-koe widget bug --title <t> --description <d> [--steps <s>] [--expected <e>] [--search <text>] [--path /projects?tab=export] [--trigger-error] [--dry-run]
 control-koe widget feature --title <t> --description <d> [--path /] [--dry-run]
 control-koe widget vote [--title <regex>] [--dry-run]
 control-koe widget my-requests
@@ -766,7 +774,9 @@ ${HOST_USER.id} ("${HOST_USER.name}"), whose userHash the host page computed ser
 They click the real launcher (button "Support"), then the intent card, then fill fields by
 their visible labels ("Title", "What happened?", "How to reproduce", "Describe your idea").
 
-bug        --trigger-error first clicks the host's broken "Export CSV" button (console error),
+bug        --search first types <text> into the host's "Search projects" box (the report's action
+           trail must name the field, never contain the text).
+           --trigger-error first clicks the host's broken "Export CSV" button (500 + console error),
            so a later \`repro\` has something to observe. Waits for POST /v1/widget/bugs,
            shows the success text, then reads the tickets row back from the DB (second read).
            Side effect: one tickets row (kind=bug). Prints ticketId for \`repro\` and \`ticket\`.
@@ -786,12 +796,17 @@ my-requests "My requests" list for the host user (read-only).
     const hostPath = hostOrigin ? hostOrigin + (pathPart.startsWith('/') ? pathPart : '/' + pathPart) : pathPart;
     if (flags['dry-run']) return { ok: true, dryRun: true, action, hostUrl: resolveUrl(hostPath, 'host'), as: HOST_USER, fields: { title: flags.title, description: flags.description, steps: flags.steps }, triggerError: !!flags['trigger-error'], sideEffect: { bug: 'tickets row', feature: 'tickets row', vote: 'ticket_votes row toggled' }[action] || 'none' };
     return withPage(async ({ page, state }) => {
-      if (action === 'bug' && flags['trigger-error']) {
+      const prepare = action === 'bug' && (flags['trigger-error'] || typeof flags.search === 'string');
+      if (prepare) {
         await page.goto(resolveUrl(hostPath, 'host'), { waitUntil: 'networkidle' });
-        await page.getByRole('button', { name: 'Export CSV' }).click();
+        if (typeof flags.search === 'string') {
+          await page.getByLabel('Search projects').fill(flags.search);
+          await page.getByLabel('Search projects').blur();
+        }
+        if (flags['trigger-error']) await page.getByRole('button', { name: 'Export CSV' }).click();
         await sleep(300);
       }
-      const dialog = action === 'bug' && flags['trigger-error'] ? await (async () => {
+      const dialog = prepare ? await (async () => {
         await page.getByRole('button', { name: 'Support', exact: true }).click();
         const d = page.getByRole('dialog');
         await d.waitFor({ timeout: 5000 });
@@ -1073,11 +1088,53 @@ COMMANDS['network-log'] = {
 // ---------- repro ----------
 const STEP_HELP = `Steps file (--steps-file): JSON array, executed in order on the replay page, a screenshot after each:
   {"goto": "/projects?tab=export"}                      host-page path
-  {"click": {"role": "button", "name": "Export CSV"}}   or {"click": {"text": "..."}} / {"label": "..."}
+  {"click": {"role": "button", "name": "Export CSV"}}   or {"click": {"testId": "..."}} / {"text": "..."} / {"label": "..."}
   {"fill": {"label": "Title", "value": "x"}}
   {"press": "Enter"}
   {"wait": 1000}
-Write it by reading the report's free-text "steps_to_reproduce"; Koe does not record actions.`;
+Without --steps-file, a report that carries metadata.breadcrumbs is replayed from its action
+trail: it starts at the first recorded page, clicks by role + accessible name (or data-testid),
+follows recorded navigations, and skips field edits (their contents are never captured).
+For an older report without a trail, write the steps from its free-text "steps_to_reproduce".`;
+
+// metadata.breadcrumbs -> replay steps. Fields are listed as skipped: Koe never records values.
+function trailToSteps(breadcrumbs, fallbackTarget) {
+  const toPath = (u) => {
+    try {
+      const x = new URL(u, HOST);
+      return x.pathname + x.search + x.hash;
+    } catch {
+      return null;
+    }
+  };
+  let start = fallbackTarget;
+  const steps = [];
+  breadcrumbs.forEach((b, idx) => {
+    if (b.type === 'navigation') {
+      const p = toPath(b.url);
+      if (!p) return;
+      if (idx === 0) start = p;
+      else steps.push({ goto: p, unlessAt: true });
+    } else if (b.type === 'click') {
+      const t = b.target || {};
+      if (t.role && t.name) steps.push({ click: { role: t.role, name: t.name, exact: true } });
+      else if (t.testId) steps.push({ click: { testId: t.testId } });
+      else if (t.name) steps.push({ click: { text: t.name } });
+      else steps.push({ skip: 'click target has no role, name or test id', crumb: b });
+    } else if (b.type === 'input') {
+      steps.push({ skip: 'field edited; its value is never captured', crumb: b });
+    }
+  });
+  return { start, steps };
+}
+
+async function loadRedaction() {
+  try {
+    return await import(path.join(PKG.shared, 'dist', 'index.js'));
+  } catch {
+    return { redactText: (s) => s, redactUrl: (s) => s };
+  }
+}
 
 function loadReport(flags, pos) {
   if (typeof flags['from-file'] === 'string') {
@@ -1208,11 +1265,18 @@ ${STEP_HELP}`,
     if (ticket.kind && ticket.kind !== 'bug') fail(`Ticket ${ticket.id} is a ${ticket.kind}, not a bug report.`, 'repro only replays bug reports (kind=bug).');
     const plan = buildReplayPlan(ticket);
     let steps = [];
+    let stepsSource = 'none';
     if (typeof flags['steps-file'] === 'string') {
       steps = JSON.parse(fs.readFileSync(flags['steps-file'], 'utf8'));
       if (!Array.isArray(steps)) fail('--steps-file must contain a JSON array.', STEP_HELP);
+      stepsSource = 'steps-file';
+    } else if (Array.isArray(ticket.metadata?.breadcrumbs) && ticket.metadata.breadcrumbs.length) {
+      const auto = trailToSteps(ticket.metadata.breadcrumbs, plan.target);
+      plan.target = auto.start;
+      steps = auto.steps;
+      stepsSource = 'metadata.breadcrumbs';
     }
-    if (flags['dry-run']) return { ok: true, dryRun: true, source, plan, steps };
+    if (flags['dry-run']) return { ok: true, dryRun: true, source, plan, stepsSource, steps };
     const state = requireState();
     const bundle = path.join(evidenceDir(state), `repro-${String(ticket.id || 'file').slice(0, 8)}-${stamp()}`);
     fs.mkdirSync(bundle, { recursive: true });
@@ -1267,10 +1331,18 @@ ${STEP_HELP}`,
       for (const [i, s] of steps.entries()) {
         const r = { i: i + 1, step: s };
         try {
-          if (s.goto) await page.goto(HOST + s.goto, { waitUntil: 'networkidle' });
+          if (s.skip) {
+            r.ok = null;
+            r.skipped = s.skip;
+            stepResults.push(r);
+            continue;
+          }
+          const here = new URL(page.url());
+          if (s.goto && s.unlessAt && here.pathname + here.search + here.hash === s.goto) r.alreadyThere = true;
+          else if (s.goto) await page.goto(HOST + s.goto, { waitUntil: 'networkidle' });
           else if (s.click) {
             const k = s.click;
-            const loc = k.role ? page.getByRole(k.role, { name: k.name, exact: !!k.exact }) : k.label ? page.getByLabel(k.label) : page.getByText(k.text);
+            const loc = k.role ? page.getByRole(k.role, { name: k.name, exact: !!k.exact }) : k.testId ? page.getByTestId(k.testId) : k.label ? page.getByLabel(k.label) : page.getByText(k.text);
             await loc.first().click({ timeout: 5000 });
           } else if (s.fill) await page.getByLabel(s.fill.label).first().fill(s.fill.value, { timeout: 5000 });
           else if (s.press) await page.keyboard.press(s.press);
@@ -1301,6 +1373,23 @@ ${STEP_HELP}`,
     };
     const errors = consoleRows.filter((r) => r.type === 'error' || r.type === 'pageerror');
     const failedRequests = networkRows.filter((r) => r.status === null || r.status >= 400);
+    // Ground truth from the report vs what the replay produced, both redacted the same way.
+    const { redactText, redactUrl } = await loadRedaction();
+    const seenConsole = consoleRows.filter((r) => ['error', 'warning', 'pageerror'].includes(r.type)).map((r) => redactText(r.text));
+    const pathOf = (u) => {
+      try {
+        return new URL(u, HOST).pathname;
+      } catch {
+        return u;
+      }
+    };
+    const consoleMatch = Array.isArray(m.console) ? m.console.map((e) => ({ captured: e.message, level: e.level, seenInReplay: seenConsole.some((s) => s.includes(e.message)) })) : null;
+    const networkMatch = Array.isArray(m.network)
+      ? m.network.map((e) => ({ captured: `${e.method} ${e.url} -> ${e.status}`, seenInReplay: failedRequests.some((r) => r.method === e.method && pathOf(redactUrl(r.url)) === pathOf(e.url) && (r.status ?? 0) === e.status) }))
+      : null;
+    const groundTruth = [...(consoleMatch || []), ...(networkMatch || [])];
+    const allStepsOk = stepResults.every((r) => r.ok !== false);
+    const reproduced = groundTruth.length ? allStepsOk && groundTruth.every((g) => g.seenInReplay) : null;
     fs.writeFileSync(path.join(bundle, 'console.json'), JSON.stringify(consoleRows, null, 2));
     fs.writeFileSync(path.join(bundle, 'network.json'), JSON.stringify(networkRows, null, 2));
     const summary = {
@@ -1314,7 +1403,11 @@ ${STEP_HELP}`,
       originRewritten: plan.originRewritten,
       envMatch,
       observed,
-      stepsReplayed: stepResults.map(({ i, step, ok, error }) => ({ i, step, ok, error })),
+      stepsSource,
+      stepsReplayed: stepResults.map(({ i, step, ok, error, skipped, alreadyThere }) => ({ i, step, ok, error, skipped, alreadyThere })),
+      consoleMatch,
+      networkMatch,
+      reproduced,
       manualStepsFromReport: plan.manualSteps,
       consoleErrors: errors.map((e) => e.text),
       failedRequests,
@@ -1324,7 +1417,12 @@ ${STEP_HELP}`,
       versions: plan.versions,
       reporterMetadata: plan.reporterMetadata,
       notCaptured: plan.notCaptured,
-      verdict: 'Environment and entry URL replayed. Whether the bug reproduces needs a human or agent judgement: compare consoleErrors and the step screenshots with the report description.',
+      verdict:
+        reproduced === true
+          ? 'Reproduced: every console entry and failed request captured at report time appeared again in the replay.'
+          : reproduced === false
+            ? 'Not reproduced: some captured console entries or failed requests did not appear (see consoleMatch, networkMatch, stepsReplayed).'
+            : 'Environment and entry URL replayed. The report has no console or network ground truth: compare consoleErrors and the step screenshots with the description.',
     };
     fs.writeFileSync(path.join(bundle, 'summary.json'), JSON.stringify(summary, null, 2));
     return summary;
