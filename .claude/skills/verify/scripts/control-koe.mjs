@@ -35,7 +35,10 @@ const DASH = `${API}/admin`;
 // Fake, throwaway identities. Nothing here is a real account.
 const ADMIN = { email: 'admin@koe-verify.test', password: 'verify-admin-pass-123' };
 const PROJECT = { key: 'acme-verify', name: 'Acme Verify (fake)' };
-const HOST_USER = { id: 'user-42', name: 'Jane Fake', email: 'jane@acme-verify.test' };
+const HOST_USER = { id: 'user-42', name: 'Jane Fake', email: 'jane@acme-verify.test', metadata: { plan: 'pro (fake)', role: 'owner' } };
+const HOST_APP = { version: '2.3.1-fake', release: 'acme-2026.10.04' };
+// 1x1 PNG served by the host page as the "uploaded" screenshot.
+const FAKE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 const PKG = {
   api: path.join(REPO, 'packages', 'api'),
   widget: path.join(REPO, 'packages', 'widget'),
@@ -254,6 +257,8 @@ function hostPageHtml(state, reqPath, asUser) {
     userHash,
     position: 'bottom-right',
     theme: { accentColor: '#0f766e' },
+    app: HOST_APP,
+    capture: { keepQueryParams: ['tab'] },
   };
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   return `<!doctype html>
@@ -301,7 +306,12 @@ function hostPageHtml(state, reqPath, asUser) {
   });
 </script>
 <script src="/koe/koe.iife.js"></script>
-<script>Koe.init(${JSON.stringify(cfg)});</script>
+<script>
+  // The host's screenshot hook: a real app would capture and upload to its own storage.
+  Koe.init(Object.assign(${JSON.stringify(cfg)}, {
+    captureScreenshot: function () { return Promise.resolve(location.origin + '/fake-screenshots/' + Date.now() + '.png'); }
+  }));
+</script>
 </body>
 </html>`;
 }
@@ -330,6 +340,11 @@ async function hostd() {
         res.end();
       });
       req.pipe(up);
+      return;
+    }
+    if (url.pathname.startsWith('/fake-screenshots/')) {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(FAKE_PNG);
       return;
     }
     if (url.pathname === '/favicon.ico') {
@@ -739,7 +754,7 @@ Side effect: one admin_sessions row. The auth route allows 5 attempts/minute per
 COMMANDS.widget = {
   summary: 'Drive the embedded widget on the host page: open | bug | feature | vote | my-requests.',
   help: `control-koe widget open [--path /projects]
-control-koe widget bug --title <t> --description <d> [--steps <s>] [--path /projects?tab=export] [--trigger-error] [--dry-run]
+control-koe widget bug --title <t> --description <d> [--steps <s>] [--expected <e>] [--path /projects?tab=export] [--trigger-error] [--dry-run]
 control-koe widget feature --title <t> --description <d> [--path /] [--dry-run]
 control-koe widget vote [--title <regex>] [--dry-run]
 control-koe widget my-requests
@@ -828,6 +843,7 @@ my-requests "My requests" list for the host user (read-only).
       await dialog.getByLabel('Title').fill(flags.title);
       await dialog.getByLabel(isBug ? 'What happened?' : 'Describe your idea').fill(flags.description);
       if (isBug && typeof flags.steps === 'string') await dialog.getByLabel('How to reproduce').fill(flags.steps.replace(/\\n/g, '\n'));
+      if (isBug && typeof flags.expected === 'string') await dialog.getByLabel('What did you expect?').fill(flags.expected);
       const before = artifactPath(state, `widget-${action}-filled`);
       await page.screenshot({ path: before });
       const endpoint = isBug ? '/v1/widget/bugs' : '/v1/widget/features';
@@ -1095,6 +1111,21 @@ function loadReport(flags, pos) {
   return { source: `db:${PG}/tickets/${id}`, ticket: t };
 }
 
+// What the stored report still lacks for a full auto-reproduction.
+function notCaptured(ticket) {
+  const m = ticket.metadata || {};
+  const gaps = [];
+  if (!Array.isArray(m.breadcrumbs)) gaps.push('action trail (metadata.breadcrumbs)');
+  if (!Array.isArray(m.console)) gaps.push('console buffer (metadata.console)');
+  if (!Array.isArray(m.network)) gaps.push('failed requests (metadata.network)');
+  if (!ticket.screenshot_url) gaps.push('screenshot (screenshot_url; host captureScreenshot hook)');
+  if (!ticket.expected_behavior) gaps.push('expected behavior (expected_behavior)');
+  if (!m.app?.version) gaps.push('host app version (metadata.app)');
+  if (!m.widgetVersion) gaps.push('widget version (metadata.widgetVersion)');
+  if (!m.input) gaps.push('input capability (metadata.input): touch is not replayed');
+  return gaps;
+}
+
 function buildReplayPlan(ticket) {
   const m = ticket.metadata || {};
   const missing = [];
@@ -1127,6 +1158,11 @@ function buildReplayPlan(ticket) {
     deviceScaleFactor: typeof m.devicePixelRatio === 'number' && m.devicePixelRatio > 0 ? m.devicePixelRatio : null,
   };
   for (const [k, v] of Object.entries(context)) if (v === null) missing.push(`metadata.${k}`);
+  // Touch emulation from the captured input capability (widget >= capture-context).
+  if (m.input && typeof m.input.maxTouchPoints === 'number') {
+    context.hasTouch = m.input.maxTouchPoints > 0;
+    context.isMobile = !!m.input.coarsePointer && !m.input.hover;
+  } else missing.push('metadata.input');
   return {
     target: target || '/',
     originRewritten,
@@ -1135,10 +1171,14 @@ function buildReplayPlan(ticket) {
     reporterId: ticket.reporter_id,
     manualSteps: ticket.steps_to_reproduce ? ticket.steps_to_reproduce.split('\n').map((s) => s.trim()).filter(Boolean) : [],
     expected: ticket.expected_behavior,
-    actual: ticket.actual_behavior,
+    actual: ticket.actual_behavior || ticket.description,
     screenshotUrl: ticket.screenshot_url,
+    versions: { widget: m.widgetVersion || null, app: m.app || null },
+    reporterMetadata: m.reporterMetadata || null,
     missingFromReport: missing,
+    notCaptured: notCaptured(ticket),
     capturedAt: m.capturedAt || null,
+    pageLoadedAt: m.pageLoadedAt || null,
   };
 }
 
@@ -1193,6 +1233,7 @@ ${STEP_HELP}`,
         ...(c.locale ? { locale: c.locale } : {}),
         ...(c.timezoneId ? { timezoneId: c.timezoneId } : {}),
         ...(c.deviceScaleFactor ? { deviceScaleFactor: c.deviceScaleFactor } : {}),
+        ...(typeof c.hasTouch === 'boolean' ? { hasTouch: c.hasTouch, isMobile: c.isMobile } : {}),
       });
       if (plan.reporterId) await ctx.addCookies([{ name: 'koe_verify_as', value: encodeURIComponent(plan.reporterId), url: HOST }]);
       const page = await ctx.newPage();
@@ -1219,6 +1260,8 @@ ${STEP_HELP}`,
         viewport: { width: innerWidth, height: innerHeight },
         screen: { width: screen.width, height: screen.height },
         devicePixelRatio: devicePixelRatio,
+        maxTouchPoints: navigator.maxTouchPoints,
+        coarsePointer: matchMedia('(pointer: coarse)').matches,
       }));
       observed.httpStatus = resp?.status() ?? null;
       for (const [i, s] of steps.entries()) {
@@ -1254,6 +1297,7 @@ ${STEP_HELP}`,
       timezone: !m.timezone || observed.timezone === m.timezone,
       viewport: !m.viewport || (observed.viewport.width === m.viewport.width && observed.viewport.height === m.viewport.height),
       devicePixelRatio: !m.devicePixelRatio || observed.devicePixelRatio === m.devicePixelRatio,
+      touch: !m.input || (observed.maxTouchPoints > 0) === (m.input.maxTouchPoints > 0),
     };
     const errors = consoleRows.filter((r) => r.type === 'error' || r.type === 'pageerror');
     const failedRequests = networkRows.filter((r) => r.status === null || r.status >= 400);
@@ -1275,7 +1319,11 @@ ${STEP_HELP}`,
       consoleErrors: errors.map((e) => e.text),
       failedRequests,
       missingFromReport: plan.missingFromReport,
-      notCapturedByKoe: ['action trail (clicks/inputs before the report)', 'console logs at report time', 'network log / failing request', 'app state (route params, store, feature flags, auth role)', 'screenshot (screenshot_url column exists, widget never uploads one)', 'expected/actual behavior (columns exist, widget form never sends them)', 'reporter.metadata / avatarUrl (accepted by the API schema, dropped on insert)', 'host app version / release', 'widget version', 'input capability (touch / coarse pointer): hasTouch and isMobile are not replayed'],
+      oracle: { expected: plan.expected, actual: plan.actual },
+      screenshotUrl: plan.screenshotUrl,
+      versions: plan.versions,
+      reporterMetadata: plan.reporterMetadata,
+      notCaptured: plan.notCaptured,
       verdict: 'Environment and entry URL replayed. Whether the bug reproduces needs a human or agent judgement: compare consoleErrors and the step screenshots with the report description.',
     };
     fs.writeFileSync(path.join(bundle, 'summary.json'), JSON.stringify(summary, null, 2));

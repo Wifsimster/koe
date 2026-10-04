@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import dts from 'vite-plugin-dts';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -21,12 +22,33 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  */
 const target = process.env.BUILD_TARGET ?? 'lib';
 
+/**
+ * Version stamped into reports (`metadata.widgetVersion`). semantic-release
+ * bumps package.json only after the build, so the nearest git tag plus the
+ * commit (`v1.9.0-3-g54e50cb`) identifies the build. `KOE_WIDGET_VERSION`
+ * overrides it.
+ */
+function widgetVersion(): string {
+  if (process.env.KOE_WIDGET_VERSION) return process.env.KOE_WIDGET_VERSION;
+  try {
+    return execFileSync('git', ['describe', '--tags', '--always', '--match', 'v*'], {
+      cwd: __dirname,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+const versionDefine = { __KOE_WIDGET_VERSION__: JSON.stringify(widgetVersion()) };
+
 export default defineConfig(() => {
   if (target === 'standalone') {
     return {
       plugins: [react()],
       define: {
         'process.env.NODE_ENV': JSON.stringify('production'),
+        ...versionDefine,
       },
       build: {
         emptyOutDir: false,
@@ -63,6 +85,7 @@ export default defineConfig(() => {
         bundledPackages: ['@koe/shared'],
       }),
     ],
+    define: versionDefine,
     build: {
       emptyOutDir: false,
       lib: {

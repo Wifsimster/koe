@@ -15,7 +15,7 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 | `@wifsimster/koe` | `@koe/shared` | Widget React (build lib ESM / npm + build IIFE autonome avec React inline) | Tags git `v*` + npm (semantic-release) |
 | `@koe/api`        | `@koe/shared` | API Hono : widget public + admin JSON + auth admin (password)              | Image Docker (bundle tsup)             |
 | `@koe/dashboard`  | `@koe/shared` | SPA React TanStack Router : inbox, ticket detail, overview, onboarding     | Embarquee dans l'image API (`/admin/`) |
-| `@koe/shared`     | -             | Types metier et helpers transverses (`captureBrowserMetadata`)             | Prive au workspace                     |
+| `@koe/shared`     | -             | Types metier et helpers transverses (`captureBrowserMetadata`, `redactUrl`, `redactText`)             | Prive au workspace                     |
 
 ## Stack et versions
 

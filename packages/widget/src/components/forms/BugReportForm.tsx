@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type FocusEvent, type FormEvent } from 'react';
-import { captureBrowserMetadata, isValidEmail } from '@koe/shared';
+import { isValidEmail } from '@koe/shared';
+import { buildMetadata, hostScreenshot } from '../../capture';
 import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
 import { TextField, TextAreaField } from '../ui/Field';
@@ -10,6 +11,7 @@ interface FormState {
   title: string;
   description: string;
   reproduce: string;
+  expected: string;
   email: string;
 }
 
@@ -17,6 +19,7 @@ const EMPTY: FormState = {
   title: '',
   description: '',
   reproduce: '',
+  expected: '',
   email: '',
 };
 
@@ -105,10 +108,11 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
     return undefined;
   };
 
-  const onBlur = (key: keyof FormState) => (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const msg = validateField(key, e.target.value);
-    dispatchForm({ type: 'setError', key, message: msg });
-  };
+  const onBlur =
+    (key: keyof FormState) => (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const msg = validateField(key, e.target.value);
+      dispatchForm({ type: 'setError', key, message: msg });
+    };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -140,13 +144,19 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
       const email = values.email.trim() || baseReporter.email;
       const reporter = email ? { ...baseReporter, email } : baseReporter;
 
+      // Capture the context at submit time, before the hook can change the page.
+      const metadata = buildMetadata(config);
+      const screenshotUrl = await hostScreenshot(config);
+      if (controller.signal.aborted) return;
       await api.submitBugReport(
         {
           title: values.title.trim(),
           description: values.description.trim(),
           stepsToReproduce: values.reproduce.trim() || undefined,
+          expectedBehavior: values.expected.trim() || undefined,
           reporter,
-          metadata: captureBrowserMetadata(),
+          metadata,
+          screenshotUrl,
         },
         { signal: controller.signal },
       );
@@ -210,6 +220,12 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
         value={values.reproduce}
         onChange={(e) => update('reproduce')(e.target.value)}
         rows={3}
+      />
+      <TextAreaField
+        label={locale.bugForm.expected ?? 'What did you expect?'}
+        value={values.expected}
+        onChange={(e) => update('expected')(e.target.value)}
+        rows={2}
       />
       {/* Email field only shows when the host didn't already identify
           the user — otherwise it's redundant and adds friction. */}

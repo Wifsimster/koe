@@ -281,6 +281,9 @@ Points importants :
 | `theme`      | Non                  | indigo, mode `auto`   | Règle couleur, mode et rayon.                            |
 | `features`   | Non                  | toutes activées       | Active ou masque les onglets bugs, évolutions et chat.   |
 | `locale`     | Non                  | anglais               | Remplace les textes d'interface.                         |
+| `app`        | Non                  | -                     | `{ version, release }` de l'application hôte, joint à chaque rapport. |
+| `capture`    | Non                  | toutes les valeurs masquées | `keepQueryParams` : paramètres d'URL dont la valeur est conservée. |
+| `captureScreenshot` | Non           | -                     | Hook qui téléverse une capture chez vous et renvoie son URL http(s). |
 
 ### Roadmap publique et « Mes demandes »
 

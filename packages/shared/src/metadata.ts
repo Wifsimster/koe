@@ -1,11 +1,17 @@
 import type { BrowserMetadata } from './types/ticket';
+import { redactUrl, type RedactUrlOptions } from './redact';
+
+export interface CaptureOptions extends RedactUrlOptions {
+  widgetVersion?: string;
+  app?: BrowserMetadata['app'];
+}
 
 /**
  * Captures browser/environment data to attach to a bug report. Safe to call
  * in any browser; falls back to empty values in non-DOM contexts so tests
  * don't blow up.
  */
-export function captureBrowserMetadata(): BrowserMetadata {
+export function captureBrowserMetadata(options: CaptureOptions = {}): BrowserMetadata {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return {
       userAgent: '',
@@ -19,10 +25,12 @@ export function captureBrowserMetadata(): BrowserMetadata {
     };
   }
 
+  const match = (q: string) =>
+    typeof window.matchMedia === 'function' ? window.matchMedia(q).matches : false;
   return {
     userAgent: navigator.userAgent,
-    url: window.location.href,
-    referrer: document.referrer || undefined,
+    url: redactUrl(window.location.href, options),
+    referrer: document.referrer ? redactUrl(document.referrer) : undefined,
     viewport: {
       width: window.innerWidth,
       height: window.innerHeight,
@@ -40,5 +48,17 @@ export function captureBrowserMetadata(): BrowserMetadata {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? '',
     devicePixelRatio: window.devicePixelRatio || 1,
     capturedAt: new Date().toISOString(),
+    redaction: 'query-values',
+    pageLoadedAt:
+      typeof performance !== 'undefined' && performance.timeOrigin
+        ? new Date(performance.timeOrigin).toISOString()
+        : undefined,
+    widgetVersion: options.widgetVersion,
+    app: options.app,
+    input: {
+      maxTouchPoints: navigator.maxTouchPoints ?? 0,
+      coarsePointer: match('(pointer: coarse)'),
+      hover: match('(hover: hover)'),
+    },
   };
 }

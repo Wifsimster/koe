@@ -29,7 +29,40 @@ export const reporterSchema = z.object({
     // Block `javascript:` and `data:` scheme injection into the admin UI.
     .refine((u) => /^https?:\/\//i.test(u), 'avatarUrl must be http(s)')
     .optional(),
-  metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  metadata: z
+    .record(z.string().max(64), z.union([z.string().max(500), z.number(), z.boolean(), z.null()]))
+    .refine((m) => Object.keys(m).length <= 20, 'reporter.metadata accepts at most 20 keys')
+    .optional(),
+});
+
+/** Upper bound for each captured buffer. The widget keeps fewer (see `capture.ts`). */
+export const MAX_CAPTURED_ENTRIES = 50;
+
+const breadcrumbTargetSchema = z.object({
+  tag: z.string().max(32),
+  role: z.string().max(32).optional(),
+  name: z.string().max(200).optional(),
+  testId: z.string().max(100).optional(),
+});
+
+const breadcrumbSchema = z.discriminatedUnion('type', [
+  z.object({ ts: z.string().max(64), type: z.literal('click'), target: breadcrumbTargetSchema }),
+  z.object({ ts: z.string().max(64), type: z.literal('input'), target: breadcrumbTargetSchema }),
+  z.object({ ts: z.string().max(64), type: z.literal('navigation'), url: z.string().max(2048) }),
+]);
+
+const consoleEntrySchema = z.object({
+  ts: z.string().max(64),
+  level: z.enum(['error', 'warn']),
+  message: z.string().max(1000),
+});
+
+const networkEntrySchema = z.object({
+  ts: z.string().max(64),
+  method: z.string().max(16),
+  url: z.string().max(2048),
+  status: z.number().int().min(0).max(999),
+  durationMs: z.number().min(0).max(3_600_000),
 });
 
 export const metadataSchema = z.object({
@@ -42,6 +75,22 @@ export const metadataSchema = z.object({
   timezone: z.string().max(64),
   devicePixelRatio: z.number(),
   capturedAt: z.string().max(64),
+  redaction: z.literal('query-values').optional(),
+  pageLoadedAt: z.string().max(64).optional(),
+  widgetVersion: z.string().max(64).optional(),
+  app: z
+    .object({ version: z.string().max(64).optional(), release: z.string().max(128).optional() })
+    .optional(),
+  input: z
+    .object({
+      maxTouchPoints: z.number().int().min(0).max(256),
+      coarsePointer: z.boolean(),
+      hover: z.boolean(),
+    })
+    .optional(),
+  breadcrumbs: z.array(breadcrumbSchema).max(MAX_CAPTURED_ENTRIES).optional(),
+  console: z.array(consoleEntrySchema).max(MAX_CAPTURED_ENTRIES).optional(),
+  network: z.array(networkEntrySchema).max(MAX_CAPTURED_ENTRIES).optional(),
 });
 
 export const createBugSchema = z.object({
@@ -98,7 +147,10 @@ export const allowedOriginSchema = z
   .trim()
   .min(1)
   .max(512)
-  .refine((v) => v !== '*', 'wildcard "*" is not allowed; leave allowedOrigins empty for permissive')
+  .refine(
+    (v) => v !== '*',
+    'wildcard "*" is not allowed; leave allowedOrigins empty for permissive',
+  )
   .refine((v) => !/^file:\/\//i.test(v), 'file:// origins are not allowed')
   .superRefine((v, ctx) => {
     let url: URL;

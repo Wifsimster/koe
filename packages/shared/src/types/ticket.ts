@@ -34,6 +34,7 @@ export function isTicketKind(value: unknown): value is TicketKind {
  */
 export interface BrowserMetadata {
   userAgent: string;
+  /** Page URL. Query and hash values are redacted (see `redactUrl`). */
   url: string;
   referrer?: string;
   viewport: { width: number; height: number };
@@ -42,6 +43,57 @@ export interface BrowserMetadata {
   timezone: string;
   devicePixelRatio: number;
   capturedAt: string;
+  /**
+   * Set by widgets that already redacted URLs client-side
+   * (`'query-values'`). The API redacts every query value of reports
+   * without it, so older widgets do not leak tokens either.
+   */
+  redaction?: 'query-values';
+  /** When the host page started loading (`performance.timeOrigin`). */
+  pageLoadedAt?: string;
+  /** Widget build that captured the report, e.g. `v1.9.0-3-g54e50cb`. */
+  widgetVersion?: string;
+  /** Host app context passed through `WidgetConfig.app`. */
+  app?: { version?: string; release?: string };
+  /** Input capability, so a replay can emulate touch. */
+  input?: { maxTouchPoints: number; coarsePointer: boolean; hover: boolean };
+  /** Last user actions before the report, oldest first. Never field contents. */
+  breadcrumbs?: Breadcrumb[];
+  /** Last console errors and warnings, oldest first. */
+  console?: ConsoleEntry[];
+  /** Last failed or 4xx/5xx requests, oldest first. URLs redacted. */
+  network?: NetworkEntry[];
+}
+
+/** Accessible description of the element an action targeted. */
+export interface BreadcrumbTarget {
+  tag: string;
+  role?: string;
+  /** Accessible name, truncated. Empty for fields: their content is never read. */
+  name?: string;
+  /** `data-testid`, when the host sets one. */
+  testId?: string;
+}
+
+export type Breadcrumb =
+  | { ts: string; type: 'click'; target: BreadcrumbTarget }
+  /** A field was edited. Records which field, never what was typed. */
+  | { ts: string; type: 'input'; target: BreadcrumbTarget }
+  | { ts: string; type: 'navigation'; url: string };
+
+export interface ConsoleEntry {
+  ts: string;
+  level: 'error' | 'warn';
+  message: string;
+}
+
+export interface NetworkEntry {
+  ts: string;
+  method: string;
+  url: string;
+  /** HTTP status, or 0 when the request failed without a response. */
+  status: number;
+  durationMs: number;
 }
 
 export interface TicketBase {
