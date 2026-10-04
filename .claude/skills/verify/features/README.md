@@ -34,7 +34,7 @@ Each feature file has an H1 and one paragraph, then exactly four H2s in this ord
 
 ## Features
 
-- [Widget bug report](./widget-bug-report.md) covers the launcher, the bug form, the captured browser metadata, identity verification, and the success state. Driven end to end on `1cbae34` (run `2026-10-03T21-35-28-340Z`), and the cross-origin failure reproduced in run `2026-10-03T21-38-02-734Z`.
+- [Widget bug report](./widget-bug-report.md) covers the launcher, the bug form, the captured browser metadata, identity verification, and the success state. Driven end to end on `1cbae34` (run `2026-10-03T21-35-28-340Z`), the cross-origin failure reproduced in run `2026-10-03T21-38-02-734Z`, and cross-origin submission plus disallowed-origin refusal driven after the CORS fix.
 - [Feature requests, voting and My requests](./widget-feature-voting.md) covers the idea form, "Browse ideas" with upvote toggling, and the "My requests" tab. Driven on `1cbae34`.
 - [Dashboard inbox and triage](./dashboard-inbox-triage.md) covers admin login, the inbox list and filters, ticket detail, status and priority changes with the audit trail, and bulk actions. Login, inbox, ticket detail and a status change (with its audit event) driven on `1cbae34`.
 - [Project setup and identity](./project-setup.md) covers onboarding and "New project", the one-time identity secret, allowed origins, and the HMAC `userHash` the host signs.

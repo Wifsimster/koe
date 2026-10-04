@@ -9,7 +9,7 @@ An operator creates a project from the dashboard (onboarding on an empty install
 - `project-create-cli`: `bootstrap.ts --non-interactive` with `KOE_PROJECT_NAME`, `KOE_PROJECT_KEY`, `KOE_ALLOWED_ORIGINS` and `KOE_REQUIRE_IDENTITY_VERIFICATION`. `launch` uses this path.
 - `identity-v1`: the `X-Koe-User-Hash` header, checked against `projects.identity_secret`.
 - `identity-v2`: the `X-Koe-Identity-Token` header (`kid`, `iat`, `nonce`, 600 s max age), checked against `project_identity_secrets`.
-- `origin-allowlist`: enforced in `widgetCors` and again in `requireProject`.
+- `origin-allowlist`: `requireProject` refuses a disallowed origin with 403 on every real request; `widgetCors` reflects `Access-Control-Allow-Origin` only for an allowed origin. Same-origin GETs pass with `Sec-Fetch-Site: same-origin`.
 - `heartbeat`: `projects.last_ping_at` and `last_ping_origin`, shown as "Last ping from ..." in the inbox.
 
 ## How to get to it (user POV)
@@ -29,7 +29,7 @@ Preconditions:
 - **Secret shown once.** Run `$C snapshot`. It shows "Project created", textbox `second-app-fake`, an identity secret textbox, the `KOE_IDENTITY_SECRET=` env snippet, and a disabled "Enter the dashboard". Save `$C screenshot --name project-created`.
 - **Second read.** Run `docker exec koe-verify-pg psql -U koe -d koe -Atc "select key, allowed_origins, require_identity_verification from projects"`. It returns `second-app-fake|["http://localhost:38788"]|f`.
 - **Identity, end to end.** Run `$C widget bug ...`. `dbRow.reporter_verified` is true, because the host signed `user-42`. A forged hash returns 401 "Identity hash mismatch". As an API-level check: `curl` the proxy with `-H 'X-Koe-User-Hash: 00'` and a valid body.
-- **Allowlist.** Run `$C launch --origins allowlist`, then `$C widget vote` (it fails with 403, a product bug) and `$C widget bug ...` (it passes, because POST carries `Origin`).
+- **Allowlist.** Run `$C launch --origins allowlist`, then `$C widget vote` and `$C widget my-requests` (both pass: same-origin GETs), and `$C widget bug --host-origin http://127.0.0.1:38788 ...` (refused: that origin is not in the list).
 
 ## Gotchas
 

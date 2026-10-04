@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { eq } from 'drizzle-orm';
 import { db, dbAvailable, schema } from '../db';
+import { isOriginAllowed, preflightHeaders } from '../lib/widgetOrigin';
 
 /**
  * Per-entry TTL fallback. If the route layer forgets to call
@@ -20,6 +21,30 @@ const originCache = new Map<string, { origins: string[]; expires: number }>();
  */
 export function invalidateOriginCache(projectKey: string): void {
   originCache.delete(projectKey);
+  allOriginsCache = null;
+}
+
+/**
+ * Every project's allowlist, for the preflight. `anyOrigin` is true when at
+ * least one project accepts any origin (empty allowlist). Cached for the
+ * same TTL, misses included: a preflight carries no project key, so an
+ * uncached miss would cost one DB read per preflight from any origin.
+ */
+let allOriginsCache: { origins: Set<string>; anyOrigin: boolean; expires: number } | null = null;
+
+async function isOriginKnownToAnyProject(origin: string): Promise<boolean> {
+  if (!allOriginsCache || allOriginsCache.expires <= Date.now()) {
+    if (!dbAvailable) return false;
+    const rows = await db
+      .select({ allowedOrigins: schema.projects.allowedOrigins })
+      .from(schema.projects);
+    allOriginsCache = {
+      origins: new Set(rows.flatMap((r) => r.allowedOrigins)),
+      anyOrigin: rows.some((r) => r.allowedOrigins.length === 0),
+      expires: Date.now() + CACHE_TTL_MS,
+    };
+  }
+  return allOriginsCache.anyOrigin || allOriginsCache.origins.has(origin);
 }
 
 async function getCachedOrigins(projectKey: string): Promise<string[] | null> {
@@ -44,86 +69,64 @@ async function getCachedOrigins(projectKey: string): Promise<string[] | null> {
   return entry.origins;
 }
 
-/**
- * Decides whether `origin` is allowed for the given project's
- * `allowedOrigins`. An empty list keeps the historical permissive
- * semantic: the project's owner has explicitly opted in to "any
- * origin". Important: this permissiveness is per-project, never
- * leaked to other projects.
- */
-function isOriginAllowed(allowedOrigins: string[], origin: string): boolean {
-  if (allowedOrigins.length === 0) return true;
-  return allowedOrigins.includes(origin);
+export interface OriginLookup {
+  /** The project's `allowedOrigins`, or `null` for an unknown key. */
+  projectOrigins(projectKey: string): Promise<string[] | null>;
+  /** Whether at least one project accepts this origin. */
+  anyProjectAccepts(origin: string): Promise<boolean>;
 }
 
 /**
  * CORS for the embeddable widget.
  *
- * Unlike a typical API we cannot keep a static allowlist — every host SaaS
- * app that embeds the widget is a valid origin. Instead we enforce the
- * per-project `allowedOrigins` at the CORS layer AND again in
- * `requireProject` (defense in depth).
+ * Every host SaaS app that embeds the widget is a potential origin, so there
+ * is no static allowlist. The rules live in `lib/widgetOrigin.ts`:
  *
- * Project resolution
- * ------------------
- * We resolve the requesting project from `X-Koe-Project-Key` on every
- * request — preflight included. Earlier versions cached a global union
- * of every project's `allowedOrigins` on the preflight path; that
- * leaked permissiveness across tenants (one project with an empty
- * allowlist made every other project's preflight reflect arbitrary
- * origins). The per-project lookup eliminates that leak: a strict
- * project's preflight cannot succeed via a permissive sibling.
+ * - Preflight (`OPTIONS`): browsers never send the `X-Koe-Project-Key`
+ *   value on a preflight, so the project is unknown here. The preflight is
+ *   answered from the `Origin` and the requested method and headers
+ *   (`preflightHeaders`), and only for an origin that at least one project
+ *   accepts. It grants no access by itself.
+ * - Real request: `Access-Control-Allow-Origin` is reflected only when this
+ *   project's `allowedOrigins` accepts the origin. `requireProject` then
+ *   refuses a disallowed origin with a 403 before any handler runs, so a
+ *   preflight that passed thanks to another project cannot lead to a write.
  *
- * If the project key is missing (browser-driven preflights don't send
- * custom headers) or unknown, we default to strict deny — emit no CORS
- * headers and 204. The browser blocks the follow-up request without
- * us having to leak whether the project exists. Widget integrations
- * that need cross-origin browser preflight must keep `allowedOrigins`
- * explicit per project.
- *
- * Credentials
- * -----------
- * We never set `Access-Control-Allow-Credentials: true`. The widget
- * does not need cookies to operate, and combining
- * `Access-Control-Allow-Credentials: true` with `Allow-Origin: *` is
- * rejected by browsers anyway — so even on the permissive (empty
- * allowlist) path we always reflect the specific `Origin`, never `*`.
+ * We always reflect the specific origin, never `*`, and never set
+ * `Access-Control-Allow-Credentials`: the widget sends no cookies.
  */
-export const widgetCors: MiddlewareHandler = async (c, next) => {
-  const origin = c.req.header('Origin');
-  const projectKey = c.req.header('X-Koe-Project-Key');
+export function createWidgetCors(lookup: OriginLookup): MiddlewareHandler {
+  return async (c, next) => {
+    const origin = c.req.header('Origin');
+    c.header('Vary', 'Origin');
 
-  if (c.req.method === 'OPTIONS') {
+    if (c.req.method === 'OPTIONS') {
+      const headers = preflightHeaders(
+        origin,
+        c.req.header('Access-Control-Request-Method'),
+        c.req.header('Access-Control-Request-Headers'),
+      );
+      if (headers && origin && (await lookup.anyProjectAccepts(origin))) {
+        for (const [k, v] of Object.entries(headers)) c.header(k, v);
+      }
+      // Always 204: a missing CORS header is enough for the browser to block
+      // the real request.
+      return c.body(null, 204);
+    }
+
+    const projectKey = c.req.header('X-Koe-Project-Key');
     if (origin && projectKey) {
-      const allowed = await getCachedOrigins(projectKey);
+      const allowed = await lookup.projectOrigins(projectKey);
       if (allowed && isOriginAllowed(allowed, origin)) {
-        // Reflect the specific Origin — never `*`. Even when the
-        // project is permissive (empty allowlist), echoing `*` would
-        // both leak permissiveness across tenants in the response
-        // and be incompatible with any future credentialed request.
         c.header('Access-Control-Allow-Origin', origin);
-        c.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-        c.header(
-          'Access-Control-Allow-Headers',
-          'Content-Type, X-Koe-Project-Key, X-Koe-User-Hash, X-Koe-Identity-Token',
-        );
-        c.header('Access-Control-Max-Age', '600');
-        c.header('Vary', 'Origin');
       }
     }
-    // Always 204 — omitting CORS headers is sufficient for the browser
-    // to block the follow-up request, without leaking whether the
-    // origin/project is unknown vs. the preflight was malformed.
-    return c.body(null, 204);
-  }
 
-  if (origin && projectKey) {
-    const allowed = await getCachedOrigins(projectKey);
-    if (allowed && isOriginAllowed(allowed, origin)) {
-      c.header('Access-Control-Allow-Origin', origin);
-      c.header('Vary', 'Origin');
-    }
-  }
+    await next();
+  };
+}
 
-  await next();
-};
+export const widgetCors = createWidgetCors({
+  projectOrigins: getCachedOrigins,
+  anyProjectAccepts: isOriginKnownToAnyProject,
+});

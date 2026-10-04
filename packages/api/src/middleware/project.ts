@@ -3,6 +3,7 @@ import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import { db, dbAvailable, schema } from '../db';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
 import { fail } from '../lib/response';
+import { checkRequestOrigin } from '../lib/widgetOrigin';
 
 export interface ProjectContext {
   project: {
@@ -27,9 +28,9 @@ const HEARTBEAT_THROTTLE_SECONDS = 60;
 /**
  * Resolves `X-Koe-Project-Key` to a project row and attaches it to the
  * Hono context. Also enforces the origin allowlist when one is
- * configured — this is defense in depth on top of the CORS layer, and
- * catches non-browser clients that don't send an `Origin` header when
- * the project requires one.
+ * configured (`checkRequestOrigin`). This is the real access check: the
+ * CORS preflight cannot know the project, so a disallowed origin is
+ * refused here, before any handler runs.
  */
 export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = async (c, next) => {
   const key = c.req.header('X-Koe-Project-Key');
@@ -46,15 +47,13 @@ export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = 
   }
 
   const origin = c.req.header('Origin');
-  if (project.allowedOrigins.length > 0) {
-    // A project with an explicit allowlist never accepts blank Origin
-    // requests — those bypass browser CORS entirely.
-    if (!origin) {
-      return fail(c, 'origin_not_allowed', 'Origin header is required', 403);
-    }
-    if (!project.allowedOrigins.includes(origin)) {
-      return fail(c, 'origin_not_allowed', `Origin ${origin} is not allowed`, 403);
-    }
+  const originCheck = checkRequestOrigin({
+    allowedOrigins: project.allowedOrigins,
+    origin,
+    secFetchSite: c.req.header('Sec-Fetch-Site'),
+  });
+  if (!originCheck.ok) {
+    return fail(c, 'origin_not_allowed', originCheck.message, 403);
   }
 
   // Decrypt at the boundary. Legacy rows stored plaintext (pre-KMS
@@ -86,7 +85,10 @@ export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = 
         eq(schema.projects.id, project.id),
         or(
           isNull(schema.projects.lastPingAt),
-          lt(schema.projects.lastPingAt, sql`now() - make_interval(secs => ${HEARTBEAT_THROTTLE_SECONDS})`),
+          lt(
+            schema.projects.lastPingAt,
+            sql`now() - make_interval(secs => ${HEARTBEAT_THROTTLE_SECONDS})`,
+          ),
         ),
       ),
     )
