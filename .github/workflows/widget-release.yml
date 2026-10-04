@@ -9,7 +9,8 @@ name: Widget release
 #     patch, `feat:` → minor, `BREAKING CHANGE:` in the body → major).
 #   - If no releasable commits are present, the job is a no-op.
 #   - Otherwise it creates a git tag via the GitHub API and opens a
-#     GitHub Release with auto-generated notes.
+#     GitHub Release with auto-generated notes, with the standalone
+#     bundle (koe.iife.js + style.css) attached as release assets.
 #
 # What it does NOT do:
 #   - It does NOT commit CHANGELOG or version bumps back to main
@@ -17,11 +18,11 @@ name: Widget release
 #     Releases page. This keeps us off the "GitHub Actions can't
 #     create PRs or push to main" rails entirely.
 #   - It does NOT fire on branches other than main, tags, or forks.
+#   - It does NOT publish to npm (no `@semantic-release/npm` plugin).
+#     The widget ships as `v*` git tags and GitHub Releases only.
 #
 # Required secrets:
-#   - GITHUB_TOKEN: provided by Actions.
-#   - NPM_TOKEN: an npm automation token with publish rights on
-#     `@wifsimster/koe`. Set under Settings → Secrets → Actions.
+#   - GITHUB_TOKEN: provided by Actions. No other secret is needed.
 
 on:
   push:
@@ -41,7 +42,6 @@ jobs:
       contents: write # create tags and GitHub Releases via the API
       issues: write # semantic-release/github may comment on issues
       pull-requests: write # semantic-release/github may comment on PRs
-      id-token: write # npm publish with provenance (OIDC)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,12 +58,6 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          # We deliberately do NOT set `registry-url` here. setup-node
-          # would inject a `~/.npmrc` with `_authToken=${NODE_AUTH_TOKEN}`
-          # that shadows whatever @semantic-release/npm writes and fails
-          # with 401 when NODE_AUTH_TOKEN is not in the env.
-          # @semantic-release/npm reads `NPM_TOKEN` directly and writes
-          # its own auth line, which is what we want.
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -74,5 +68,4 @@ jobs:
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: pnpm release

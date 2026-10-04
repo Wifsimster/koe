@@ -39,14 +39,12 @@
       }
     ],
     [
-      "@semantic-release/npm",
-      {
-        "pkgRoot": "packages/widget"
-      }
-    ],
-    [
       "@semantic-release/github",
       {
+        "assets": [
+          { "path": "packages/widget/dist/koe.iife.js", "label": "koe.iife.js (standalone bundle)" },
+          { "path": "packages/widget/dist/style.css", "label": "style.css (standalone styles)" }
+        ],
         "successComment": false,
         "failComment": false,
         "releasedLabels": false
