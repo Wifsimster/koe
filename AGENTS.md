@@ -6,7 +6,7 @@ touche ce dépôt.
 
 ## Vue d'ensemble
 
-Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-hosted destine aux produits SaaS (bugs, demandes d'evolution, vote public) et son back-office. Produit auto-heberge : aucune instance geree. Distribue sous forme d'image Docker `ghcr.io/wifsimster/koe-server` (API + dashboard bundles) et de tags git `v*` pour le widget (consomme via `github:Wifsimster/koe#vX.Y.Z` ou jsDelivr, ou via npm). Le widget (bugs, demandes d'evolution, vote) et l'API d'administration (inbox, bulk actions, audit) sont branches. Le chat temps reel existe comme onglet de preview local mais n'est pas branche.
+Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-hosted destine aux produits SaaS (bugs, demandes d'evolution, vote public) et son back-office. Produit auto-heberge : aucune instance geree. Distribue sous forme d'image Docker `ghcr.io/wifsimster/koe-server` (API + dashboard bundles) et de tags git `v*` pour le widget (consomme via `github:Wifsimster/koe#vX.Y.Z` ou jsDelivr ; non publie sur npm). Le widget (bugs, demandes d'evolution, vote) et l'API d'administration (inbox, bulk actions, audit) sont branches. Le chat temps reel existe comme onglet de preview local mais n'est pas branche.
 
 ## Packages
 
