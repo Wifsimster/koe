@@ -55,10 +55,10 @@ $C launch              # ~10 s warm, plus a one-time `pnpm turbo run build` if d
 
 `launch` is ready when it returns `"ok": true`. By then it has already waited for `/health/ready`, the host page and the CDP port.
 
-Two launch flags exist because of product bugs found by this harness (see Gotchas):
+Two launch flags choose how the widget reaches the API:
 
-- `--embed same-origin` (default): the host page reverse-proxies `/v1/*` to the API, and the widget's `apiUrl` is the host's own origin. `--embed cross-origin` points the widget straight at `:38787`, the way a SaaS on another domain would.
-- `--origins any` (default): `allowedOrigins=[]`. `--origins allowlist` sets `allowedOrigins=["http://localhost:38788"]`.
+- `--embed same-origin` (default): the host page reverse-proxies `/v1/*` to the API, and the widget's `apiUrl` is the host's own origin. `--embed cross-origin` points the widget straight at `:38787`, the way a SaaS on another domain would. Use it to prove any CORS change.
+- `--origins any` (default): `allowedOrigins=[]`. `--origins allowlist` sets `allowedOrigins=["http://localhost:38788"]`. Every `widget` action accepts `--host-origin http://127.0.0.1:38788`: the same host page from an origin outside that allowlist, to prove a refusal.
 
 Isolation: one instance per host. The ports 38787, 38788, 38432 and 38222 are fixed. Do not use 8787 or 5432: on the shared host they belong to other projects. `launch` refuses to start when any port is busy, when the `koe-verify-pg` container exists, or when `.verify-run/state.json` exists. Never point the CLI at an instance you did not launch, and never run `docker compose up` from this repo alongside it.
 
@@ -81,7 +81,7 @@ $C doctor   # read-only; exit 0 only when every required check passes
 - the third-party env of the API process is empty (it reads `/proc/<pid>/environ` and prints names only)
 - the git SHA of the checkout
 
-It also reports `widgetPreflightAllowsHost`: whether the API answers a browser CORS preflight from the host origin. On `1cbae34` this is `false` (see Gotchas). It is informational and not required. Run `doctor` first whenever anything looks off, and read its `hints`.
+It also reports `widgetPreflightAllowsHost`: whether the API answers a browser CORS preflight from the host origin. It is `true` since the CORS fix, and was `false` on `1cbae34`. It is informational and not required. Run `doctor` first whenever anything looks off, and read its `hints`.
 
 ## Drive
 
@@ -145,8 +145,7 @@ Run it after every failed iteration too. Afterwards, `docker ps --filter label=k
 
 ## Gotchas
 
-- **Cross-origin widget submissions are blocked by CORS (product bug on `1cbae34`).** `widgetCors` only answers a preflight when the `OPTIONS` request carries `X-Koe-Project-Key`. Browsers never send custom header values on a preflight, so the API omits `Access-Control-Allow-Origin`. The widget sends `Content-Type: application/json` plus custom headers, so every call is preflighted. The result is that every widget call from another origin fails, and the user sees "Network error — check your connection". This is why `launch` defaults to `--embed same-origin`. Reproduce it with `launch --embed cross-origin`, then `widget bug ...`, then `console --level error`.
-- **With an allowlist, same-origin GETs fail with 403 (product bug).** Under `--origins allowlist`, "Browse ideas" and "My requests" fail with 403 `origin_not_allowed` / "Origin header is required". Browsers omit `Origin` on same-origin GETs, and `requireProject` demands one when `allowedOrigins` is non-empty. Bug and idea submissions (POST) still work. Under `--origins any`, the heartbeat shows "Last ping from unknown origin" for the same reason.
+- **CORS model.** A browser preflight carries no `X-Koe-Project-Key` value, so the API answers it from the `Origin` and the requested headers, and only for an origin that at least one project accepts (`lib/widgetOrigin.ts`). The per-project check runs on the real request: `requireProject` refuses a disallowed origin with 403 before any handler, and the response carries no `Access-Control-Allow-Origin`. A disallowed origin therefore shows "Network error — check your connection" in the widget. Same-origin GETs carry no `Origin`; they pass an allowlist through `Sec-Fetch-Site: same-origin`. The heartbeat still shows "Last ping from unknown origin" for them.
 - **On viewports 480px wide or less, the closed launcher drops to the bottom-left corner (product bug).** The bottom-sheet media query pins `.koe-root` even when the panel is closed. See `features/repro-bug-report.md` Gotchas.
 - **The live chat is not wired.** It has no widget screen and no API route; only the `conversations` and `messages` tables exist. See `features/live-chat.md`. Do not report it as verified.
 - **The widget never captures a screenshot, expected/actual behavior, or console logs.** Those `tickets` columns stay null. `repro` lists what a report lacks.

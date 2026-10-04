@@ -420,13 +420,11 @@ Refuses to start if a port is busy, the container exists, or .verify-run/state.j
 
 --embed      same-origin (default): the host page reverse-proxies /v1/* to the API and the widget's
              apiUrl is the host's own origin (the README's "self-host the API on the same domain").
-             cross-origin: the widget calls ${API} directly, like a SaaS on another domain. On
-             1cbae34 every browser submission then fails the CORS preflight (product bug; see
-             features/widget-bug-report.md Gotchas). Use it to reproduce or prove a CORS fix.
+             cross-origin: the widget calls ${API} directly, like a SaaS on another domain.
+             Use it to prove any CORS change (see features/widget-bug-report.md).
 --origins    any (default): allowedOrigins=[] (permissive), every widget screen works.
-             allowlist: allowedOrigins=[${HOST}]. On 1cbae34 same-origin GETs (Browse ideas,
-             My requests) then return 403 origin_not_allowed because browsers omit Origin on
-             same-origin GETs (product bug). Submissions (POST) still work.
+             allowlist: allowedOrigins=[${HOST}]. \`widget ... --host-origin http://127.0.0.1:${PORTS.host}\`
+             then loads the host page from an origin outside the list, to prove a refusal.
 --dry-run    print the plan and touch nothing.`,
   async run(flags) {
     const embed = flags.embed === 'cross-origin' ? 'cross-origin' : 'same-origin';
@@ -629,7 +627,7 @@ Run it first whenever anything looks off; read "hints".`,
     if (!state) hints.push('No instance recorded: run `control-koe launch`.');
     if (state && !Object.values(checks.pids).every(Boolean)) hints.push('A recorded process died: read .verify-run/logs/*.log, then `control-koe teardown` and launch again.');
     if (!checks.playwrightChromium) hints.push(`Install the browser: node ${TOOLS_DIR}/node_modules/playwright-core/cli.js install chromium`);
-    if (state?.embed === 'cross-origin' && !checks.widgetPreflightAllowsHost) hints.push('The API answers the CORS preflight from the host origin WITHOUT Access-Control-Allow-Origin (see features/widget-bug-report.md Gotchas). Cross-origin widget submissions will be blocked by the browser; relaunch without `--embed cross-origin` to drive the widget through a reverse proxy instead.');
+    if (state?.embed === 'cross-origin' && !checks.widgetPreflightAllowsHost) hints.push('The API answers the CORS preflight from the host origin WITHOUT Access-Control-Allow-Origin, so the browser will block cross-origin widget calls. Read packages/api/src/middleware/cors.ts and lib/widgetOrigin.ts (see features/widget-bug-report.md Gotchas).');
     if (!required) process.exitCode = 1;
     return { ok: !!required, runId: state?.runId, checks, hints };
   },
@@ -745,6 +743,8 @@ control-koe widget bug --title <t> --description <d> [--steps <s>] [--path /proj
 control-koe widget feature --title <t> --description <d> [--path /] [--dry-run]
 control-koe widget vote [--title <regex>] [--dry-run]
 control-koe widget my-requests
+Every action accepts --host-origin http://127.0.0.1:${PORTS.host}: the same host page, served from
+an origin that \`launch --origins allowlist\` does not allow. Use it to prove a refusal.
 
 All flows start on the fake host page (${HOST}<path>) as the signed-in host user
 ${HOST_USER.id} ("${HOST_USER.name}"), whose userHash the host page computed server-side.
@@ -765,7 +765,10 @@ my-requests "My requests" list for the host user (read-only).
     const actions = ['open', 'bug', 'feature', 'vote', 'my-requests'];
     if (!actions.includes(action)) fail(`Unknown widget action "${action ?? ''}".`, `Use one of: ${actions.join(', ')} (see control-koe widget --help).`);
     if ((action === 'bug' || action === 'feature') && (typeof flags.title !== 'string' || typeof flags.description !== 'string')) fail('Missing --title or --description.', `Example: control-koe widget ${action} --title "Export does nothing" --description "Clicked Export CSV, no file"`);
-    const hostPath = typeof flags.path === 'string' ? flags.path : action === 'bug' ? '/projects?tab=export' : '/';
+    const pathPart = typeof flags.path === 'string' ? flags.path : action === 'bug' ? '/projects?tab=export' : '/';
+    const hostOrigin = typeof flags['host-origin'] === 'string' ? flags['host-origin'].replace(/\/$/, '') : null;
+    if (hostOrigin && !/^http:\/\/(localhost|127\.0\.0\.1):38788$/.test(hostOrigin)) fail(`--host-origin must name the local host page (${HOST} or http://127.0.0.1:${PORTS.host}).`, 'Use --host-origin http://127.0.0.1:38788 to load the same host page from an origin outside the allowlist.');
+    const hostPath = hostOrigin ? hostOrigin + (pathPart.startsWith('/') ? pathPart : '/' + pathPart) : pathPart;
     if (flags['dry-run']) return { ok: true, dryRun: true, action, hostUrl: resolveUrl(hostPath, 'host'), as: HOST_USER, fields: { title: flags.title, description: flags.description, steps: flags.steps }, triggerError: !!flags['trigger-error'], sideEffect: { bug: 'tickets row', feature: 'tickets row', vote: 'ticket_votes row toggled' }[action] || 'none' };
     return withPage(async ({ page, state }) => {
       if (action === 'bug' && flags['trigger-error']) {
@@ -793,13 +796,13 @@ my-requests "My requests" list for the host user (read-only).
         const loadError = await dialog.getByRole('alert').first().textContent({ timeout: 500 }).catch(() => null);
         const rows = psqlJson(`select id, kind, title, status from tickets where reporter_id = ${lit(HOST_USER.id)} order by created_at desc`);
         if (loadError) process.exitCode = 1;
-        return { ok: !loadError, aria: await dialog.ariaSnapshot(), dbRowsForHostUser: rows, file, ...(loadError ? { error: `My requests failed to load: "${loadError}".`, fix: 'Run `control-koe network-log --filter /v1/widget/my-requests`; 403 origin_not_allowed = --origins allowlist (known product bug).' } : {}) };
+        return { ok: !loadError, aria: await dialog.ariaSnapshot(), dbRowsForHostUser: rows, file, ...(loadError ? { error: `My requests failed to load: "${loadError}".`, fix: 'Run `control-koe network-log --filter /v1/widget/my-requests`; a 403 origin_not_allowed means the page origin is outside allowedOrigins.' } : {}) };
       }
       if (action === 'vote') {
         await dialog.getByRole('button', { name: /browse ideas/i }).click();
         await dialog.getByRole('listitem').or(dialog.getByRole('alert')).first().waitFor({ timeout: 10000 });
         const loadError = await dialog.getByRole('alert').first().textContent({ timeout: 500 }).catch(() => null);
-        if (loadError && !(await dialog.getByRole('listitem').count())) fail(`Browse ideas failed to load: "${loadError}".`, 'Run `control-koe network-log --filter /v1/widget/features`. A 403 origin_not_allowed means the instance runs with --origins allowlist (known product bug, see features/widget-feature-voting.md).');
+        if (loadError && !(await dialog.getByRole('listitem').count())) fail(`Browse ideas failed to load: "${loadError}".`, 'Run `control-koe network-log --filter /v1/widget/features`. A 403 origin_not_allowed means the page origin is outside allowedOrigins.');
         const items = dialog.getByRole('listitem');
         const row = typeof flags.title === 'string' ? items.filter({ hasText: new RegExp(flags.title, 'i') }).first() : items.first();
         if (!(await row.count())) fail('No idea row matched --title.', 'Run `control-koe widget vote --dry-run` and `control-koe snapshot` to see row titles.');
@@ -845,7 +848,7 @@ my-requests "My requests" list for the host user (read-only).
       if (!ok) {
         process.exitCode = 1;
         result.error = resp ? `Submission did not complete (HTTP ${resp.status()}).` : 'No POST reached the API (blocked by the browser: CORS?).';
-        result.fix = 'Run `control-koe console --level error --last 10` and `control-koe network-log --filter /v1/widget`; if the console shows a CORS error, see features/widget-bug-report.md Gotchas (relaunch without `--embed cross-origin`).';
+        result.fix = 'Run `control-koe console --level error --last 10` and `control-koe network-log --filter /v1/widget`; a CORS error means the page origin is not allowed (expected with --host-origin under --origins allowlist); see features/widget-bug-report.md.';
       }
       return result;
     });

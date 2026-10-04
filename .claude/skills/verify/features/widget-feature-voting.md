@@ -30,7 +30,7 @@ Preconditions:
 
 ## Gotchas
 
-- Under `launch --origins allowlist`, "Browse ideas" and "My requests" show "Couldn't load ..." because the GETs return 403 `origin_not_allowed` (product bug: browsers omit `Origin` on same-origin GETs). Under `--embed cross-origin`, every call fails CORS. Use the defaults to drive these screens.
+- Same-origin GETs ("Browse ideas", "My requests") carry no `Origin` header. Under `launch --origins allowlist` they pass through `Sec-Fetch-Site: same-origin`; before the CORS fix they returned 403 `origin_not_allowed`.
 - `GET /v1/widget/features` trusts the `userId` query string to compute `hasVoted`, and needs no identity header. The vote itself is HMAC-checked.
 - The seeded ideas have `metadata = {}`. Widget-submitted ones carry full browser metadata.
 - Votes are not shown in "My requests" for bugs. The `voteCount` column is the same aggregate as the inbox's.
