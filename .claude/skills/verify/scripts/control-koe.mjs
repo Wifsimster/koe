@@ -616,7 +616,7 @@ Run it first whenever anything looks off; read "hints".`,
       try {
         const envRaw = fs.readFileSync(`/proc/${state.pids.api}/environ`, 'utf8');
         // Report names only, never values.
-        const bad = ['RESEND_API_KEY', 'REDIS_URL', 'NOTIFY_OWNER_EMAIL', 'DASHBOARD_PUBLIC_URL'].filter((k) => envRaw.split('\0').some((l) => l.startsWith(k + '=') && l.length > k.length + 1));
+        const bad = ['RESEND_API_KEY', 'RESEND_FROM_EMAIL', 'REDIS_URL', 'NOTIFY_OWNER_EMAIL', 'DASHBOARD_PUBLIC_URL', 'KOE_SECRET_KEYS'].filter((k) => envRaw.split('\0').some((l) => l.startsWith(k + '=') && l.length > k.length + 1));
         checks.thirdPartyEnvEmpty = bad.length === 0 ? true : bad;
       } catch {
         checks.thirdPartyEnvEmpty = 'unknown (tsx re-spawns node; see logs)';
