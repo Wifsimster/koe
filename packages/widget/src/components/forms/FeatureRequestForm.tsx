@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type FocusEvent, type FormEvent } from 'react';
-import { captureBrowserMetadata, isValidEmail } from '@koe/shared';
+import { isValidEmail } from '@koe/shared';
+import { buildMetadata } from '../../capture';
 import { useKoe } from '../../context/KoeContext';
 import { KoeApiError } from '../../api/client';
 import { TextField, TextAreaField } from '../ui/Field';
@@ -98,10 +99,11 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
     return undefined;
   };
 
-  const onBlur = (key: keyof FormState) => (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const msg = validateField(key, e.target.value);
-    dispatchForm({ type: 'setError', key, message: msg });
-  };
+  const onBlur =
+    (key: keyof FormState) => (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const msg = validateField(key, e.target.value);
+      dispatchForm({ type: 'setError', key, message: msg });
+    };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -137,7 +139,7 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
           title: values.title.trim(),
           description: values.description.trim(),
           reporter,
-          metadata: captureBrowserMetadata(),
+          metadata: buildMetadata(config),
         },
         { signal: controller.signal },
       );

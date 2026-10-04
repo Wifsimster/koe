@@ -6,4 +6,5 @@ export * from './types/widget';
 export * from './types/api';
 export * from './locales';
 export * from './metadata';
+export * from './redact';
 export * from './validation';

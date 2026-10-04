@@ -5,11 +5,11 @@
 ## Sub-features
 
 - `repro-load`: from the DB (`repro <ticketId>`) or from a file (`repro --from-file x.json`). The file can be a `tickets` row (snake_case), the admin API shape (camelCase), a widget response envelope `{ok,data}`, or a previous bundle's `report.json`.
-- `repro-environment`: a new context with `viewport`, `screen`, `userAgent`, `locale` (from `language`), `timezoneId` and `deviceScaleFactor`, taken from `metadata`.
-- `repro-url`: `metadata.url` is re-targeted onto `http://localhost:38788` (path, query and hash kept). `originRewritten` records a foreign origin. The referrer is replayed when it was captured.
+- `repro-environment`: a new context with `viewport`, `screen`, `userAgent`, `locale` (from `language`), `timezoneId`, `deviceScaleFactor`, and `hasTouch`/`isMobile` (from `metadata.input`), taken from `metadata`.
+- `repro-url`: `metadata.url` is re-targeted onto `http://localhost:38788` (path, query and hash kept; redacted values stay empty). `originRewritten` records a foreign origin. The referrer is replayed when it was captured.
 - `repro-identity`: the host page renders as the reporter id (`koe_verify_as` cookie), so the widget shows that user's "My requests".
 - `repro-steps`: `--steps-file` holds a JSON action list (`goto`, `click`, `fill`, `press`, `wait`) with a screenshot after each step. The report only has free-text `steps_to_reproduce`, which `repro` copies into `manualStepsFromReport` for the agent to translate.
-- `repro-bundle`: `report.json`, `plan.json`, `console.json`, `network.json`, `landed.png`, `step-N.png` and `summary.json`. The summary holds `envMatch`, `consoleErrors`, `failedRequests`, `missingFromReport` and `notCapturedByKoe`.
+- `repro-bundle`: `report.json`, `plan.json`, `console.json`, `network.json`, `landed.png`, `step-N.png` and `summary.json`. The summary holds `envMatch` (touch included), `oracle` (`expected`, and `actual` = description), `screenshotUrl`, `versions`, `reporterMetadata`, `consoleErrors`, `failedRequests`, `missingFromReport` and `notCaptured`.
 
 ## How to get to it (user POV)
 
@@ -36,13 +36,13 @@ These are product suggestions only; nothing here changes product code. Each item
 1. **Action trail** (`metadata.breadcrumbs`: last N clicks, inputs (redacted), route changes, with timestamps and target role/name). It would make `--steps-file` unnecessary, because `repro` could replay the actions directly. Today `steps_to_reproduce` is free text, and the agent must translate it.
 2. **Console log buffer** (`metadata.console`: last N `error`/`warn` entries plus unhandled rejections). Without it there is no ground truth: `repro` observes errors, but cannot compare them to what the reporter got.
 3. **Network failures** (`metadata.network`: failed or 4xx/5xx requests, with method, URL without query values, status and timing). The failing backend call is often the bug itself.
-4. **Screenshot.** The `tickets.screenshot_url` column and the dashboard "Screenshot" section exist, and the API accepts `screenshotUrl`, but the widget never captures or uploads one. That leaves no visual ground truth to diff `landed.png` against.
-5. **Expected and actual behavior.** The columns and the API fields exist, but the widget form has no inputs for them. Repro cannot state a pass/fail oracle.
-6. **Host app context** (`metadata.app`: host app version/release, current route name and params, feature flags, the user's plan or role). The host passes these through `reporter.metadata`, which the API accepts and then drops on insert. Storing that field is the cheapest fix.
-7. **Widget version** (`metadata.widgetVersion`). Without it, a widget regression cannot be told apart from a host bug.
-8. **Precise moment** (`metadata.capturedAt` exists). Add the page load time and time-on-page, so time-dependent bugs (timers, token expiry) can be replayed.
-9. **Input capability** (`navigator.maxTouchPoints`, `matchMedia('(pointer: coarse)')`). Without it `repro` cannot set Playwright's `hasTouch`/`isMobile`: an iPhone report replays with the iPhone UA and viewport but mouse input, and touch-only bugs do not show.
-10. **Privacy-safe URL.** `metadata.url` keeps the full query string. A replay needs the path and the parameter names, not the secret values, so redact values server-side.
+4. **Screenshot.** Done: the host's `captureScreenshot` hook uploads to the host's storage and Koe stores the URL. Koe itself still has no capture or upload flow.
+5. **Expected and actual behavior.** Done: "What did you expect?" fills `expected_behavior`; the description is the actual behavior. `repro` reports both as `oracle`.
+6. **Host app context.** Done: `WidgetConfig.app` (`metadata.app`) and `user.metadata` (`metadata.reporterMetadata`). Route params and feature flags travel through `user.metadata` if the host adds them.
+7. **Widget version.** Done: `metadata.widgetVersion` (`git describe` at build time).
+8. **Precise moment.** Done: `capturedAt` plus `pageLoadedAt`.
+9. **Input capability.** Done: `metadata.input`; `repro` sets `hasTouch`/`isMobile` and reports `envMatch.touch`.
+10. **Privacy-safe URL.** Done: query and hash values are redacted by the widget and again by the API.
 
 ## Gotchas
 

@@ -1,10 +1,6 @@
 import type { WidgetUser } from './user';
 
-export type WidgetPosition =
-  | 'bottom-right'
-  | 'bottom-left'
-  | 'top-right'
-  | 'top-left';
+export type WidgetPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 
 export interface WidgetTheme {
   /**
@@ -82,6 +78,28 @@ export interface WidgetConfig {
   language?: string;
   /** Localization strings. Override individual keys on top of `language`. */
   locale?: Partial<WidgetLocale>;
+  /**
+   * Host app version and release, attached to every report as
+   * `metadata.app`, so a regression can be tied to a deploy.
+   */
+  app?: { version?: string; release?: string };
+  /** What the widget records for bug reports. */
+  capture?: {
+    /**
+     * Query parameter names whose values are kept in captured URLs.
+     * Every other value is dropped (`?token=` stays a name only). Names
+     * that look sensitive (`token`, `code`, `session`...) and token-like
+     * values are dropped even when listed.
+     */
+    keepQueryParams?: string[];
+  };
+  /**
+   * Called when a bug report is submitted. Upload a screenshot to your
+   * own storage and resolve its http(s) URL; it is stored as
+   * `screenshotUrl`. Koe never receives image bytes. Rejections and
+   * slow hooks (over 5 s) are ignored, and the report is sent without it.
+   */
+  captureScreenshot?: () => Promise<string | undefined>;
 }
 
 export interface WidgetLocale {
@@ -163,9 +181,9 @@ export interface WidgetLocale {
      * before the consolidation still typecheck; no longer rendered.
      */
     steps?: string;
-    /** @deprecated Merged into `reproduce`. */
+    /** Optional "what did you expect?" textarea, sent as `expectedBehavior`. */
     expected?: string;
-    /** @deprecated Merged into `reproduce`. */
+    /** @deprecated Not rendered: "What happened?" (`description`) is the actual behavior. */
     actual?: string;
     /** Label for the optional email field shown above submit. */
     email?: string;
@@ -250,6 +268,7 @@ export const DEFAULT_LOCALE: WidgetLocale = {
     title: 'Title',
     description: 'What happened?',
     reproduce: 'How to reproduce',
+    expected: 'What did you expect?',
     email: 'Email · optional',
     submit: 'Send bug report',
     success: 'Thanks — your report has been received.',

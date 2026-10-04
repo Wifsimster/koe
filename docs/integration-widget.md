@@ -33,6 +33,13 @@ L'equipe choisit un mode d'integration. L'application hote initialise ensuite le
 | `theme`      | Non             | Regle la couleur, le mode clair ou sombre et le rayon.              |
 | `features`   | Non             | Active ou masque les onglets bugs, evolutions et chat.              |
 | `locale`     | Non             | Remplace les textes d'interface.                                    |
+| `app`        | Non             | `{ version, release }` de l'application hote, joint a chaque rapport. |
+| `capture`    | Non             | `keepQueryParams` : parametres d'URL dont la valeur est conservee ; toutes les autres valeurs sont masquees. |
+| `captureScreenshot` | Non      | Hook appele a l'envoi d'un bug : televerse une capture sur votre stockage et renvoie son URL http(s) (`screenshotUrl`). Ignore apres 5 s ou en cas d'erreur. |
+
+### Contexte capture et confidentialite
+
+Chaque rapport joint l'environnement du navigateur, la version du widget (`widgetVersion`), `app`, la capacite tactile (`input`) et `user.metadata` (stocke sous `reporterMetadata`). Les valeurs de query et de hash des URL sont masquees par le widget puis a nouveau par l'API, tout comme les jetons (JWT, `Bearer`, `token=...`) et les adresses e-mail dans le texte capture.
 
 ## Exemple React
 

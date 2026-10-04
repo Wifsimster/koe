@@ -16,6 +16,7 @@ import { attachVerifier, type VerifyReporterFn } from '../middleware/identity';
 import { widgetCors } from '../middleware/cors';
 import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rateLimit';
 import { notifyNewTicket } from '../lib/notifications';
+import { sanitizeMetadata } from '../lib/reportContext';
 
 /** 256 KB hard cap on any widget payload. Screenshots go through a
  *  presigned upload flow, never inline base64 (see `screenshotUrl`). */
@@ -83,7 +84,7 @@ widgetRoutes.post('/bugs', async (c) => {
         reporterName: input.reporter.name,
         reporterEmail: input.reporter.email,
         reporterVerified: verdict.verified,
-        metadata: input.metadata,
+        metadata: sanitizeMetadata(input.metadata, input.reporter),
         screenshotUrl: input.screenshotUrl,
       })
       .returning(),
@@ -118,7 +119,7 @@ widgetRoutes.post('/features', async (c) => {
         reporterName: input.reporter.name,
         reporterEmail: input.reporter.email,
         reporterVerified: verdict.verified,
-        metadata: input.metadata,
+        metadata: sanitizeMetadata(input.metadata, input.reporter),
       })
       .returning(),
   );
@@ -251,12 +252,7 @@ widgetRoutes.get('/my-requests', async (c) => {
     })
     .from(schema.tickets)
     .leftJoin(schema.ticketVotes, eq(schema.ticketVotes.ticketId, schema.tickets.id))
-    .where(
-      and(
-        eq(schema.tickets.projectId, project.id),
-        eq(schema.tickets.reporterId, userId),
-      ),
-    )
+    .where(and(eq(schema.tickets.projectId, project.id), eq(schema.tickets.reporterId, userId)))
     .groupBy(schema.tickets.id)
     .orderBy(desc(schema.tickets.createdAt))
     .limit(limit);
