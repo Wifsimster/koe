@@ -42,7 +42,7 @@ The original gap list, with its status. What remains: field values (never captur
 4. **Screenshot.** Done: the host's `captureScreenshot` hook uploads to the host's storage and Koe stores the URL. Koe itself still has no capture or upload flow.
 5. **Expected and actual behavior.** Done: "What did you expect?" fills `expected_behavior`; the description is the actual behavior. `repro` reports both as `oracle`.
 6. **Host app context.** Done: `WidgetConfig.app` (`metadata.app`) and `user.metadata` (`metadata.reporterMetadata`). Route params and feature flags travel through `user.metadata` if the host adds them.
-7. **Widget version.** Done: `metadata.widgetVersion` (`git describe` at build time).
+7. **Widget version.** Done: `metadata.widgetVersion` (`git describe` at build time). The git tag is not a turbo input. A turbo cache hit (worktrees share the cache) replays a `dist/` with an older stamp: a run on `0265681` reported `v1.36.0-10-gc9995eb` instead of `v1.37.0`. Before you trust the version, run `pnpm turbo run build --filter=@wifsimster/koe --force`.
 8. **Precise moment.** Done: `capturedAt` plus `pageLoadedAt`.
 9. **Input capability.** Done: `metadata.input`; `repro` sets `hasTouch`/`isMobile` and reports `envMatch.touch`.
 10. **Privacy-safe URL.** Done: query and hash values are redacted by the widget and again by the API.
