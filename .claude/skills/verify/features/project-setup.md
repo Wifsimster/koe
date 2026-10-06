@@ -23,7 +23,7 @@ An operator creates a project from the dashboard (onboarding on an empty install
 
 Preconditions:
 
-- A fresh `$C launch`, `$C doctor` exits 0, and `$C login` returned ok.
+- A fresh `$C launch`, `$C doctor` exits 0, and `$C login` returned ok. If an earlier command left the browser on the host page, run `$C goto / --app dashboard` first. Do not run `login` again (see `dashboard-inbox-triage.md`).
 
 - **Create.** Run `$C click --role link --name "^New project$"` (the URL becomes `/admin/onboarding`). Then run `$C fill --label "^Project name$" --value "Second App (fake)"` and `$C fill --label "^Allowed origins$" --value "http://localhost:38788"`. Then `$C click --role button --name "^Create project$"`.
 - **Secret shown once.** Run `$C snapshot`. It shows "Project created", textbox `second-app-fake`, an identity secret textbox, the `KOE_IDENTITY_SECRET=` env snippet, and a disabled "Enter the dashboard". Save `$C screenshot --name project-created`.

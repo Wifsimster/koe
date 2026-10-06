@@ -44,7 +44,7 @@ $C launch              # ~10 s warm, plus a one-time `pnpm turbo run build` if d
 
 `launch` does the following, in order:
 
-1. If `packages/{shared,widget,dashboard}/dist` is missing, it runs `pnpm turbo run build`.
+1. If `packages/{shared,widget,dashboard}/dist` is missing, it runs `pnpm turbo run build`. A turbo cache hit restores `dist/` without a rebuild, so `metadata.widgetVersion` can be stale (see `features/repro-bug-report.md`, item 7).
 2. It starts the Docker container `koe-verify-pg`: `postgres:16-alpine` with its data dir on tmpfs, on `127.0.0.1:38432`, labelled `koe-verify=1`. The data dies with the container.
 3. It starts the API from source (`tsx src/bin/serve.ts`) on `:38787` with `MIGRATE_ON_START=true` and `ENABLE_DASHBOARD=true`. The dashboard is served from `packages/dashboard/dist` at `/admin/`. The env is a whitelist, so nothing from your shell leaks in:
    - `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `NOTIFY_OWNER_EMAIL`, `DASHBOARD_PUBLIC_URL`, `REDIS_URL` and `KOE_SECRET_KEYS` are forced empty.

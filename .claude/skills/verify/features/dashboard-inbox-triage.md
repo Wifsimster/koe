@@ -1,6 +1,6 @@
 # Dashboard inbox and triage
 
-The single admin (credentials from env, argon2id hash, HMAC session cookie backed by `admin_sessions`) logs in at `/admin/login`. The admin lands on the inbox: ticket counts, the "Last ping from ..." heartbeat, search, a status filter, kind chips (All, Bugs, Ideas) and a ticket list. Opening a ticket shows its Description, Reproduction, Browser context (the raw metadata JSON), Screenshot, Notes, Activity, and side cards for State (Status and Priority selects), Visibility (public roadmap) and Reporter. Every mutation writes an `admin_ticket_events` row in the same transaction.
+The single admin (credentials from env, argon2id hash, HMAC session cookie backed by `admin_sessions`) logs in at `/admin/login`. The admin lands on the inbox: ticket counts, the "Last ping from ..." heartbeat, search, a status filter, kind chips (All, Bugs, Ideas) and a ticket list. Opening a ticket shows its Description, Reproduction, Browser context (the raw metadata JSON, which also holds the bug report's `breadcrumbs`, `console` and `network` arrays), Screenshot, Notes, Activity, and side cards for State (Status and Priority selects), Visibility (public roadmap) and Reporter. Every mutation writes an `admin_ticket_events` row in the same transaction.
 
 ## Sub-features
 
@@ -28,7 +28,7 @@ Preconditions:
 - A fresh `$C launch` and `$C doctor` exits 0.
 - At least one widget ticket exists (`$C widget bug ...` prints its `ticketId`).
 
-- **Login.** Run `$C login`. The result has `loginStatus: 200`, a `url` under `/admin/?kind=all&status=open...`, and `adminSessionsRows: 1`. `dashboard-after-login.png` shows the inbox.
+- **Login.** Run `$C login`. The result has `loginStatus: 200`, a `url` under `/admin/?kind=all&status=open...`, and `adminSessionsRows: 1`. `dashboard-after-login.png` shows the inbox. Run `login` once per launch. The session cookie stays in the shared browser, so to get back to the dashboard later run `$C goto / --app dashboard`. A second `login` while signed in fails with "Login did not leave /admin/login." (product bug, https://github.com/Wifsimster/koe/issues/90).
 - **Inbox.** Run `$C inbox --expect <ticketId>`. `api.status` is 200, and `expect.inApi` and `expect.visibleOnPage` are both true. `dashboard-inbox.png` shows the row with the bug glyph and "OPEN".
 - **Detail.** Run `$C ticket <ticketId>`. `shows.title` and `shows.browserContext` are true; `shows.reproduction` is true when the report has steps (`widget bug --steps`), `null` otherwise. The full-page screenshot shows the metadata JSON.
 - **Status change.** Run `$C ticket <ticketId> --set-status in_progress`. The result has `patchStatus: 200`, `statusAfter: "in_progress"`, and `auditEvents` holding `{kind: "status_changed", payload: {from: "open", to: "in_progress"}}`. Then `$C inbox --expect <ticketId>` fails under the default `--status open`, and passes with `--status all` or `--status in_progress`.
