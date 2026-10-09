@@ -5,6 +5,10 @@ import { routeTree, type RouterContext } from './router';
 import { NotFoundView, RouteErrorView } from './components/RouteFallbacks';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { ThemeProvider } from './components/theme-provider';
+// Fonts are imported here, not from styles.css: @tailwindcss/postcss inlines
+// CSS imports without rebasing Fontsource's relative `./files/*.woff2` URLs.
+import '@fontsource-variable/jetbrains-mono';
+import '@fontsource-variable/geist';
 import './styles.css';
 
 // Match the Vite `base` config so the SPA can be mounted under
