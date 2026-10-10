@@ -40,11 +40,10 @@ jobs:
 
       - name: Lint
         run: pnpm turbo run lint
-        continue-on-error: true # enable hard fail once eslint is wired
+        continue-on-error: true # packages/widget runs `eslint src` but eslint is not installed; hard fail once wired
 
       - name: Test
         run: pnpm turbo run test
-        continue-on-error: true # enable hard fail once tests exist
 
       - name: Verify widget tarball
         working-directory: packages/widget
