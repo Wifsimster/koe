@@ -14,17 +14,18 @@ colors:
     popover-foreground: "oklch(0.145 0 0)"
     primary: "oklch(0.205 0 0)"
     primary-foreground: "oklch(0.985 0 0)"
-    secondary: "oklch(0.967 0.001 286.375)"
-    secondary-foreground: "oklch(0.21 0.006 285.885)"
+    secondary: "oklch(0.97 0 0)"
+    secondary-foreground: "oklch(0.205 0 0)"
     muted: "oklch(0.97 0 0)"
     muted-foreground: "oklch(0.556 0 0)"
     accent: "oklch(0.97 0 0)"
     accent-foreground: "oklch(0.205 0 0)"
     destructive: "oklch(0.577 0.245 27.325)"
+    destructive-foreground: "oklch(0.985 0 0)"
     border: "oklch(0.922 0 0)"
     input: "oklch(0.922 0 0)"
     ring: "oklch(0.708 0 0)"
-    chart: ["oklch(0.205 0 0)", "oklch(0.37 0 0)", "oklch(0.556 0 0)", "oklch(0.708 0 0)", "oklch(0.837 0 0)"]
+    chart: ["oklch(0.87 0 0)", "oklch(0.556 0 0)", "oklch(0.439 0 0)", "oklch(0.371 0 0)", "oklch(0.269 0 0)"]
     sidebar: "oklch(0.985 0 0)"
     sidebar-foreground: "oklch(0.145 0 0)"
     sidebar-primary: "oklch(0.205 0 0)"
@@ -36,7 +37,7 @@ colors:
     widget-bg: "#ffffff"
     widget-bg-muted: "#f7f7f7"
     widget-border: "#e5e5e5"
-    widget-field-border: "#c4c4c4"
+    widget-field-border: "#949494"
     widget-text: "#0a0a0a"
     widget-text-muted: "#737373"
     widget-text-hover: "#262626"
@@ -47,22 +48,23 @@ colors:
     card-foreground: "oklch(0.985 0 0)"
     popover: "oklch(0.205 0 0)"
     popover-foreground: "oklch(0.985 0 0)"
-    primary: "oklch(0.985 0 0)"
+    primary: "oklch(0.922 0 0)"
     primary-foreground: "oklch(0.205 0 0)"
-    secondary: "oklch(0.274 0.006 286.033)"
+    secondary: "oklch(0.269 0 0)"
     secondary-foreground: "oklch(0.985 0 0)"
     muted: "oklch(0.269 0 0)"
     muted-foreground: "oklch(0.708 0 0)"
     accent: "oklch(0.269 0 0)"
     accent-foreground: "oklch(0.985 0 0)"
     destructive: "oklch(0.704 0.191 22.216)"
+    destructive-foreground: "oklch(0.205 0 0)"
     border: "oklch(1 0 0 / 10%)"
     input: "oklch(1 0 0 / 15%)"
     ring: "oklch(0.556 0 0)"
-    chart: ["oklch(0.985 0 0)", "oklch(0.837 0 0)", "oklch(0.708 0 0)", "oklch(0.556 0 0)", "oklch(0.439 0 0)"]
+    chart: ["oklch(0.87 0 0)", "oklch(0.556 0 0)", "oklch(0.439 0 0)", "oklch(0.371 0 0)", "oklch(0.269 0 0)"]
     sidebar: "oklch(0.205 0 0)"
     sidebar-foreground: "oklch(0.985 0 0)"
-    sidebar-primary: "oklch(0.985 0 0)"
+    sidebar-primary: "oklch(0.922 0 0)"
     sidebar-primary-foreground: "oklch(0.205 0 0)"
     sidebar-accent: "oklch(0.269 0 0)"
     sidebar-accent-foreground: "oklch(0.985 0 0)"
@@ -71,18 +73,18 @@ colors:
     widget-bg: "#0a0a0a"
     widget-bg-muted: "#171717"
     widget-border: "#262626"
-    widget-field-border: "#3f3f3f"
+    widget-field-border: "#5d5d5d"
     widget-text: "#fafafa"
     widget-text-muted: "#a3a3a3"
     widget-text-hover: "#e5e5e5"
 typography:
   dashboard-body: "'JetBrains Mono Variable', ui-monospace, monospace"
-  dashboard-heading: "'Geist Variable', ui-sans-serif, sans-serif"
+  dashboard-heading: "'JetBrains Mono Variable', monospace (font-heading = font-mono)"
   widget: "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace"
   widget-base-size: 13px
   scale: tailwind-default
 rounded:
-  dashboard: 0 (rounded-none on every primitive; --radius 0.625rem declared)
+  dashboard: 0 (rounded-none on every primitive; --radius 0)
   widget: "var(--koe-radius, 0)"
 elevation:
   dashboard: ring-1 ring-foreground/10 (hairline, no shadow)
@@ -93,8 +95,8 @@ spacing:
 components:
   style: radix-lyra
   primitives: radix (radix-ui)
-  icons: lucide-react
-  tailwind: v3.4
+  icons: "@phosphor-icons/react (primitives), lucide-react (pages)"
+  tailwind: "dashboard v4 (@tailwindcss/postcss), widget v3.4"
 ---
 
 # Kōe — DESIGN.md
@@ -127,22 +129,23 @@ Palette shadcn *neutral* d'origine, en OKLCH.
 | `--background` | `oklch(1 0 0)` | `oklch(0.145 0 0)` |
 | `--foreground` | `oklch(0.145 0 0)` | `oklch(0.985 0 0)` |
 | `--card` / `--popover` | `oklch(1 0 0)` | `oklch(0.205 0 0)` |
-| `--primary` | `oklch(0.205 0 0)` | `oklch(0.985 0 0)` |
+| `--primary` | `oklch(0.205 0 0)` | `oklch(0.922 0 0)` |
 | `--primary-foreground` | `oklch(0.985 0 0)` | `oklch(0.205 0 0)` |
-| `--secondary` | `oklch(0.967 0.001 286.375)` | `oklch(0.274 0.006 286.033)` |
-| `--secondary-foreground` | `oklch(0.21 0.006 285.885)` | `oklch(0.985 0 0)` |
+| `--secondary` | `oklch(0.97 0 0)` | `oklch(0.269 0 0)` |
+| `--secondary-foreground` | `oklch(0.205 0 0)` | `oklch(0.985 0 0)` |
 | `--muted` / `--accent` | `oklch(0.97 0 0)` | `oklch(0.269 0 0)` |
 | `--muted-foreground` | `oklch(0.556 0 0)` | `oklch(0.708 0 0)` |
 | `--accent-foreground` | `oklch(0.205 0 0)` | `oklch(0.985 0 0)` |
 | `--destructive` | `oklch(0.577 0.245 27.325)` | `oklch(0.704 0.191 22.216)` |
+| `--destructive-foreground` | `oklch(0.985 0 0)` (4.56:1 sur destructive) | `oklch(0.205 0 0)` (6.19:1) |
 | `--border` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 10%)` |
 | `--input` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 15%)` |
 | `--ring` | `oklch(0.708 0 0)` | `oklch(0.556 0 0)` |
-| `--chart-1…5` | `0.205`, `0.37`, `0.556`, `0.708`, `0.837` (L, chroma 0) | `0.985`, `0.837`, `0.708`, `0.556`, `0.439` |
-| `--sidebar-*` | `oklch(0.985 0 0)` fond, mêmes valeurs que primary/accent/border/ring | `oklch(0.205 0 0)` fond, idem |
+| `--chart-1…5` | `0.87`, `0.556`, `0.439`, `0.371`, `0.269` (L, chroma 0) | idem |
+| `--sidebar-*` | `oklch(0.985 0 0)` fond, mêmes valeurs que primary/accent/border/ring | `oklch(0.205 0 0)` fond, idem (`--sidebar-primary` = `--primary`) |
 
-Mapping Tailwind dans `packages/dashboard/tailwind.config.js` (`darkMode:
-['class']`, couleurs `var(--…)`). Thème piloté par
+Mapping Tailwind v4 dans le bloc `@theme inline` de `styles.css` (`--color-*:
+var(--…)`, variante `dark` = `&:is(.dark *)`). Thème piloté par
 `components/theme-provider.tsx` + `ModeToggle`.
 
 ### Widget (`packages/widget/src/styles.css`, `tailwind.config.js`)
@@ -152,7 +155,7 @@ Mapping Tailwind dans `packages/dashboard/tailwind.config.js` (`darkMode:
 | `--koe-bg` | `#ffffff` | `#0a0a0a` |
 | `--koe-bg-muted` | `#f7f7f7` | `#171717` |
 | `--koe-border` | `#e5e5e5` | `#262626` |
-| `--koe-field-border` | non défini, repli `#c4c4c4` | `#3f3f3f` |
+| `--koe-field-border` | `#949494` (3.03:1 sur `--koe-bg`) | `#5d5d5d` (3.01:1) |
 | `--koe-text` | `#0a0a0a` | `#fafafa` |
 | `--koe-text-muted` | `#737373` | `#a3a3a3` |
 | `--koe-text-hover` | `#262626` | `#e5e5e5` |
@@ -163,7 +166,7 @@ Mapping Tailwind dans `packages/dashboard/tailwind.config.js` (`darkMode:
 | Surface | Rôle | Famille | Source |
 | --- | --- | --- | --- |
 | Dashboard | Corps (tout le `html`) | `'JetBrains Mono Variable', ui-monospace, monospace` via `@fontsource-variable/jetbrains-mono` | `styles.css` (`html { @apply font-mono }`) |
-| Dashboard | Titres (`font-heading`, 20 usages) | `'Geist Variable', ui-sans-serif, sans-serif` via `@fontsource-variable/geist` | `styles.css`, `tailwind.config.js` |
+| Dashboard | Titres (`font-heading`, 20 usages) | `--font-heading: var(--font-mono)` (JetBrains Mono) | `styles.css` (`@theme inline`) |
 | Widget | Tout | `ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace`, 13 px / 1.5 | `widget/src/styles.css` |
 
 Échelle : Tailwind par défaut. Densité *lyra* : contrôles et cartes en
@@ -182,18 +185,19 @@ Widget : libellés 10–11 px, compteurs 14 px `font-weight: 600`.
 
 ## Elevation
 
-- Dashboard : pas d'ombre. La Card se détache par un filet `ring-1 ring-foreground/10` (voir Known Gaps).
+- Dashboard : pas d'ombre. La Card se détache par un filet `ring-1 ring-foreground/10` (généré depuis Tailwind v4).
 - Widget : `shadow-koe` = `0 1px 3px rgba(0,0,0,0.06), 0 10px 30px -10px rgba(0,0,0,0.2)`.
 
 ## Shapes
 
-- Dashboard : `rounded-none` sur Button, Input, Card et leurs sous-parties (style `radix-lyra`). `--radius: 0.625rem` et `borderRadius.lg|md|sm` existent dans la config mais les primitives ne les utilisent pas.
+- Dashboard : `rounded-none` sur Button, Input, Card et leurs sous-parties (style `radix-lyra`). `--radius: 0`, donc `rounded-sm…4xl` valent 0 aussi.
 - Widget : `rounded-koe` = `var(--koe-radius, 0)`, carré par défaut ; `theme.radius` (px) arrondit panneau, lanceur, boutons et champs ensemble.
 
 ## Components
 
 shadcn `radix-lyra` (`components.json` : `menuColor: default`, `menuAccent:
-subtle`), primitives `radix-ui`, icônes `lucide-react`, `tw-animate-css` et
+subtle`, `iconLibrary: phosphor`), primitives `radix-ui`, icônes
+`@phosphor-icons/react` dans les primitives et `lucide-react` dans les pages, `tw-animate-css` et
 `shadcn/tailwind.css` importés.
 
 | Composant | Conventions | Source |
@@ -203,7 +207,7 @@ subtle`), primitives `radix-ui`, icônes `lucide-react`, `tw-animate-css` et
 | `Card` | `rounded-none`, `ring-1 ring-foreground/10`, prop `size` (`sm`) | `ui/card.tsx` |
 | `Input` | `h-8 rounded-none border-input bg-transparent px-2.5 text-xs` | `ui/input.tsx` |
 | Maison | `ConfirmDialog`, `HeartbeatBadge`, `ModeToggle`, `ProjectSwitcher`, `RouteFallbacks` | `src/components/` |
-| Widget | Panneau `<dialog>` non modal, `IntentPicker` en `<fieldset>`, resets en `:where()` (spécificité 0), preflight désactivé | `widget/src/styles.css` |
+| Widget | Panneau `<dialog>` non modal, `IntentPicker` en `<fieldset>`, resets en `:where()` (spécificité 0), preflight désactivé, défauts `--tw-*` de Tailwind limités à `:where(.koe-root, .koe-root *)` | `widget/src/styles.css`, `widget/postcss.config.js` |
 
 Focus : `* { outline-color: color-mix(in oklch, var(--ring) 50%, transparent)
 }` ; Button `focus-visible:border-ring ring-1 ring-ring/50`.
@@ -214,11 +218,12 @@ Focus : `* { outline-color: color-mix(in oklch, var(--ring) 50%, transparent)
 - Rester neutre : l'encre (`primary`) est la seule couleur d'action.
 - Coins carrés dans le dashboard ; dans le widget, lire `--koe-radius`.
 - Préfixer toute classe widget par `koe-` et la garder sous `.koe-root`.
-- Mono pour le texte courant, Geist pour les titres.
+- Mono partout, titres compris (`font-heading` = `font-mono`).
 
 **À éviter**
 - Un accent coloré en dur dans le widget : la teinte vient de l'hôte.
 - Des styles widget à spécificité non nulle sur les éléments natifs (utiliser `:where()`).
+- Une règle widget globale (`*`, `::before`, `:root`, `html`…) : `style.css` est chargé par l'hôte, non layeré, et gagne sur ses utilitaires Tailwind v4.
 - Un `rounded-*` sur une primitive du dashboard.
 
 ## Responsive
@@ -229,13 +234,15 @@ mobile). Widget : rupture unique `max-width: 480px` (bottom sheet),
 
 ## Known Gaps
 
-Écarts constatés dans le code, non corrigés ici.
+Écarts constatés dans le code et non corrigés. Corrigés par
+[#93](https://github.com/Wifsimster/koe/pull/93) (Tailwind v4 + preset lyra) :
+modificateurs d'opacité non générés, primitives v4 sur un projet v3, `--secondary`
+teinté. Corrigés par la PR design-fixes : reset `--tw-*` global du widget,
+`--radius` inerte, `--destructive-foreground` absent, `--koe-field-border` sans
+valeur claire (et sous 3:1), `--sidebar-primary` bleu en sombre.
 
-1. **Modificateurs d'opacité non générés (dashboard)** : Tailwind v3.4 + couleurs `var(--…)` sans `<alpha-value>` ⇒ `bg-primary/80`, `ring-foreground/10`, `bg-destructive/10`, `ring-ring/50`, `bg-input/30`… n'existent pas dans le CSS compilé (vérifié sur `vite build` : 0 occurrence). 27 classes distinctes concernées dans `src/`, dont le filet des Card, le fond du Button `destructive` et plusieurs survols.
-2. **Composants Tailwind v4 sur un projet v3** : les primitives `radix-lyra` et `shadcn/tailwind.css` sont écrits pour v4 (`has-data-[…]`, `@container/card-header`, `group-data-[size=sm]/card`), alors que `package.json` épingle `tailwindcss ^3.4.15`.
-3. **`--radius: 0.625rem` inerte** : déclaré et mappé (`borderRadius.lg|md|sm`), mais toutes les primitives sont `rounded-none`.
-4. **`destructive-foreground` absent** : `tailwind.config.js` mappe `destructive.foreground` sur `var(--primary-foreground)`, aucun `--destructive-foreground` n'est défini.
-5. **Deux piles mono** : le dashboard charge JetBrains Mono, le widget utilise la mono système (`ui-monospace, SFMono-Regular…`).
-6. **`--koe-field-border`** n'a pas de valeur claire déclarée : seul le repli `#c4c4c4` dans les règles le fournit.
-7. **`--secondary` teinté** (hue 286, chroma 0.001–0.006) alors que tous les autres neutres sont à chroma 0.
-8. **Ombre widget en `rgba()`** alors que le dashboard n'a aucune ombre : les deux surfaces ne partagent pas la même élévation.
+1. **Deux piles mono** : le dashboard charge JetBrains Mono, le widget utilise la mono système (`ui-monospace, SFMono-Regular…`). Voulu : le widget ne charge pas de police chez l'hôte.
+2. **Ombre widget en `rgba()`** alors que le dashboard n'a aucune ombre. Voulu : le panneau flotte au-dessus d'une page hôte inconnue et doit s'en détacher.
+3. **Geist chargée mais inutilisée** : `main.tsx` importe `@fontsource-variable/geist` alors que `--font-heading` pointe sur la mono depuis le preset lyra.
+4. **Deux bibliothèques d'icônes** dans le dashboard : Phosphor dans les primitives (`iconLibrary: phosphor`), `lucide-react` dans les pages et composants maison.
+5. **Widget encore en Tailwind v3.4** alors que le dashboard est en v4.
