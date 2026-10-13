@@ -14,7 +14,7 @@ From the widget, a user suggests an idea ("Suggest an idea", POST `/v1/widget/fe
 
 - From the widget launcher "Support": the cards "Suggest an idea", "Browse ideas" and "My requests".
 - From the success state of a bug or idea submission: the "My requests" call to action.
-- From the public roadmap page `http://localhost:38787/r/acme-verify`. It lists only tickets an admin published, and it is outside the widget.
+- From the public roadmap page `http://localhost:38787/r/acme-verify`. It lists only tickets an admin published whose status is Planned, In progress or Resolved (`PUBLIC_STATUSES` in `packages/api/src/routes/public.ts`), and it is outside the widget.
 
 ## Driving it with control-koe
 
@@ -26,7 +26,7 @@ Preconditions:
 - **Vote.** Run `$C widget vote --title "Export projects"`. The response is 200 with `data.hasVoted: true` and `data.voteCount: 1`. `dbVotes` contains `user-42`, and `hostUserHasVote` is true. Running it again removes the vote (toggle).
 - **Browse.** Run `$C widget open`, then `$C click --role button --name "^Browse ideas"`, then `$C snapshot --selector dialog`. The rows are ordered by votes, so "Dark mode..." (3) comes first.
 - **My requests.** After a submission, run `$C widget my-requests`. The `aria` output lists the submitted titles with "Open". `dbRowsForHostUser` is the DB view of the same list.
-- **Roadmap link.** Toggle "Visibility" on the ticket in the dashboard (see dashboard-inbox-triage.md), then run `$C widget my-requests`. A "View on roadmap" link appears. Run `$C goto http://localhost:38787/r/acme-verify` to see the public page.
+- **Roadmap link.** Toggle "Visibility" on the ticket in the dashboard (see dashboard-inbox-triage.md), then run `$C widget my-requests`. A "View on roadmap" link appears, even while the ticket is still Open. The public page does not list an Open ticket: set it to Planned first (`$C ticket <id> --set-status planned`), then run `$C goto http://localhost:38787/r/acme-verify`. The card carries `id="t-<id>"`.
 
 ## Gotchas
 

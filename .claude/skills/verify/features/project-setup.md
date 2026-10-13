@@ -33,6 +33,7 @@ Preconditions:
 
 ## Gotchas
 
+- Creating a project makes it the dashboard's current project. Afterwards, `$C ticket <id>` for an `acme-verify` ticket times out, and the page says "Ticket not found in this project.". Switch back with `$C click --role button --name "^Project Second App"`, then `$C click --role menuitem --name "^Acme Verify"`. Better: run this recipe last in a launch.
 - The "Set up" screen says the secret is "encrypted at rest". That is true only when `KOE_SECRET_KEYS` and `KOE_SECRET_ACTIVE_KID` are set. Otherwise the API logs "secret-at-rest encryption is DISABLED" and stores plaintext: the harness observed a 64-hex plaintext in `projects.identity_secret`. `.env.docker.example` does not mention `KOE_SECRET_KEYS`, so a default self-host stores plaintext while the UI says otherwise.
 - The secret appears in screenshots and ARIA snapshots of the "Set up" screen. In this harness it is a fake throwaway value, but never run this recipe against a real instance.
 - The project key may only contain lowercase letters, digits and `-`. The UI strips other characters as you type.
