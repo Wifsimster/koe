@@ -6,7 +6,7 @@ The single admin (credentials from env, argon2id hash, HMAC session cookie backe
 
 - `admin-login`: the email and password form. 5 attempts/min per IP. A wrong password returns 401 "Invalid email or password".
 - `inbox-list`: filters `?status=` (default `open`), `?kind=all|bug|feature`, `?q=` search, and `?sort=recent|votes`. Each row links to `/admin/tickets/<id>`.
-- `inbox-bulk`: per-row checkboxes ("Select ticket "<title>"") or "Select all tickets on this page", then the "Mark as…" and "Priority…" selects behind a confirm dialog (POST `/v1/admin/projects/:key/tickets/bulk`).
+- `inbox-bulk`: per-row checkboxes ("Select ticket "<title>"") or "Select all tickets on this page", then the "Mark as…" and "Priority…" selects (POST `/v1/admin/projects/:key/tickets/bulk`). Only "Closed" and "Won't fix" open a confirm dialog (`alertdialog "Close 1 ticket?"`, button "Close tickets"). Every other status and every priority applies at once and clears the selection.
 - `ticket-detail`: the sections listed above, with metadata rendered as JSON.
 - `ticket-status` / `ticket-priority`: the Radix selects in the State card. Each PATCH writes `status_changed` or `priority_changed`.
 - `ticket-notes`: the private notes textarea, then "Save notes".
@@ -32,7 +32,7 @@ Preconditions:
 - **Inbox.** Run `$C inbox --expect <ticketId>`. `api.status` is 200, and `expect.inApi` and `expect.visibleOnPage` are both true. `dashboard-inbox.png` shows the row with the bug glyph and "OPEN".
 - **Detail.** Run `$C ticket <ticketId>`. `shows.title` and `shows.browserContext` are true; `shows.reproduction` is true when the report has steps (`widget bug --steps`), `null` otherwise. The full-page screenshot shows the metadata JSON.
 - **Status change.** Run `$C ticket <ticketId> --set-status in_progress`. The result has `patchStatus: 200`, `statusAfter: "in_progress"`, and `auditEvents` holding `{kind: "status_changed", payload: {from: "open", to: "in_progress"}}`. Then `$C inbox --expect <ticketId>` fails under the default `--status open`, and passes with `--status all` or `--status in_progress`.
-- **Bulk.** Run `$C click --role checkbox --name "Select ticket \"<title>\""`, then `$C snapshot` to find the "Mark as…" combobox and the confirm button. Read back with `$C tickets --id <id>`. This recipe is not scripted yet; prove each step with screenshots.
+- **Bulk.** Run `$C goto "/?kind=all&status=all" --app dashboard`, then `$C click --role checkbox --name "Select ticket \"<title>\""` (the bar shows "1 selected"). The bulk comboboxes have no accessible name, so open one by its text: `$C click --text "^Mark as…$"`, then `$C click --role option --name "^In progress$"`. That applies at once, with no dialog. For "Closed", select the row again (the selection clears after each change), pick `--name "^Closed$"`, check `$C snapshot --selector '[role=alertdialog]'` for "Close 1 ticket?", then `$C click --role button --name "^Close tickets$"`. Read back with `docker exec koe-verify-pg psql -U koe -d koe -Atc "select kind, payload from admin_ticket_events where ticket_id='<id>'"`: one `status_changed` per step. This recipe is not scripted yet; prove each step with screenshots.
 - **Logout.** Run `$C goto / --app dashboard`, then `$C click --role button --name "^Sign out$"`. The URL becomes `/admin/login?redirectTo=%2F`, and the `admin_sessions` count drops from 1 to 0: check `docker exec koe-verify-pg psql -U koe -d koe -Atc "select count(*) from admin_sessions"`.
 
 ## Gotchas
