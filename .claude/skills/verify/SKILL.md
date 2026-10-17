@@ -7,7 +7,7 @@ description: Launch and drive Koe (embeddable support widget + admin dashboard, 
 
 Koe has three user surfaces, all covered here:
 
-- **The widget**, embedded in a customer's SaaS page. A user reports a bug, suggests an idea, votes, or reads "My requests". The harness serves a fake host page at `http://localhost:38788` that loads the real standalone build (`packages/widget/dist/koe.iife.js`) the way the README's `<script>` snippet does. The host page's own "backend" signs the user id (HMAC `userHash`).
+- **The widget**, embedded in a customer's SaaS page. A user reports a bug, suggests an idea, votes, or reads "My requests". The harness serves a fake host page at `http://localhost:38788` that loads the real standalone build (`packages/widget/dist/koe.iife.js`) the way the `<script>` snippet in `docs/installation.md` does. The host page's own "backend" signs the user id (HMAC `userHash`).
 - **The admin dashboard**, at `http://localhost:38787/admin/`: log in, inbox, ticket detail, status changes, project creation.
 - **The API** (`@koe/api`, Hono), at `http://localhost:38787`. It is driven through the two surfaces above, and read back through the DB.
 
