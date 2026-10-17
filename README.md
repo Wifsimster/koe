@@ -1,69 +1,69 @@
 # Koe
 
-Un petit bouton « Support » dans le coin de votre application. Vos utilisateurs y signalent un bug, proposent une idée et votent pour celles des autres, sans quitter la page.
+A small "Support" button in the corner of your app. Your users report a bug, suggest an idea and vote on other people's ideas without leaving the page.
 
-![Le widget Koe ouvert dans une application](docs/screenshots/hero.webp)
-
-<p align="center">
-  <img src="docs/screenshots/widget-loop.webp" width="420" alt="On ouvre le widget, on parcourt les idées, on vote, puis on retrouve ses demandes" />
-</p>
-
-## Signaler un bug en trente secondes
-
-Un titre, ce qui s'est passé, comment le reproduire. Koe joint tout seul la page, le navigateur et la version de l'application. Vous n'avez plus à demander « vous étiez sur quel écran ? ».
+![The Koe widget open inside an app](docs/screenshots/hero.webp)
 
 <p align="center">
-  <img src="docs/screenshots/widget-bug.webp" width="380" alt="Formulaire de signalement de bug" />
+  <img src="docs/screenshots/widget-loop.webp" width="420" alt="Opening the widget, browsing ideas, upvoting one, then checking my requests" />
 </p>
 
-## Laisser les utilisateurs choisir la suite
+## Report a bug in thirty seconds
 
-Chacun propose ses idées et vote pour celles des autres. Les plus demandées remontent en haut de la liste, et vous savez quoi construire ensuite.
+A title, what happened, how to reproduce it. Koe attaches the page, the browser and the app version on its own. No more asking "which screen were you on?".
+
+<p align="center">
+  <img src="docs/screenshots/widget-bug.webp" width="380" alt="Bug report form" />
+</p>
+
+## Let your users pick what comes next
+
+Anyone can suggest an idea and upvote the others. The most wanted ones rise to the top, so you know what to build next.
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/widget-idea.webp" alt="Proposer une idée" /></td>
-    <td><img src="docs/screenshots/widget-ideas.webp" alt="Liste des idées avec les votes" /></td>
+    <td><img src="docs/screenshots/widget-idea.webp" alt="Suggesting an idea" /></td>
+    <td><img src="docs/screenshots/widget-ideas.webp" alt="List of ideas with upvotes" /></td>
   </tr>
 </table>
 
-## Tenir chacun au courant
+## Keep everyone in the loop
 
-Dans « My requests », l'utilisateur retrouve tout ce qu'il a envoyé, avec le statut à jour : ouvert, prévu, en cours, livré. Plus besoin d'écrire au support pour savoir où en est sa demande.
+Under "My requests", each user finds everything they sent, with its current status: open, planned, in progress, shipped. Nobody has to email support to ask where things stand.
 
 <p align="center">
-  <img src="docs/screenshots/widget-my-requests.webp" width="380" alt="Suivi des demandes envoyées" />
+  <img src="docs/screenshots/widget-my-requests.webp" width="380" alt="Tracking submitted requests" />
 </p>
 
-## Partager une roadmap publique
+## Share a public roadmap
 
-Vous choisissez les tickets à rendre publics. Koe en fait une page à partager : prévu, en cours, livré.
+You pick which tickets go public. Koe turns them into a page you can share: planned, in progress, shipped.
 
-![Roadmap publique](docs/screenshots/roadmap.webp)
+![Public roadmap](docs/screenshots/roadmap.webp)
 
-## Trier depuis une seule boîte de réception
+## Triage from a single inbox
 
-Bugs et idées arrivent au même endroit. Vous les filtrez, changez leur statut et leur priorité, gardez des notes privées. Chaque changement reste dans l'historique et peut être annulé.
+Bugs and ideas land in the same place. Filter them, change their status and priority, keep private notes. Every change stays in the history and can be undone.
 
-![Boîte de réception de l'admin](docs/screenshots/dashboard-inbox.webp)
+![Admin inbox](docs/screenshots/dashboard-inbox.webp)
 
-![Détail d'un ticket](docs/screenshots/dashboard-ticket.webp)
+![Ticket detail](docs/screenshots/dashboard-ticket.webp)
 
-## Chez vous, à vos couleurs
+## Your server, your colors
 
-Le widget suit le thème clair ou sombre, prend votre couleur et s'ouvre en volet depuis le bas de l'écran sur mobile. Une seule instance Koe peut servir plusieurs applications.
+The widget follows light or dark mode, takes your accent color and slides up from the bottom of the screen on mobile. One Koe instance can serve several apps.
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/widget-dark.webp" alt="Le widget en mode sombre" /></td>
-    <td><img src="docs/screenshots/widget-mobile.webp" alt="Le widget sur mobile" /></td>
+    <td><img src="docs/screenshots/widget-dark.webp" alt="The widget in dark mode" /></td>
+    <td><img src="docs/screenshots/widget-mobile.webp" alt="The widget on mobile" /></td>
   </tr>
 </table>
 
-Koe est auto-hébergé : vos retours utilisateurs restent sur vos serveurs. Il n'y a pas d'abonnement ni d'instance gérée.
+Koe is self-hosted: your users' feedback stays on your servers. No subscription, no managed instance.
 
-## Essayer Koe
+## Try Koe
 
-Le guide [Installer et intégrer Koe](docs/installation.md) explique comment lancer votre instance et ajouter le widget à votre application. Envie de contribuer ? Lisez [CONTRIBUTING.md](CONTRIBUTING.md).
+The [install and integration guide](docs/installation.md) (in French) shows how to run your own instance and add the widget to your app. Want to contribute? Read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Licence MIT.
+MIT license.

@@ -1,6 +1,6 @@
 # Installer, intégrer et développer Koe
 
-Ce guide regroupe tout le détail technique. Pour découvrir Koe en images, voir le [README](../README.md).
+Ce guide regroupe tout le détail technique. Pour découvrir Koe en images, voir le [README](../README.md) (en anglais).
 
 ## Comment ça marche
 
