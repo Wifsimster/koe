@@ -121,6 +121,7 @@ The feature map in [`features/README.md`](features/README.md) has one recipe per
   - Check every mutation with a second read: the `tickets`, `ticket_votes` or `admin_ticket_events` rows (`$C tickets --id`), and the dashboard showing the ticket (`$C inbox --expect`).
   - For a bug, reproduce it on the same surface first, then show it gone.
 - In a git worktree, the default evidence dir dies with `git worktree remove`. Set `KOE_EVIDENCE_DIR` outside the checkout.
+- `launch` pins the evidence root in `.verify-run/state.json` (`evidenceRoot`). Later calls write there even from a shell where `KOE_EVIDENCE_DIR` is not set. Before that, such calls fell back to `.verify-evidence/` in the checkout.
 
 ## Cleanup
 

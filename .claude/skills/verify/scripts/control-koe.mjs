@@ -118,7 +118,9 @@ function requireState() {
   return s;
 }
 function evidenceDir(state) {
-  const dir = path.join(EVIDENCE_ROOT, state?.runId || 'adhoc');
+  // The root is pinned in state.json at launch, so later calls from a shell
+  // without KOE_EVIDENCE_DIR still write into the same run dir.
+  const dir = path.join(state?.evidenceRoot || EVIDENCE_ROOT, state?.runId || 'adhoc');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -254,8 +256,8 @@ function argList(v) {
 // ---------- the fake host SaaS page ----------
 // Served by the `__hostd` daemon on :38788. It plays the customer: its
 // "backend" signs the reporter id with the project's identitySecret
-// (v1 HMAC, README "Identity verification") and the page embeds the
-// standalone IIFE build exactly like the README's <script> snippet.
+// (v1 HMAC, docs/installation.md "Vérification d'identité") and the page embeds the
+// standalone IIFE build exactly like the <script> snippet in docs/installation.md.
 function hostPageHtml(state, reqPath, asUser) {
   const user = asUser || HOST_USER;
   const userHash = hmacHex(state.project.identitySecret, user.id);
@@ -452,7 +454,7 @@ Starts ONE isolated verification instance:
 Refuses to start if a port is busy, the container exists, or .verify-run/state.json exists.
 
 --embed      same-origin (default): the host page reverse-proxies /v1/* to the API and the widget's
-             apiUrl is the host's own origin (the README's "self-host the API on the same domain").
+             apiUrl is the host's own origin (the API served behind the customer's own domain).
              cross-origin: the widget calls ${API} directly, like a SaaS on another domain.
              Use it to prove any CORS change (see features/widget-bug-report.md).
 --origins    any (default): allowedOrigins=[] (permissive), every widget screen works.
@@ -489,7 +491,7 @@ Refuses to start if a port is busy, the container exists, or .verify-run/state.j
     }
 
     const runId = stamp();
-    const state = { runId, startedAt: new Date().toISOString(), embed, origins, pids: {}, containers: [], gitSha: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']) };
+    const state = { runId, evidenceRoot: EVIDENCE_ROOT, startedAt: new Date().toISOString(), embed, origins, pids: {}, containers: [], gitSha: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']) };
     writeState(state);
     const logDir = path.join(RUN_DIR, 'logs');
     fs.mkdirSync(logDir, { recursive: true });

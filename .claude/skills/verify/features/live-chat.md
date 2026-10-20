@@ -1,6 +1,6 @@
 # Live chat
 
-The widget's package description (`packages/widget/package.json`) advertises "live chat", and the README says a Chat tab is visible and that `features` toggles it. In the code at `2fe69c7` (first checked on `1cbae34`), chat is **not wired**. The schema has `conversations` and `messages` tables. `WidgetConfig.features.chat` and the locale strings (`tabs.chat`, `chat.placeholder`, `chat.send`) exist "for forward compatibility". There is no widget screen (`Panel.tsx` renders only `bug`, `feature`, `vote` and `my-requests`), no API route, and no dashboard page. `AGENTS.md` says: do not document chat as an active feature.
+The widget's package description (`packages/widget/package.json`) advertises "live chat", and `docs/installation.md` (moved out of the README in `04b25bd`) says a Chat tab is visible and that `features` toggles it. In the code at `04b25bd` (first checked on `1cbae34`), chat is **not wired**. The schema has `conversations` and `messages` tables. `WidgetConfig.features.chat` and the locale strings (`tabs.chat`, `chat.placeholder`, `chat.send`) exist "for forward compatibility". There is no widget screen (`Panel.tsx` renders only `bug`, `feature`, `vote` and `my-requests`), no API route, and no dashboard page. `AGENTS.md` says: do not document chat as an active feature.
 
 ## Sub-features
 
