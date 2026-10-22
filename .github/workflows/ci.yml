@@ -40,7 +40,6 @@ jobs:
 
       - name: Lint
         run: pnpm turbo run lint
-        continue-on-error: true # packages/widget runs `eslint src` but eslint is not installed; hard fail once wired
 
       - name: Test
         run: pnpm turbo run test
