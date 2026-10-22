@@ -12,7 +12,7 @@
     "bootstrap": "node dist/bootstrap.js",
     "hash-password": "node dist/hash-password.js",
     "test": "node --import tsx --test src/lib/*.test.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsrs --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
@@ -34,6 +34,7 @@
     "@types/node": "^22.9.0",
     "drizzle-kit": "^0.28.0",
     "ioredis-mock": "^8.13.1",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.6.0"

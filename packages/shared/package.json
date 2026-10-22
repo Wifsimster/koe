@@ -17,10 +17,11 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch --preserveWatchOutput",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsrs --noEmit",
     "clean": "rm -rf dist .turbo"
   },
   "devDependencies": {
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.6.0"
   }
 }
