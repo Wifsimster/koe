@@ -13,6 +13,7 @@
     "hash-password": "node dist/hash-password.js",
     "test": "node --import tsx --test src/lib/*.test.ts",
     "typecheck": "tsrs --noEmit",
+    "lint": "OXLINT_TSGOLINT_PATH=\"$(tsrslint-path)\" oxlint -c ../../.oxlintrc.json --type-aware src",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",

@@ -42,7 +42,7 @@
     "build:lib": "tsc --noEmit && BUILD_TARGET=lib vite build",
     "build:standalone": "BUILD_TARGET=standalone vite build",
     "typecheck": "tsrs --noEmit",
-    "lint": "eslint src",
+    "lint": "OXLINT_TSGOLINT_PATH=\"$(tsrslint-path)\" oxlint -c ../../.oxlintrc.json --type-aware src",
     "clean": "rm -rf dist .turbo",
     "prepublishOnly": "pnpm build"
   },

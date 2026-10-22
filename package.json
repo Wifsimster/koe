@@ -16,9 +16,11 @@
     "release:dry": "semantic-release --dry-run --no-ci"
   },
   "devDependencies": {
+    "@maschwenk/tsrslint": "0.1.5",
     "@semantic-release/github": "^11.0.1",
     "@types/node": "^22.9.0",
     "conventional-changelog-conventionalcommits": "^8.0.0",
+    "oxlint": "1.89.0",
     "prettier": "^3.3.0",
     "semantic-release": "^24.2.0",
     "turbo": "^2.3.0",
