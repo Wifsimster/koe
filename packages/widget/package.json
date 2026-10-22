@@ -41,7 +41,7 @@
     "build": "pnpm build:lib && pnpm build:standalone",
     "build:lib": "tsc --noEmit && BUILD_TARGET=lib vite build",
     "build:standalone": "BUILD_TARGET=standalone vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsrs --noEmit",
     "lint": "eslint src",
     "clean": "rm -rf dist .turbo",
     "prepublishOnly": "pnpm build"
@@ -64,6 +64,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwindcss": "^3.4.15",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.6.0",
     "vite": "^6.0.0",
     "vite-plugin-dts": "^4.3.0"
