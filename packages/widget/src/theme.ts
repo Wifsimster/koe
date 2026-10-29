@@ -26,10 +26,6 @@ export function themeVars(theme?: WidgetTheme): CSSProperties {
   return vars as CSSProperties;
 }
 
-/**
- * Very small HSL-free darkener. Accepts `#rgb` or `#rrggbb` and returns
- * a new hex string with each channel scaled by (1 - amount).
- */
 function darken(hex: string, amount: number): string {
   const normalized = hex.replace('#', '');
   const full =

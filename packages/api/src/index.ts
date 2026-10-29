@@ -16,23 +16,8 @@ app.use('*', logger());
 app.route('/health', healthRoutes);
 app.route('/v1/widget', widgetRoutes);
 
-// Public roadmap surface — unauthenticated, mounted unconditionally so
-// an operator can share `/r/:projectKey` regardless of whether the
-// admin API is wired up. Internal routes are registered at the app root
-// (`/r/:projectKey` HTML + `/v1/public/:projectKey/roadmap` JSON) so a
-// single Hono instance owns both paths.
 app.route('/', publicRoadmapRoutes);
 
-// Admin JSON API. Single-admin product — credentials live in env vars
-// (ADMIN_EMAIL + ADMIN_PASSWORD_HASH) and the session is a signed
-// cookie (ADMIN_SESSION_SECRET). The admin surface is mounted whenever
-// those three vars are set; otherwise it stays off so a fresh deploy
-// never exposes an unauthenticated admin API.
-//
-// Sentinel detection: fail loud when env files ship through unchanged.
-// `REPLACE_ME…` lands as-is for operators who skim the example file;
-// argon2 verify would then silently reject every login, which is
-// confusing. Refusing to boot surfaces the real problem immediately.
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
 const adminSessionSecret = process.env.ADMIN_SESSION_SECRET;
 if (adminPasswordHash?.startsWith('REPLACE_ME')) {
@@ -50,12 +35,6 @@ if (adminSessionSecret?.startsWith('REPLACE_ME')) {
 
 const adminConfigured = !!process.env.ADMIN_EMAIL && !!adminPasswordHash && !!adminSessionSecret;
 
-// Resolve the session TTL with a NaN guard: a non-numeric
-// ADMIN_SESSION_TTL_DAYS would make `Number(...)` return NaN, and the
-// minted cookie's `expiresAt = Date.now() + NaN` is itself NaN — which
-// `verifySessionCookie` rejects, so every login would "succeed" (200)
-// yet the very next request is 401, with no obvious cause. Fall back to
-// the default instead.
 const DEFAULT_SESSION_TTL_DAYS = 7;
 function resolveSessionTtlDays(): number {
   const raw = process.env.ADMIN_SESSION_TTL_DAYS;
@@ -77,29 +56,18 @@ if (adminConfigured) {
   });
 
   const adminRoot = new Hono();
-  // CSRF defence runs before everything else in the admin namespace so
-  // login/logout (which mutate) are protected too, not only the
-  // session-gated API routes.
   adminRoot.use('*', requireSameOrigin);
-  // `/auth/*` mounts first so /auth/login and /auth/logout aren't
-  // swallowed by the session-gated API routes.
   adminRoot.route('/auth', authRoutes);
   adminRoot.route('/', createAdminApiRoutes());
 
   app.route('/v1/admin', adminRoot);
 } else if (process.env.ADMIN_EMAIL || adminPasswordHash) {
-  // Partial config = configuration error, not "no admin". Fail loud
-  // so the operator notices before they assume the surface is up.
   throw new Error(
     'Admin auth requires all of ADMIN_EMAIL, ADMIN_PASSWORD_HASH, and ' +
       'ADMIN_SESSION_SECRET. See packages/api/.env.example.',
   );
 }
 
-// Admin dashboard SPA. Off by default — flip ENABLE_DASHBOARD=true to
-// serve the UI at `/admin/*`. The static assets are public; the
-// admin API behind them requires the session cookie, so a flipped
-// flag without ADMIN_* vars set just shows a non-functional shell.
 if ((process.env.ENABLE_DASHBOARD ?? 'true').toLowerCase() === 'true') {
   app.route('/admin', createAdminRoutes());
 }

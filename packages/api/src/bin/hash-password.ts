@@ -1,24 +1,5 @@
 import { hashPassword } from '../lib/password';
 
-/**
- * Generate an argon2id hash to paste into ADMIN_PASSWORD_HASH.
- *
- *   # Interactive (masked prompt; preferred):
- *   docker compose run --rm api hash-password
- *
- *   # Scripted (stdin):
- *   echo -n 'my-password' | docker compose run --rm -T api hash-password
- *
- * Prints the hash to stdout. Wrap it in single quotes when pasting
- * into `.env` so the `$argon2id$…` segments aren't interpreted by
- * the shell.
- *
- * Note: the legacy `argv[2]` form is intentionally not supported.
- * Passing the plaintext on the command line lands it in shell
- * history, `ps auxf`, and container logs — not acceptable even for a
- * solo founder's dashboard.
- */
-
 function readPasswordFromTTY(): Promise<string> {
   return new Promise((resolve, reject) => {
     process.stderr.write('Password: ');
@@ -39,7 +20,6 @@ function readPasswordFromTTY(): Promise<string> {
           return;
         }
         if (code === 3) {
-          // Ctrl-C: restore the terminal before bailing.
           stdin.setRawMode(false);
           stdin.pause();
           stdin.removeListener('data', onData);
@@ -63,8 +43,6 @@ async function readPasswordFromStdin(): Promise<string> {
   for await (const chunk of process.stdin) {
     chunks.push(chunk as Buffer);
   }
-  // Strip a single trailing newline so `echo 'pw' |` works as
-  // expected without the newline landing in the hash input.
   return Buffer.concat(chunks).toString('utf8').replace(/\r?\n$/, '');
 }
 

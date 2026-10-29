@@ -1,10 +1,5 @@
 import type { PublicRoadmapRow } from '@koe/shared';
 
-/**
- * Columns rendered on `/r/:projectKey`, in display order. `closed` and
- * `wont_fix` are never shown on the public roadmap — an admin that wants
- * a ticket visible keeps it in one of these three buckets.
- */
 export const ROADMAP_COLUMNS = ['planned', 'in_progress', 'resolved'] as const;
 export type RoadmapColumn = (typeof ROADMAP_COLUMNS)[number];
 
@@ -22,10 +17,6 @@ const HTML_ESCAPE_MAP: Record<string, string> = {
   "'": '&#39;',
 };
 
-/**
- * Minimal HTML escaper. Used for every reporter-supplied string that
- * flows into the public page — never interpolate raw into the template.
- */
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (ch) => HTML_ESCAPE_MAP[ch] ?? ch);
 }
@@ -35,12 +26,6 @@ export interface RenderRoadmapInput {
   tickets: PublicRoadmapRow[];
 }
 
-/**
- * Render the public roadmap page for a project. Groups tickets by
- * column, orders each column by vote count desc, escapes every
- * user-supplied string. No JavaScript — this is a crawlable static
- * page, the whole point is shareability and SEO.
- */
 export function renderRoadmap({ project, tickets }: RenderRoadmapInput): string {
   const grouped: Record<RoadmapColumn, PublicRoadmapRow[]> = {
     planned: [],
@@ -127,12 +112,6 @@ function renderCard(t: PublicRoadmapRow): string {
 </article>`;
 }
 
-/**
- * Defense-in-depth on `project.accentColor`. The dashboard already
- * constrains the field, but an operator with DB access could stash any
- * string; we only emit ASCII hex / rgb / rgba / named colors, falling
- * back to the brand default if the value looks suspicious.
- */
 function sanitizeColor(color: string): string {
   const trimmed = color.trim();
   if (/^#[0-9a-fA-F]{3,8}$/.test(trimmed)) return trimmed;
@@ -141,7 +120,6 @@ function sanitizeColor(color: string): string {
   return '#4f46e5';
 }
 
-/** Truncate a description to a safe length for public display. */
 export const ROADMAP_DESCRIPTION_LIMIT = 280;
 export function truncateDescription(s: string): string {
   if (s.length <= ROADMAP_DESCRIPTION_LIMIT) return s;

@@ -45,8 +45,6 @@ describe('secretStore local-kek', () => {
     });
     const blob = oldStore.encrypt(PLAINTEXT);
 
-    // Now we've rotated: v2 is active, but v1 is still available for
-    // decrypting old blobs during the re-encryption window.
     const newStore = createLocalKekSecretStore({
       keys: new Map([
         ['v1', k1],
@@ -56,7 +54,6 @@ describe('secretStore local-kek', () => {
     });
     assert.equal(newStore.decrypt(blob), PLAINTEXT);
 
-    // New encrypts use the active kid.
     const fresh = newStore.encrypt(PLAINTEXT);
     assert.ok(fresh.startsWith(`${ENVELOPE_PREFIX}.v2.`));
   });
@@ -77,7 +74,6 @@ describe('secretStore local-kek', () => {
     });
     const blob = store.encrypt(PLAINTEXT);
     const parts = blob.split('.');
-    // Flip a character in the auth tag.
     parts[4] = parts[4]!.replace(/^./, (c) => (c === 'a' ? 'b' : 'a'));
     const tampered = parts.join('.');
     assert.throws(() => store.decrypt(tampered));

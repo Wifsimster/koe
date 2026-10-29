@@ -15,17 +15,11 @@ export interface ConfirmDialogProps {
   title: string;
   body: string;
   confirmLabel: string;
-  /** Disables buttons and swaps the confirm label for a spinner. */
   submitting: boolean;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
 
-/**
- * Destructive-action confirmation. Escape / backdrop / cancel are
- * safe; Enter does not auto-confirm because AlertDialog lands focus
- * on Cancel.
- */
 export function ConfirmDialog({
   title,
   body,

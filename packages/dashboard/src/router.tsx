@@ -17,28 +17,12 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootGate,
 });
 
-/**
- * Same-origin guard for the post-login `redirectTo`. The auth gate
- * encodes the original pathname in the `/login?redirectTo=...` search
- * param; an attacker who manages to land a victim on
- * `/login?redirectTo=https://evil.com` must NOT bounce them off-site.
- *
- * The accepted shape is a relative path on this same origin: starts
- * with a single `/`, never starts with `//` (protocol-relative URL),
- * never embeds a scheme-like prefix (`http:`, `javascript:`, `data:`,
- * etc). Anything else collapses to the inbox default.
- */
 function sanitiseRedirectTo(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined;
   if (raw.length === 0 || raw.length > 2048) return undefined;
-  // Must be a relative same-origin path.
   if (!raw.startsWith('/')) return undefined;
-  // `//foo` and `/\foo` are protocol-relative URLs in some browsers.
   if (raw.startsWith('//') || raw.startsWith('/\\')) return undefined;
-  // Catch any embedded scheme like `/javascript:` (rare) or accidental
-  // double-slashes after URL decoding.
   if (/^\/+[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return undefined;
-  // Cheap defence-in-depth: reject any whitespace / control chars.
   if (/\s/.test(raw)) return undefined;
   return raw;
 }
@@ -56,12 +40,6 @@ export const loginRoute = createRoute({
 const authenticatedLayoutRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: '_authenticated',
-  // Bounce to /login unless we have an authenticated state. State is
-  // already resolved by the AuthProvider on mount; loaders see the
-  // current snapshot.
-  //
-  // Empty-projects gate: a fresh deploy with no projects yet lands
-  // on /onboarding instead of the inbox.
   beforeLoad: ({ context, location }) => {
     if (context.auth.state.status === 'unauthenticated') {
       throw redirect({

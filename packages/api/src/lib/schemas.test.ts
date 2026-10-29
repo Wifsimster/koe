@@ -2,12 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { allowedOriginSchema, createProjectSchema } from './schemas';
 
-/**
- * Each invalid case is its own assertion so a regression failure
- * names the exact rule that regressed, not "one of these eight
- * inputs". The accepted set covers the canonical shapes the
- * dashboard form will produce.
- */
 describe('allowedOriginSchema', () => {
   describe('accepts canonical origin shapes', () => {
     const cases = [

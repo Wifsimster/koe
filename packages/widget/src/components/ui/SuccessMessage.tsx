@@ -1,25 +1,14 @@
 import { Button } from './Button';
 
 export interface SuccessMessageProps {
-  /** Short emoji rendered above the message (e.g. ✓, ✨). */
   emoji: string;
   message: string;
   onDismiss: () => void;
-  /**
-   * Optional secondary CTA for jumping to the "my requests" screen.
-   * Only shown for sessions with a verified identity — the Panel gates
-   * this, so callers pass the handler when appropriate.
-   */
   onViewMyRequests?: () => void;
   viewMyRequestsLabel?: string;
   dismissLabel?: string;
 }
 
-/**
- * Post-submission acknowledgement rendered by the bug and feature
- * forms. Both forms used to inline this; the only thing that differed
- * was the emoji, so factor it into one component.
- */
 export function SuccessMessage({
   emoji,
   message,

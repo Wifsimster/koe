@@ -19,11 +19,6 @@ import { Separator } from '../components/ui/separator';
 import { Textarea } from '../components/ui/textarea';
 import { cn } from '../lib/utils';
 
-/**
- * Load + mutation state for the detail page. A reducer keeps the
- * optimistic-update / rollback / audit-refetch transitions as single
- * immutable steps instead of a cascade of correlated `setState` calls.
- */
 interface DetailState {
   ticket: AdminTicket | null;
   events: TicketEvent[] | null;
@@ -138,8 +133,6 @@ export function TicketDetailPage() {
   const applyPatch = async (patch: TicketPatch) => {
     if (!activeKey || !ticket) return;
     const prev = ticket;
-    // Optimistic update. `notes` normalises empty string to null so the
-    // local ticket shape matches what the server returns.
     dispatch({
       type: 'mutStart',
       ticket: {
@@ -151,7 +144,6 @@ export function TicketDetailPage() {
     try {
       const next = await api.updateTicket(activeKey, ticket.id, patch);
       dispatch({ type: 'mutSettled', ticket: next });
-      // Notes-only patches don't emit an audit event, so skip the refetch.
       if (
         patch.status !== undefined ||
         patch.priority !== undefined ||
@@ -323,17 +315,6 @@ export function TicketDetailPage() {
   );
 }
 
-/**
- * Private notes textarea, saved on demand. One field on the ticket,
- * not a stream — the solo admin doesn't need threaded notes, and
- * avoiding the comments table simplifies the server too.
- *
- * Save triggers an explicit PATCH rather than debouncing on every
- * keystroke: debouncing a save with no visible feedback would leave
- * the operator unsure whether their half-finished thought was
- * persisted. An explicit button also matches the model — notes are
- * settings-like, not chat-like.
- */
 function NotesPanel({
   value,
   onSave,
@@ -341,12 +322,6 @@ function NotesPanel({
   value: string;
   onSave: (notes: string) => Promise<void>;
 }) {
-  // `draft` is local edit state seeded from the saved notes once. The
-  // panel is keyed on the ticket id by the caller, so navigating to a
-  // different ticket remounts it with a fresh draft; within one ticket
-  // the only way `value` changes is the operator's own save, after
-  // which draft already equals it — so no prop-sync effect is needed
-  // (and a failed save keeps the unsaved text instead of clobbering it).
   const [draft, setDraft] = useState(() => value);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -505,12 +480,6 @@ const PRIORITY_OPTIONS: Array<{ value: TicketPriority; label: string }> = [
   { value: 'critical', label: 'Critical' },
 ];
 
-/**
- * Publish-to-roadmap toggle. Default is off; operators opt tickets in
- * individually so the public page stays curated rather than dumping
- * every submission. Emits a `roadmap_toggled` audit event on every
- * flip — revertable from the Activity timeline like status/priority.
- */
 function RoadmapToggle({
   checked,
   disabled,

@@ -53,7 +53,6 @@ function onboardingReducer(state: OnboardingForm, action: OnboardingAction): Onb
     case 'setName':
       return { ...state, name: action.value };
     case 'setKey':
-      // Editing the key field pins it: stop auto-deriving from the name.
       return { ...state, keyValue: action.value, keyDirty: true };
     case 'setOrigins':
       return { ...state, origins: action.value };
@@ -76,22 +75,10 @@ function onboardingReducer(state: OnboardingForm, action: OnboardingAction): Onb
   }
 }
 
-/**
- * Project creation surface. Used both for the empty-state landing
- * (no projects yet) and for adding additional projects via the
- * sidebar's "+ Create project" entry. After a successful create the
- * result screen displays the plaintext `identitySecret` exactly once:
- * the server encrypts it at rest and never returns it again.
- */
 export function OnboardingPage() {
   const { api, state, refresh, setActiveProject } = useAuth();
   const navigate = useNavigate();
 
-  // The whole create flow — form fields, submission flags, and the
-  // post-create "secret saved / entering" gates — lives in one reducer.
-  // Folding them together also keeps every hook unconditional: the
-  // secret/entering state used to be declared *after* the early return
-  // below, which is a rules-of-hooks violation.
   const [form, dispatch] = useReducer(onboardingReducer, INITIAL_ONBOARDING);
   const {
     name,
@@ -106,9 +93,6 @@ export function OnboardingPage() {
     entering,
   } = form;
 
-  // Auto-derive the slug from the name until the operator edits the
-  // key field themselves. Same rule the `bootstrap` CLI uses so the
-  // muscle memory matches.
   const suggestedKey = keyDirty ? keyValue : slugify(name);
 
   if (state.status !== 'authenticated') {
@@ -141,10 +125,6 @@ export function OnboardingPage() {
         allowedOrigins: allowedOrigins.length ? allowedOrigins : undefined,
         requireIdentityVerification: requireVerification || undefined,
       });
-      // Refresh the projects list so the switcher picks up the new
-      // project. Do it before we show the secret — if the refresh
-      // 401s the auth layer kicks to /login, which is less jarring
-      // than showing a secret that the rest of the UI can't see.
       await refresh();
       setActiveProject(result.project.key);
       dispatch({ type: 'created', result });
@@ -358,7 +338,6 @@ function Shell({
   caption: string;
   subtitle: ReactNode;
   children: ReactNode;
-  /** Wider column for the post-create success screen with code blocks. */
   wide?: boolean;
 }) {
   return (
@@ -400,7 +379,6 @@ function CodeBlock({ value, lang }: { value: string; lang?: string }) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Clipboard blocked (non-https dev): operator can still select + copy.
     }
   };
   return (
@@ -446,8 +424,6 @@ function CopyField({ value, mono = false }: { value: string; mono?: boolean }) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Some browsers block clipboard writes in non-https dev. The
-      // value stays visible in the input — operator can select + copy.
     }
   };
   return (

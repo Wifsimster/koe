@@ -1,29 +1,5 @@
 name: Widget release
 
-# Automated release driven by Conventional Commits + semantic-release.
-#
-# How it works:
-#   - Every push to `main` triggers this workflow.
-#   - semantic-release reads commits since the last git tag, uses the
-#     Conventional Commits preset to decide the next version (`fix:` →
-#     patch, `feat:` → minor, `BREAKING CHANGE:` in the body → major).
-#   - If no releasable commits are present, the job is a no-op.
-#   - Otherwise it creates a git tag via the GitHub API and opens a
-#     GitHub Release with auto-generated notes, with the standalone
-#     bundle (koe.iife.js + style.css) attached as release assets.
-#
-# What it does NOT do:
-#   - It does NOT commit CHANGELOG or version bumps back to main
-#     (no `@semantic-release/git` plugin). The CHANGELOG lives on the
-#     Releases page. This keeps us off the "GitHub Actions can't
-#     create PRs or push to main" rails entirely.
-#   - It does NOT fire on branches other than main, tags, or forks.
-#   - It does NOT publish to npm (no `@semantic-release/npm` plugin).
-#     The widget ships as `v*` git tags and GitHub Releases only.
-#
-# Required secrets:
-#   - GITHUB_TOKEN: provided by Actions. No other secret is needed.
-
 on:
   push:
     branches: [main]
@@ -39,15 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository == 'wifsimster/koe'
     permissions:
-      contents: write # create tags and GitHub Releases via the API
-      issues: write # semantic-release/github may comment on issues
-      pull-requests: write # semantic-release/github may comment on PRs
+      contents: write
+      issues: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # semantic-release needs full history to analyze commits since
-          # the last tag.
           fetch-depth: 0
 
       - name: Setup pnpm

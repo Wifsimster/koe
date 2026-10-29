@@ -11,45 +11,20 @@ export interface PanelProps {
   onClose: () => void;
 }
 
-/**
- * The widget's main surface. Two screens:
- *
- *   1. `picker` — intent selection (bug / feature). Entry point.
- *   2. `form`   — the selected form, with a back button.
- *
- * On narrow viewports (<480px) the shell flips to a bottom-sheet posture
- * — see `styles.css` for the `@media` rule. Same component, no fork.
- *
- * The root element has `container-type: inline-size` so later refactors
- * (Shadow DOM, sized iframe embeds) can switch the same rules over to
- * `@container` without touching JS.
- */
 export function Panel({ onClose }: PanelProps) {
   const { locale, config } = useKoe();
   const features = config.features ?? { bugs: true, features: true };
 
-  // If exactly one intent is enabled we skip the picker and land directly
-  // on that screen — one less tap for a single-purpose deployment.
   const initialIntent = soloEnabledIntent(features);
   const [screen, setScreen] = useState<Intent | null>(initialIntent);
 
-  // Only non-anonymous identified sessions can "see their requests" —
-  // matches the gating in IntentPicker so success-state CTAs don't
-  // offer a tab that doesn't exist for the caller.
   const userId = config.user?.id;
   const canSeeMyRequests = Boolean(userId && userId !== 'anonymous');
   const goToMyRequests = canSeeMyRequests ? () => setScreen('my-requests') : undefined;
 
-  // Track visual viewport so the panel body follows the keyboard on
-  // mobile. Writes a CSS variable; no React re-render per resize.
   const shellRef = useRef<HTMLDialogElement>(null);
   useVisualViewport(shellRef);
 
-  // Record the element that had focus before the dialog opened so we
-  // can hand focus back to it on close. Without this, a keyboard user
-  // who opened the panel with Enter on the launcher would be dumped at
-  // <body> when the panel closes — focus would have nowhere to land
-  // because the panel itself unmounts.
   const lastFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const previouslyFocused = (typeof document !== 'undefined' ? document.activeElement : null) as
@@ -57,10 +32,6 @@ export function Panel({ onClose }: PanelProps) {
       | null;
     lastFocusRef.current = previouslyFocused;
     return () => {
-      // Guard against the previously-focused node being detached (host
-      // app removed it while the panel was open) — `.focus()` on an
-      // orphan element silently no-ops in modern browsers but
-      // `isConnected` keeps us future-proof.
       const el = lastFocusRef.current;
       if (el && typeof el.focus === 'function' && el.isConnected) {
         el.focus();
@@ -77,7 +48,6 @@ export function Panel({ onClose }: PanelProps) {
       aria-labelledby="koe-panel-title"
       className="koe-panel-shell koe-mb-3 koe-rounded-koe koe-bg-koe-bg koe-text-koe-text koe-shadow-koe koe-border koe-border-koe-border"
     >
-      {/* Grab handle, only visible in bottom-sheet mode (CSS-controlled). */}
       <div aria-hidden="true" className="koe-panel-grab" />
 
       <header className="koe-panel-header koe-px-4 koe-py-3 koe-border-b koe-border-koe-border">
@@ -88,7 +58,6 @@ export function Panel({ onClose }: PanelProps) {
                 type="button"
                 onClick={() => setScreen(null)}
                 aria-label={back}
-                // 44px hit target, visible chevron only.
                 className="koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-min-w-[44px] koe-text-koe-text-muted hover:koe-text-koe-text koe-shrink-0 -koe-ml-2"
               >
                 <BackIcon />
@@ -110,7 +79,6 @@ export function Panel({ onClose }: PanelProps) {
             type="button"
             onClick={onClose}
             aria-label="Close"
-            // 44px hit target fixes the previous 24px ✕ fat-finger hazard.
             className="koe-inline-flex koe-items-center koe-justify-center koe-min-h-[44px] koe-min-w-[44px] koe-text-koe-text-muted hover:koe-text-koe-text koe-shrink-0 -koe-mr-2"
           >
             <CloseIcon />
@@ -134,10 +102,6 @@ function soloEnabledIntent(features: { bugs?: boolean; features?: boolean; vote?
   if (features.bugs !== false) enabled.push('bug');
   if (features.features !== false) enabled.push('feature');
   if (features.vote !== false) enabled.push('vote');
-  // `noUncheckedIndexedAccess` is on, so `enabled[0]` is `Intent | undefined`.
-  // The `length === 1` guard makes that safe at runtime, but a `!` assertion
-  // would mask a refactor that broke the invariant — `?? null` keeps the
-  // return type honest and falls back to the picker if the array is empty.
   return enabled.length === 1 ? enabled[0] ?? null : null;
 }
 

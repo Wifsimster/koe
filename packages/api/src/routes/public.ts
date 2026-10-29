@@ -12,28 +12,12 @@ import {
 } from '../lib/roadmapHtml';
 import type { PublicRoadmapRow } from '@koe/shared';
 
-/**
- * Unauthenticated public surface. Two shapes off the same query:
- *
- *   - `GET /r/:projectKey`                       → SSR HTML for humans /
- *                                                  crawlers, shareable link
- *   - `GET /v1/public/:projectKey/roadmap`       → JSON for programmatic
- *                                                  consumption (e.g. a future
- *                                                  widget "Browse roadmap" tab)
- *
- * Both are rate-limited on (projectKey, clientIP) at a looser ceiling
- * than the widget mutation routes — a single social-share unfurl storm
- * must not trip the widget's limiter.
- */
-
 const PUBLIC_STATUSES: Array<'planned' | 'in_progress' | 'resolved'> = [
   'planned',
   'in_progress',
   'resolved',
 ];
 
-// 60 rpm per (project, ip) is generous for a shareable page without
-// inviting scraping floods. Same token-bucket adapter as the widget.
 const publicRateLimiter = createRateLimiterFromEnv({
   refillPerSecond: 60 / 60,
   capacity: 120,
@@ -57,8 +41,6 @@ publicRoadmapRoutes.get('/r/:projectKey', publicRateLimit, async (c) => {
   const projectKey = c.req.param('projectKey');
   const project = await loadProject(projectKey);
   if (!project) {
-    // Return a plain 404 HTML body — no detail that would help an
-    // attacker map valid keys.
     return c.html('<!doctype html><title>Not found</title><h1>Not found</h1>', 404);
   }
 
@@ -84,7 +66,6 @@ publicRoadmapRoutes.get('/v1/public/:projectKey/roadmap', publicRateLimit, async
   });
 });
 
-// Preflight for the JSON endpoint. HTML route doesn't need CORS.
 publicRoadmapRoutes.options('/v1/public/:projectKey/roadmap', (c) => {
   c.header('Access-Control-Allow-Origin', '*');
   c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -106,11 +87,6 @@ async function loadProject(key: string) {
   return row ?? null;
 }
 
-/**
- * Column projection is explicit, not `select *`. Never expose reporter
- * email/name, screenshot URL, private metadata, or admin notes on the
- * public roadmap — those live entirely inside the admin API.
- */
 async function loadPublicTickets(projectId: string): Promise<PublicRoadmapRow[]> {
   const rows = await db
     .select({

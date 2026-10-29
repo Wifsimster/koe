@@ -20,8 +20,6 @@ export function ProjectSwitcher({ onChange }: { onChange?: () => void }) {
   const activeProject = projects.find((p) => p.key === active) ?? projects[0];
 
   if (projects.length === 0) {
-    // Reachable only if the router's empty-projects redirect fails to
-    // fire — normal flow takes the user straight to /onboarding.
     return (
       <div className="rounded-none border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         No projects yet.{' '}

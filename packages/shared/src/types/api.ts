@@ -1,7 +1,3 @@
-/**
- * Canonical shape for all API responses.
- * Using a discriminated union lets clients exhaustively handle both paths.
- */
 export type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: ApiError };

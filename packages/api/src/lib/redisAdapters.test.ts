@@ -10,19 +10,9 @@ import {
   type RedisEvalClient,
 } from '../middleware/rateLimit';
 
-// ioredis-mock's `.set` / `.eval` signatures diverge structurally
-// from our narrow ports even though the runtime shape matches. Cast
-// once at the test boundary so the assertions stay readable.
 type MockClient = InstanceType<typeof RedisMock>;
 const asSetNx = (r: MockClient) => r as unknown as RedisSetNxClient;
 const asEval = (r: MockClient) => r as unknown as RedisEvalClient;
-
-/**
- * Black-box tests against `ioredis-mock`, which implements the same
- * API surface as the real `ioredis` client. Covers the atomicity
- * properties we rely on: SET NX EX for the nonce cache, EVAL on the
- * token-bucket Lua script for the rate limiter.
- */
 
 describe('createRedisNonceCache', () => {
   it('first call sees the nonce unseen, second sees it as replay', async () => {
@@ -40,8 +30,6 @@ describe('createRedisNonceCache', () => {
     const b = createRedisNonceCache(asSetNx(redis), { prefix: 'app2:' });
 
     assert.equal(await a.hasSeen('shared'), false);
-    // The b cache uses a different prefix, so `shared` is still novel
-    // to it — no cross-talk through the underlying Redis.
     assert.equal(await b.hasSeen('shared'), false);
   });
 
@@ -51,10 +39,6 @@ describe('createRedisNonceCache', () => {
     assert.equal(await cache.hasSeen('expiring'), false);
     assert.equal(await cache.hasSeen('expiring'), true);
 
-    // ioredis-mock respects EX when you advance its clock. In
-    // real-world tests you'd use fakeredis or an actual Redis with
-    // SLEEP; here we just delete the key and assert the adapter
-    // treats the next call as unseen (end-state check).
     await redis.del('koe:nonce:expiring');
     assert.equal(await cache.hasSeen('expiring'), false);
   });
@@ -80,7 +64,6 @@ describe('createRedisRateLimiter', () => {
     assert.equal(c.allowed, true);
     assert.equal(d.allowed, false);
     if (!d.allowed) {
-      // refill=1/s, need 1 more token → ~1s wait
       assert.ok(d.retryAfter >= 1 && d.retryAfter <= 2);
     }
   });
@@ -116,17 +99,11 @@ describe('createRedisRateLimiter', () => {
 
     assert.equal((await widget.consume('ip-1')).allowed, true);
     assert.equal((await widget.consume('ip-1')).allowed, false);
-    // Same `ip-1` on the admin bucket is a fresh conversation.
     assert.equal((await admin.consume('ip-1')).allowed, true);
   });
 
   afterAll();
 });
 
-// `ioredis-mock` opens background intervals when constructed; we
-// rely on node:test's default cleanup + process exit to tear them
-// down. This helper is a placeholder hook for any future explicit
-// disconnect we need to add.
 function afterAll() {
-  /* no-op */
 }

@@ -7,19 +7,6 @@ export interface IntentPickerProps {
   onPick: (intent: Intent) => void;
 }
 
-/**
- * First-screen intent picker. Replaces the previous 3-tab top nav.
- *
- * Why a picker instead of tabs: on a 360px phone viewport the horizontal
- * tab strip ate ~40% of the header before the user had declared intent.
- * Asking up front, with one tap to commit, is faster one-handed and
- * respects how people actually hold phones.
- *
- * Cards are intentionally 64px+ tall and full-width — thumb-reachable
- * without aiming, and WCAG 2.5.5 Large Target compliant. The prompt is
- * kept visually hidden (sr-only) because the card titles already declare
- * intent; screen readers still get the group labelling.
- */
 export function IntentPicker({ onPick }: IntentPickerProps) {
   const { locale, config } = useKoe();
   const features = config.features ?? {};
@@ -38,9 +25,6 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
   const showBugs = features.bugs !== false;
   const showFeatures = features.features !== false;
   const showVote = features.vote !== false;
-  // Only surface "my requests" when the host has identified a real user.
-  // Anonymous sessions share a reporter id, so showing the tab would leak
-  // tickets from other anonymous visitors into a shared inbox.
   const userId = config.user?.id;
   const showMyRequests = Boolean(userId && userId !== 'anonymous');
 

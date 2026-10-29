@@ -27,18 +27,10 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
-  // Post-login navigation is driven by an effect so the router sees
-  // the new auth state on its next commit. Calling navigate
-  // synchronously would race the AuthProvider's transition and bounce
-  // back to /login.
   const pendingNavRef = useRef(false);
   useEffect(() => {
     if (pendingNavRef.current && state.status === 'authenticated') {
       pendingNavRef.current = false;
-      // `redirectTo` was validated by `loginRoute.validateSearch` —
-      // it's guaranteed same-origin relative or undefined here. Falling
-      // back to `/` lets the existing landing logic (multi-project
-      // overview, single-project inbox) route the user.
       if (redirectTo) {
         void navigate({ to: redirectTo });
       } else {
@@ -49,8 +41,6 @@ export function LoginPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    // Hard early-return: while a previous submit is still in flight,
-    // ignore the second click (or Enter keypress).
     if (submitting || pendingNavRef.current) return;
     setError(null);
     if (!email.trim() || !password) {
@@ -121,14 +111,6 @@ export function LoginPage() {
   );
 }
 
-/**
- * Map auth-related error codes to a single opaque string. The server
- * may distinguish "no such email" from "wrong password" for its own
- * logs, but echoing those distinctions to the browser would let an
- * attacker enumerate which emails have an account. Network/server
- * problems still surface verbatim so the operator can see what's
- * broken.
- */
 function formatLoginError(err: unknown): string {
   if (err instanceof AdminApiError) {
     if (AUTH_ERROR_CODES.has(err.code)) return GENERIC_AUTH_ERROR;
@@ -141,8 +123,6 @@ function formatLoginError(err: unknown): string {
     if (err.code === 'server_error') {
       return err.message || 'The server is having trouble. Try again in a moment.';
     }
-    // Unknown / non-auth: echo verbatim — useful for legitimate
-    // unexpected failures.
     return err.message || GENERIC_AUTH_ERROR;
   }
   if (err instanceof Error && err.message) return err.message;

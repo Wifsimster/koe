@@ -4,23 +4,6 @@ import { useKoe } from '../context/KoeContext';
 import { KoeApiError } from '../api/client';
 import { Button } from './ui/Button';
 
-/**
- * Browse-and-vote screen. Sort order is server-decided (votes desc) so
- * we don't duplicate the sort here. We lazy-load on mount — piggy-backing
- * on the user's navigation to this screen rather than pre-fetching on
- * every page view that hosts the widget.
- *
- * Voting uses an optimistic toggle: we flip `hasVoted` + `voteCount`
- * locally before the POST so the tap feels instant. If the server
- * rejects (network error, identity invalid), we roll back and surface
- * the error inline. A composite PK on `ticket_votes` makes the endpoint
- * idempotent, so accidental double-taps are safe on the API side too.
- *
- * Anonymous viewers (no `config.user.id`) can browse read-only. The
- * vote button is rendered disabled with a short tooltip — the product
- * decision was "don't hide, just disable" so the feature's existence
- * stays discoverable to hosts evaluating the widget.
- */
 export function BrowseList() {
   const { api, config, locale } = useKoe();
   const browse = locale.browse ?? DEFAULT_BROWSE;
@@ -58,9 +41,6 @@ export function BrowseList() {
 
   useEffect(() => {
     load();
-    // Copy the controller `load()` just stored so cleanup aborts *this*
-    // request — reading `controllerRef.current` in the cleanup would
-    // race a later `load()` that replaced it.
     const controller = controllerRef.current;
     return () => controller?.abort();
   }, [load]);
@@ -134,8 +114,6 @@ function VoteRow({ item, canVote, onToggle, onError }: VoteRowProps) {
   const onClick = async () => {
     if (!canVote || !userId || pending) return;
 
-    // Optimistic flip — server is the source of truth but we render
-    // what the user just did without waiting for the round-trip.
     const previous = item;
     const optimistic: FeatureRequest = {
       ...item,
@@ -154,7 +132,6 @@ function VoteRow({ item, canVote, onToggle, onError }: VoteRowProps) {
       if (!controller.signal.aborted) onToggle(next);
     } catch (err) {
       if (controller.signal.aborted) return;
-      // Revert the optimistic flip so the UI matches the server again.
       onToggle(previous);
       if (err instanceof KoeApiError && err.code === 'network_error') {
         onError(locale.errors.network);

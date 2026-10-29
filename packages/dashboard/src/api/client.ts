@@ -5,16 +5,7 @@ export type { AdminTicket };
 export interface TicketPatch {
   status?: TicketStatus;
   priority?: TicketPriority;
-  /**
-   * Private admin notes. Empty string clears the field — both "" and
-   * null read back as no notes on the returned ticket.
-   */
   notes?: string | null;
-  /**
-   * Whether to publish this ticket on the public roadmap at
-   * `/r/:projectKey`. Toggled by the operator from the ticket detail
-   * page; emits a `roadmap_toggled` audit event when the value changes.
-   */
   isPublicRoadmap?: boolean;
 }
 
@@ -32,10 +23,6 @@ export interface CreateProjectPayload {
 
 export interface CreateProjectResult {
   project: AdminProject;
-  /**
-   * Plaintext HMAC secret the caller must show to the operator once.
-   * The server never returns this value again.
-   */
   identitySecret: string;
 }
 
@@ -71,11 +58,6 @@ export interface TicketListQuery {
   priority?: TicketPriority;
   verified?: boolean;
   search?: string;
-  /**
-   * Sort order. `recent` (default) orders by `created_at` desc (newest
-   * tickets first, tie-broken by id). `votes` orders by vote count desc
-   * and is incompatible with `cursor` (server returns 422).
-   */
   sort?: 'recent' | 'votes';
   limit?: number;
   cursor?: string;
@@ -90,11 +72,6 @@ export interface TicketListPage {
   };
 }
 
-/**
- * KPI tile for one project on the cross-project overview. All
- * counters are pre-aggregated server-side; the dashboard just
- * renders them.
- */
 export interface WorkspaceProjectKpis {
   openBugs: number;
   openFeatures: number;
@@ -164,11 +141,6 @@ export class AdminApiClient {
     );
   }
 
-  /**
-   * Single-ticket fetch. Used by the detail page so it doesn't have to
-   * page through the list to find an old ticket. 404 surfaces as an
-   * `AdminApiError` with code `not_found`.
-   */
   getTicket(projectKey: string, id: string, signal?: AbortSignal): Promise<AdminTicket> {
     return this.get<AdminTicket>(
       `/projects/${encodeURIComponent(projectKey)}/tickets/${encodeURIComponent(id)}`,
@@ -228,7 +200,6 @@ export class AdminApiClient {
       method: 'POST',
       credentials: 'include',
     }).catch(() => {
-      // Logout must not throw — the cookie will expire on its own.
     });
   }
 
@@ -252,8 +223,6 @@ export class AdminApiClient {
         signal,
       });
     } catch (err) {
-      // True fetch rejection — DNS failure, offline, CORS preflight
-      // bounce, AbortError, etc. Do NOT collapse into auth failure.
       if (err instanceof DOMException && err.name === 'AbortError') {
         throw err;
       }
@@ -262,8 +231,6 @@ export class AdminApiClient {
       throw new AdminApiError(0, 'network_error', message);
     }
 
-    // 204 No Content / explicitly empty body — treat as a void OK so
-    // callers don't blow up trying to parse an empty buffer.
     if (res.status === 204) {
       return null as T;
     }
@@ -282,8 +249,6 @@ export class AdminApiClient {
     try {
       payload = JSON.parse(text) as ApiResponse<T>;
     } catch {
-      // 5xx that didn't even render JSON (HTML error page from a proxy
-      // or origin) is a server-side problem, not a malformed-API bug.
       const code = res.status >= 500 ? 'server_error' : 'malformed_response';
       throw new AdminApiError(res.status, code, `Non-JSON from ${path}`);
     }

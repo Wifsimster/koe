@@ -1,29 +1,23 @@
-# Dependencies
 node_modules/
 .pnp
 .pnp.js
 
-# Build outputs
 dist/
 build/
 .next/
 out/
 *.tsbuildinfo
 
-# Turborepo
 .turbo/
 
-# Testing
 coverage/
 .nyc_output/
 
-# Environment
 .env
 .env.local
 .env.*.local
 !.env.example
 
-# Logs
 logs/
 *.log
 npm-debug.log*
@@ -31,7 +25,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Editor
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
@@ -39,19 +32,15 @@ pnpm-debug.log*
 *.swp
 *.swo
 
-# OS
 .DS_Store
 Thumbs.db
 
-# Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Claude Code: track project skills only; other local agent state stays untracked
 .claude/*
 !.claude/skills/
 
-# Verification skill (.claude/skills/verify) run state and evidence
 .verify-run/
 .verify-evidence/

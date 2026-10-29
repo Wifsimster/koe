@@ -8,20 +8,14 @@ import clsx from 'clsx';
 import { useTrail } from '../capture';
 
 export interface KoeWidgetProps extends WidgetConfig {
-  /** Start with the panel open. Useful for storybook/testing. */
   defaultOpen?: boolean;
 }
 
-/**
- * Top-level React component. Mount this once at the root of a host app
- * (or via `Koe.init` for the standalone script build).
- */
 export function KoeWidget(props: KoeWidgetProps) {
   const { defaultOpen = false, ...config } = props;
   const [open, setOpen] = useState(defaultOpen);
   useTrail(config);
 
-  // Close on Escape for accessibility parity with a modal dialog.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {

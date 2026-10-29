@@ -1,20 +1,8 @@
 import type { WidgetLocale } from './types/widget';
 import { DEFAULT_LOCALE } from './types/widget';
 
-/**
- * Built-in language code recognized by `resolveLocale()`. Hosts can pass
- * any other BCP-47 tag — unknown languages fall back to English. Kept as
- * a non-exhaustive union (`string & {}`) so authors get autocomplete
- * for shipped languages without losing the freedom to pass a custom code.
- */
 export type WidgetLanguage = 'en' | 'fr' | 'es' | 'de' | (string & {});
 
-/**
- * Built-in translations shipped with the widget. Keyed by ISO 639-1 code
- * (lowercase, no region). Region-tagged inputs (`fr-CA`, `pt-BR`) are
- * normalized to the base language by `resolveLocale()`. English is the
- * canonical fallback and equals `DEFAULT_LOCALE`.
- */
 export const LOCALES: Record<string, WidgetLocale> = {
   en: DEFAULT_LOCALE,
   fr: {
@@ -244,36 +232,18 @@ export const LOCALES: Record<string, WidgetLocale> = {
   },
 };
 
-/**
- * Normalize a BCP-47 tag (e.g. `fr-FR`, `pt_BR`) to a lowercase ISO 639-1
- * code. Returns `null` for missing/empty input so callers can fall through
- * to the next detection source.
- */
 function normalizeLanguageTag(tag: string | null | undefined): string | null {
   if (!tag) return null;
   const base = tag.trim().toLowerCase().split(/[-_]/)[0];
   return base && base.length >= 2 ? base : null;
 }
 
-/**
- * Pick the locale preset for a language code. Looks up the base
- * language (region tags are stripped) and falls back to English when no
- * preset exists. `null`/`undefined` also fall back to English so callers
- * can pipe an unset config field straight in.
- */
 export function resolveLocale(language: string | null | undefined): WidgetLocale {
   const code = normalizeLanguageTag(language);
   const preset = code ? LOCALES[code] : undefined;
   return preset ?? DEFAULT_LOCALE;
 }
 
-/**
- * Detect the active language in browser environments. Prefers an
- * explicit `<html lang="…">` (set by the host page's framework) over
- * `navigator.language` because the host has stronger intent than the
- * user agent's preferred language. Returns `null` outside the browser
- * or when neither source is set.
- */
 export function detectBrowserLanguage(): string | null {
   if (typeof document !== 'undefined') {
     const htmlLang = document.documentElement?.lang;
@@ -281,9 +251,6 @@ export function detectBrowserLanguage(): string | null {
     if (fromHtml) return fromHtml;
   }
   if (typeof navigator !== 'undefined') {
-    // Use `||` rather than `??`: some browsers expose `navigator.language`
-    // as an empty string (not nullish), which would short-circuit `??`
-    // and discard a perfectly good `navigator.languages[0]`.
     const navLang = navigator.language || navigator.languages?.[0];
     const fromNav = normalizeLanguageTag(navLang ?? null);
     if (fromNav) return fromNav;

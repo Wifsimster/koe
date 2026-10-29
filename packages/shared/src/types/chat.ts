@@ -23,10 +23,6 @@ export interface ChatConversation {
   messages: ChatMessage[];
 }
 
-/**
- * Messages pushed over the realtime WebSocket. A single discriminated
- * union keeps the client/server protocol honest.
- */
 export type RealtimeEvent =
   | { type: 'hello'; conversationId: string }
   | { type: 'message'; message: ChatMessage }

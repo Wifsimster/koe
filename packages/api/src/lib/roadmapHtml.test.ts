@@ -62,15 +62,12 @@ describe('renderRoadmap', () => {
         row({ id: 's1', title: 'Shipped one', status: 'resolved' }),
       ],
     });
-    // All three cards rendered
     assert.match(html, /Planned one/);
     assert.match(html, /In progress one/);
     assert.match(html, /Shipped one/);
-    // Column headers rendered
     assert.match(html, /Planned<\/h2>/);
     assert.match(html, /In progress<\/h2>/);
     assert.match(html, /Shipped<\/h2>/);
-    // Anchor ids per card so the widget can deep-link
     assert.match(html, /id="t-p1"/);
   });
 
@@ -84,10 +81,8 @@ describe('renderRoadmap', () => {
         }),
       ],
     });
-    // The literal opening tag must never appear unescaped in the output
     assert.ok(!html.includes('<script>alert(1)</script>'));
     assert.ok(!html.includes('<img src=x'));
-    // The escaped form must appear
     assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   });
 
@@ -112,9 +107,7 @@ describe('renderRoadmap', () => {
       project: { ...project, accentColor: 'url(javascript:alert(1))' },
       tickets: [],
     });
-    // The fallback brand color is emitted instead
     assert.match(html, /--koe-accent: #4f46e5/);
-    // The malicious payload is not present anywhere in the doc
     assert.ok(!html.includes('javascript:alert'));
   });
 
@@ -134,7 +127,6 @@ describe('renderRoadmap', () => {
       ],
     });
     assert.match(html, /▲ 7/);
-    // The bug card exists but has no vote badge
     const bugCard = html.slice(html.indexOf('id="t-b1"'));
     assert.ok(!bugCard.includes('votes'));
   });

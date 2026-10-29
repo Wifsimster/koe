@@ -23,11 +23,6 @@ import {
   SidebarTrigger,
 } from './ui/sidebar';
 
-/**
- * Shell for the authenticated surface. Built on shadcn's Sidebar
- * primitives so the mobile drawer, keyboard shortcut (⌘/Ctrl+B), and
- * offcanvas behavior come for free.
- */
 export function AppShell({ header, children }: { header: ReactNode; children: ReactNode }) {
   const { state, logout } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -38,8 +33,6 @@ export function AppShell({ header, children }: { header: ReactNode; children: Re
 
   const isInbox = pathname === '/' || pathname.startsWith('/tickets');
   const isOverview = pathname === '/overview';
-  // Overview is a landing surface for the founder who juggles multiple
-  // projects — hidden when there's only one to keep the sidebar minimal.
   const showOverview = state.projects.length >= 2;
 
   return (

@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-// control-koe: drive a throwaway local Koe instance (widget inside a fake host
-// SaaS page + admin dashboard) the way a user does, and keep the proof.
-// Agent-facing: one JSON object on stdout per call, exit 0 on success.
-// Run `control-koe --help` or `control-koe <command> --help`.
 
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -14,10 +10,6 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-// With NODE_USE_ENV_PROXY=1 and HTTP(S)_PROXY set, Node sends fetch() and
-// http.request() through the proxy, loopback included. The proxy then closes the
-// socket (UND_ERR_SOCKET) and `launch` times out on /health/ready while curl
-// gets 200. Every call this CLI makes is local, so keep loopback direct.
 for (const k of ['NO_PROXY', 'no_proxy']) {
   const hosts = (process.env[k] || '').split(',').map((s) => s.trim()).filter(Boolean);
   for (const h of ['localhost', '127.0.0.1']) if (!hosts.includes(h)) hosts.push(h);
@@ -33,7 +25,6 @@ const EVIDENCE_ROOT = path.resolve(process.env.KOE_EVIDENCE_DIR || path.join(REP
 const TOOLS_DIR = process.env.KOE_VERIFY_TOOLS || path.join(os.homedir(), '.cache', 'koe-verify', 'tools');
 const PLAYWRIGHT_VERSION = '1.62.1';
 
-// Fixed, unusual ports: the host's 5432 and 8787 already belong to other projects.
 const PORTS = { api: 38787, host: 38788, postgres: 38432, cdp: 38222 };
 const PG = 'koe-verify-pg';
 const LABEL_KEY = 'koe-verify';
@@ -42,12 +33,10 @@ const DB_URL = `postgres://koe:koe_verify@127.0.0.1:${PORTS.postgres}/koe`;
 const API = `http://localhost:${PORTS.api}`;
 const HOST = `http://localhost:${PORTS.host}`;
 const DASH = `${API}/admin`;
-// Fake, throwaway identities. Nothing here is a real account.
 const ADMIN = { email: 'admin@koe-verify.test', password: 'verify-admin-pass-123' };
 const PROJECT = { key: 'acme-verify', name: 'Acme Verify (fake)' };
 const HOST_USER = { id: 'user-42', name: 'Jane Fake', email: 'jane@acme-verify.test', metadata: { plan: 'pro (fake)', role: 'owner' } };
 const HOST_APP = { version: '2.3.1-fake', release: 'acme-2026.10.04' };
-// 1x1 PNG served by the host page as the "uploaded" screenshot.
 const FAKE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 const PKG = {
   api: path.join(REPO, 'packages', 'api'),
@@ -62,7 +51,6 @@ const BUILD_ARTIFACTS = {
   dashboard: path.join(PKG.dashboard, 'dist', 'index.html'),
 };
 
-// ---------- output ----------
 function out(obj) {
   const text = JSON.stringify(obj, null, 2);
   process.stdout.write(text + '\n');
@@ -79,7 +67,6 @@ function fail(message, fix, extra) {
   throw new CliError(message, fix, extra);
 }
 
-// ---------- args ----------
 function parseArgs(argv) {
   const pos = [];
   const flags = {};
@@ -100,7 +87,6 @@ function parseArgs(argv) {
   return { pos, flags };
 }
 
-// ---------- state ----------
 function readState() {
   try {
     return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
@@ -118,8 +104,6 @@ function requireState() {
   return s;
 }
 function evidenceDir(state) {
-  // The root is pinned in state.json at launch, so later calls from a shell
-  // without KOE_EVIDENCE_DIR still write into the same run dir.
   const dir = path.join(state?.evidenceRoot || EVIDENCE_ROOT, state?.runId || 'adhoc');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -132,7 +116,6 @@ function artifactPath(state, name, ext = '.png') {
   return path.join(evidenceDir(state), `${stamp()}_${safe}${ext}`);
 }
 
-// ---------- helpers ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function portInUse(port) {
   return new Promise((resolve) => {
@@ -253,11 +236,6 @@ function argList(v) {
   return v === undefined ? [] : [].concat(v);
 }
 
-// ---------- the fake host SaaS page ----------
-// Served by the `__hostd` daemon on :38788. It plays the customer: its
-// "backend" signs the reporter id with the project's identitySecret
-// (v1 HMAC, docs/installation.md "Vérification d'identité") and the page embeds the
-// standalone IIFE build exactly like the <script> snippet in docs/installation.md.
 function hostPageHtml(state, reqPath, asUser) {
   const user = asUser || HOST_USER;
   const userHash = hmacHex(state.project.identitySecret, user.id);
@@ -344,8 +322,6 @@ async function hostd() {
       return;
     }
     if (url.pathname.startsWith('/v1/')) {
-      // Same-origin embed mode: reverse-proxy the widget API like a customer
-      // who mounts Koe under their own domain.
       const up = http.request({ host: '127.0.0.1', port: PORTS.api, path: req.url, method: req.method, headers: { ...req.headers, host: `localhost:${PORTS.api}` } }, (r) => {
         res.writeHead(r.statusCode || 502, r.headers);
         r.pipe(res);
@@ -384,7 +360,6 @@ async function hostd() {
   process.on('SIGINT', stop);
 }
 
-// ---------- browser daemon ----------
 async function browserd() {
   const { chromium } = loadPlaywright();
   const ctx = await chromium.launchPersistentContext(path.join(RUN_DIR, 'browser-profile'), {
@@ -416,7 +391,6 @@ async function browserd() {
   setInterval(() => {}, 1 << 30);
 }
 
-// ---------- widget helpers ----------
 async function openWidget(page, hostPath) {
   await page.goto(resolveUrl(hostPath || '/', 'host'), { waitUntil: 'networkidle' });
   const launcher = page.getByRole('button', { name: 'Support', exact: true });
@@ -431,7 +405,6 @@ function ticketRow(id) {
   return psqlJson(`select id, kind, title, description, status, priority, reporter_id, reporter_name, reporter_email, reporter_verified, steps_to_reproduce, expected_behavior, actual_behavior, metadata, screenshot_url, notes, is_public_roadmap, created_at, updated_at from tickets where id = ${lit(id)}`)[0] || null;
 }
 
-// ---------- commands ----------
 const COMMANDS = {};
 
 COMMANDS.launch = {
@@ -513,7 +486,6 @@ Refuses to start if a port is busy, the container exists, or .verify-run/state.j
     docker('run', '-d', '--name', PG, '--label', LABEL, '-p', `127.0.0.1:${PORTS.postgres}:5432`, '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_USER=koe', '-e', 'POSTGRES_PASSWORD=koe_verify', '-e', 'POSTGRES_DB=koe', 'postgres:16-alpine');
     state.containers.push(PG);
     writeState(state);
-    // pg_isready flips true during the init-time restart; wait for a real query through the mapped port.
     await waitFor(async () => {
       psql('select 1');
       return portInUse(PORTS.postgres);
@@ -525,7 +497,6 @@ Refuses to start if a port is busy, the container exists, or .verify-run/state.j
 
     const argon2 = createRequire(path.join(PKG.api, 'package.json'))('@node-rs/argon2');
     const adminHash = await argon2.hash(ADMIN.password, { memoryCost: 19456, timeCost: 2, parallelism: 1 });
-    // Whitelisted env: nothing from the operator's shell (keys, tokens) leaks in.
     const env = {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
@@ -542,7 +513,6 @@ Refuses to start if a port is busy, the container exists, or .verify-run/state.j
       ADMIN_PASSWORD_HASH: adminHash,
       ADMIN_SESSION_SECRET: crypto.randomBytes(32).toString('hex'),
       ADMIN_COOKIES_SECURE: 'false',
-      // Third parties forced off.
       RESEND_API_KEY: '',
       RESEND_FROM_EMAIL: '',
       NOTIFY_OWNER_EMAIL: '',
@@ -568,7 +538,6 @@ Refuses to start if a port is busy, the container exists, or .verify-run/state.j
       fs.writeFileSync(path.join(logDir, 'bootstrap.log'), `${e.stdout}\n${e.stderr}`);
       fail('bootstrap --non-interactive failed.', `Read ${path.join(logDir, 'bootstrap.log')}, then \`control-koe teardown\`.`);
     }
-    // The identitySecret is a fake, per-run secret for a throwaway DB; keep it out of the log.
     const secret = boot.match(/identitySecret\s+([0-9a-f]{64})/)?.[1];
     fs.writeFileSync(path.join(logDir, 'bootstrap.log'), boot.replace(/[0-9a-f]{64}/g, '<redacted fake secret>'));
     if (!secret) fail('Could not read identitySecret from bootstrap output.', `Read ${path.join(logDir, 'bootstrap.log')}; the CLI output format may have changed.`);
@@ -648,7 +617,6 @@ Run it first whenever anything looks off; read "hints".`,
     if (state?.pids?.api && alive(state.pids.api)) {
       try {
         const envRaw = fs.readFileSync(`/proc/${state.pids.api}/environ`, 'utf8');
-        // Report names only, never values.
         const bad = ['RESEND_API_KEY', 'RESEND_FROM_EMAIL', 'REDIS_URL', 'NOTIFY_OWNER_EMAIL', 'DASHBOARD_PUBLIC_URL', 'KOE_SECRET_KEYS'].filter((k) => envRaw.split('\0').some((l) => l.startsWith(k + '=') && l.length > k.length + 1));
         checks.thirdPartyEnvEmpty = bad.length === 0 ? true : bad;
       } catch {
@@ -864,7 +832,6 @@ my-requests "My requests" list for the host user (read-only).
         if (!ok) process.exitCode = 1;
         return { ok, response: { status: resp.status(), body }, dbVotes: votes, hostUserHasVote: votes.some((v) => v.user_id === HOST_USER.id), evidence: { before, after }, ...(ok ? {} : { fix: 'Check `control-koe network-log --filter /v1/widget --status-min 400` and .verify-run/logs/api.log.' }) };
       }
-      // bug | feature
       const isBug = action === 'bug';
       await dialog.getByRole('button', { name: isBug ? /report a bug/i : /suggest an idea/i }).click();
       await dialog.getByLabel('Title').fill(flags.title);
@@ -961,7 +928,6 @@ back from the DB. Side effect (only with --set-status): status change + one audi
       const text = await page.locator('body').innerText().catch(() => '');
       const shows = { title: text.includes(before.title), browserContext: /Browser context/i.test(text), reproduction: before.steps_to_reproduce ? text.includes(before.steps_to_reproduce.split('\n')[0]) : null };
       if (!target) return { ok: true, ticketId: id, url: page.url(), shows, file: shot };
-      // The Status select is the first combobox in the State card ("Status" row).
       const trigger = page.getByRole('combobox').filter({ hasText: labels[before.status] || before.status }).first();
       await trigger.click();
       const patchP = page.waitForResponse((r) => r.url().includes(`/tickets/${id}`) && r.request().method() === 'PATCH', { timeout: 15000 }).catch(() => null);
@@ -1097,7 +1063,6 @@ COMMANDS['network-log'] = {
   },
 };
 
-// ---------- repro ----------
 const STEP_HELP = `Steps file (--steps-file): JSON array, executed in order on the replay page, a screenshot after each:
   {"goto": "/projects?tab=export"}                      host-page path
   {"click": {"role": "button", "name": "Export CSV"}}   or {"click": {"testId": "..."}} / {"text": "..."} / {"label": "..."}
@@ -1109,7 +1074,6 @@ trail: it starts at the first recorded page, clicks by role + accessible name (o
 follows recorded navigations, and skips field edits (their contents are never captured).
 For an older report without a trail, write the steps from its free-text "steps_to_reproduce".`;
 
-// metadata.breadcrumbs -> replay steps. Fields are listed as skipped: Koe never records values.
 function trailToSteps(breadcrumbs, fallbackTarget) {
   const toPath = (u) => {
     try {
@@ -1151,8 +1115,6 @@ async function loadRedaction() {
 function loadReport(flags, pos) {
   if (typeof flags['from-file'] === 'string') {
     const raw = JSON.parse(fs.readFileSync(flags['from-file'], 'utf8'));
-    // Accept a tickets row (snake_case), the admin API shape (camelCase), a widget
-    // response envelope ({ok,data}), or a previous repro bundle's report.json.
     const t = raw?.data && raw.ok !== undefined ? raw.data : raw?.ticket || raw?.report || raw;
     return {
       source: `file:${path.resolve(flags['from-file'])}`,
@@ -1180,7 +1142,6 @@ function loadReport(flags, pos) {
   return { source: `db:${PG}/tickets/${id}`, ticket: t };
 }
 
-// What the stored report still lacks for a full auto-reproduction.
 function notCaptured(ticket) {
   const m = ticket.metadata || {};
   const gaps = [];
@@ -1227,7 +1188,6 @@ function buildReplayPlan(ticket) {
     deviceScaleFactor: typeof m.devicePixelRatio === 'number' && m.devicePixelRatio > 0 ? m.devicePixelRatio : null,
   };
   for (const [k, v] of Object.entries(context)) if (v === null) missing.push(`metadata.${k}`);
-  // Touch emulation from the captured input capability (widget >= capture-context).
   if (m.input && typeof m.input.maxTouchPoints === 'number') {
     context.hasTouch = m.input.maxTouchPoints > 0;
     context.isMobile = !!m.input.coarsePointer && !m.input.hover;
@@ -1313,8 +1273,6 @@ ${STEP_HELP}`,
       });
       if (plan.reporterId) await ctx.addCookies([{ name: 'koe_verify_as', value: encodeURIComponent(plan.reporterId), url: HOST }]);
       const page = await ctx.newPage();
-      // Belt and braces: when the daemon's persistent context had a timezoneId, new
-      // contexts inherited it over CDP. The daemon sets none now; force it per page too.
       if (c.timezoneId) {
         const cdp = await ctx.newCDPSession(page);
         await cdp.send('Emulation.setTimezoneOverride', { timezoneId: c.timezoneId }).catch(() => {});
@@ -1385,7 +1343,6 @@ ${STEP_HELP}`,
     };
     const errors = consoleRows.filter((r) => r.type === 'error' || r.type === 'pageerror');
     const failedRequests = networkRows.filter((r) => r.status === null || r.status >= 400);
-    // Ground truth from the report vs what the replay produced, both redacted the same way.
     const { redactText, redactUrl } = await loadRedaction();
     const seenConsole = consoleRows.filter((r) => ['error', 'warning', 'pageerror'].includes(r.type)).map((r) => redactText(r.text));
     const pathOf = (u) => {
@@ -1441,7 +1398,6 @@ ${STEP_HELP}`,
   },
 };
 
-// ---------- main ----------
 function usage() {
   const lines = Object.entries(COMMANDS).map(([k, c]) => `  ${k.padEnd(12)} ${c.summary}`);
   return `control-koe: drive a throwaway local Koe (widget on a fake host SaaS page + admin dashboard).
@@ -1491,7 +1447,6 @@ async function main() {
     process.stdout.write(c.help + '\n');
     return;
   }
-  // teardown deletes the state; resolve the transcript path first.
   const preState = readState();
   let text;
   try {

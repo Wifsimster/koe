@@ -17,10 +17,6 @@ export interface KoeProviderProps {
 }
 
 export function KoeProvider({ config, children }: KoeProviderProps) {
-  // Depend on the primitive fields the client cares about, not the whole
-  // `config` reference. Hosts commonly pass an inline object literal —
-  // `<KoeProvider config={{ apiUrl, projectKey }}>` — which would otherwise
-  // rebuild the API client (and drop in-flight requests) on every render.
   const { apiUrl, projectKey, userHash, identityToken } = config;
   const api = useMemo(
     () =>
@@ -46,16 +42,6 @@ export function KoeProvider({ config, children }: KoeProviderProps) {
   return <KoeContext.Provider value={value}>{children}</KoeContext.Provider>;
 }
 
-/**
- * Validate the `apiUrl` the host passes to the widget. The widget forwards
- * reporter identity (`X-Koe-User-Hash` / `X-Koe-Identity-Token`) on every
- * request, so a misconfigured or attacker-influenced `apiUrl` would
- * silently send identity-bearing payloads to an arbitrary endpoint. We
- * parse it, require an `http(s):` scheme, and refuse `javascript:`,
- * `data:`, protocol-relative, and non-URL inputs.
- *
- * Exported so the standalone `Koe.init()` entrypoint can reuse it.
- */
 export function assertApiUrl(raw: string | undefined): string {
   if (!raw || typeof raw !== 'string') {
     throw new Error(
@@ -89,8 +75,6 @@ function mergeLocale(base: WidgetLocale, override?: Partial<WidgetLocale>): Widg
   return {
     ...base,
     ...override,
-    // Nested groups are deep-merged so hosts can override a single key
-    // (e.g. just `picker.bug`) without losing the rest of the base preset.
     picker: override.picker
       ? { ...(base.picker as NonNullable<WidgetLocale['picker']>), ...override.picker }
       : base.picker,
