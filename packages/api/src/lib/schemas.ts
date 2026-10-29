@@ -1,22 +1,9 @@
 import { z } from 'zod';
 import { TICKET_PRIORITIES, TICKET_STATUSES } from '@koe/shared';
 
-/**
- * Centralised Zod schemas for every route handler. Keeps route files
- * focused on orchestration instead of inline validation declarations,
- * and makes it easy to grep for what the API accepts.
- */
-
-/* -------------------------------------------------------------------------- */
-/*  Shared primitives                                                         */
-/* -------------------------------------------------------------------------- */
 
 export const ticketStatusSchema = z.enum(TICKET_STATUSES);
 export const ticketPrioritySchema = z.enum(TICKET_PRIORITIES);
-
-/* -------------------------------------------------------------------------- */
-/*  Widget — public submission surface                                        */
-/* -------------------------------------------------------------------------- */
 
 export const reporterSchema = z.object({
   id: z.string().min(1).max(256),
@@ -26,7 +13,6 @@ export const reporterSchema = z.object({
     .string()
     .url()
     .max(2048)
-    // Block `javascript:` and `data:` scheme injection into the admin UI.
     .refine((u) => /^https?:\/\//i.test(u), 'avatarUrl must be http(s)')
     .optional(),
   metadata: z
@@ -35,7 +21,6 @@ export const reporterSchema = z.object({
     .optional(),
 });
 
-/** Upper bound for each captured buffer. The widget keeps fewer (see `capture.ts`). */
 export const MAX_CAPTURED_ENTRIES = 50;
 
 const breadcrumbTargetSchema = z.object({
@@ -101,11 +86,6 @@ export const createBugSchema = z.object({
   actualBehavior: z.string().max(10_000).optional(),
   reporter: reporterSchema,
   metadata: metadataSchema,
-  /**
-   * Reference to a screenshot uploaded via presigned URL. The actual
-   * upload never flows through this endpoint — that's what blew up
-   * Postgres row sizes in the jsonb-blob design.
-   */
   screenshotUrl: z.string().url().max(2048).optional(),
 });
 
@@ -125,23 +105,6 @@ export const myRequestsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
-/* -------------------------------------------------------------------------- */
-/*  Admin — project + ticket mutations                                        */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Validates a single CORS origin entry. Must look like
- * `scheme://host[:port]` with no path/query/fragment, and the scheme
- * must be `http` or `https`. Rejects:
- *
- * - `*` (wildcard) — origin allowlists must be explicit; the
- *   permissive behaviour is `allowedOrigins: []`, not a star entry.
- * - `file://` — never a real cross-origin browser context for our
- *   widget, and a footgun (`Origin: null` from sandboxed iframes).
- * - Any entry with a trailing path / query / fragment — browsers
- *   never send those in `Origin`, so storing them silently breaks
- *   the per-project equality check at request time.
- */
 export const allowedOriginSchema = z
   .string()
   .trim()
@@ -177,10 +140,6 @@ export const allowedOriginSchema = z
       });
       return;
     }
-    // `URL` parses an entry with no explicit path as `pathname === '/'`.
-    // Anything richer than that — query, fragment, or a real path
-    // segment — silently breaks the equality check we run against the
-    // browser's `Origin` header (which never contains them).
     if ((url.pathname && url.pathname !== '/') || url.search || url.hash) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -188,10 +147,6 @@ export const allowedOriginSchema = z
       });
       return;
     }
-    // Refuse trailing-slash inputs as well: the browser sends
-    // `Origin: https://x.example` (no slash), so storing
-    // `https://x.example/` would never match. Catching the shape at
-    // validation time avoids a confusing silent allowlist miss later.
     if (v.endsWith('/')) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -224,11 +179,6 @@ export const ticketQuerySchema = z.object({
   sort: z.enum(['recent', 'votes']).default('recent').optional(),
 });
 
-/**
- * Partial ticket update — every field is optional, at least one is
- * required. `notes` is free-text admin-only scratch space; empty string
- * clears the field (normalised to null server-side).
- */
 export const patchTicketSchema = z
   .object({
     status: ticketStatusSchema.optional(),
@@ -257,19 +207,11 @@ export const bulkPatchSchema = z.object({
     }),
 });
 
-/* -------------------------------------------------------------------------- */
-/*  Admin auth                                                                */
-/* -------------------------------------------------------------------------- */
-
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
   password: z.string().min(1).max(4096),
 });
 
-/**
- * Optional override for the test-email endpoint. Empty body is valid
- * and means "send to whatever the env-resolved recipient is".
- */
 export const testEmailSchema = z.object({
   to: z.string().trim().toLowerCase().email().max(320).optional(),
 });

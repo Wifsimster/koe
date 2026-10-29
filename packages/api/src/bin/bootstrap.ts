@@ -6,22 +6,6 @@ import { db, dbAvailable, schema } from '../db/index.js';
 import { getSecretStoreFromEnv } from '../lib/secretStore.js';
 import { runMigrations } from './migrate.js';
 
-/**
- * Interactive CLI that creates a new `projects` row and prints the
- * `projectKey` + `identitySecret` to stdout. Replaces the "manual psql
- * INSERT" step in the self-host flow.
- *
- * Usage:
- *   docker compose run --rm api bootstrap
- *   # or inside a running container:
- *   docker compose exec api node dist/bootstrap.js
- *
- * Non-interactive mode (reads from env):
- *   KOE_PROJECT_NAME=Acme KOE_PROJECT_KEY=acme \
- *   KOE_ALLOWED_ORIGINS=https://app.acme.com \
- *   node dist/bootstrap.js --non-interactive
- */
-
 type BootstrapInput = {
   name: string;
   key: string;
@@ -82,7 +66,6 @@ async function main(): Promise<void> {
     throw new Error('DATABASE_URL must be set');
   }
 
-  // Ensure the schema exists before we try to insert. Idempotent.
   await runMigrations();
 
   const nonInteractive = process.argv.includes('--non-interactive') || !input.isTTY;
@@ -101,9 +84,6 @@ async function main(): Promise<void> {
   const identitySecret = randomBytes(32).toString('hex');
   const secretStore = getSecretStoreFromEnv();
 
-  // Encrypt at the boundary. When `KOE_SECRET_KEYS` is unset the
-  // plaintext store passes through unchanged, so this line is safe to
-  // run in dev without any KMS setup.
   const storedSecret = secretStore.encrypt(identitySecret);
 
   const [row] = await db

@@ -1,23 +1,6 @@
 import { Resend } from 'resend';
 import type { schema } from '../db';
 
-/**
- * Email notifications for new widget submissions, via Resend.
- *
- * Design notes:
- * - Lazy-init: the Resend client is only constructed on first use, and
- *   only when `RESEND_API_KEY` is set. Without it, every entry point
- *   here is a silent no-op — the widget keeps working unchanged on
- *   deployments that haven't set up email yet.
- * - Single-admin product: recipient resolution is `NOTIFY_OWNER_EMAIL`
- *   then `ADMIN_EMAIL`, then skip. The `notifyNewTicket(row, project)`
- *   signature already takes the project so the future per-project
- *   `role='owner'` lookup is a one-liner change to the resolver.
- * - Fire-and-forget at the call site (`void notifyNewTicket(...)`):
- *   widget latency must never depend on Resend availability. Errors
- *   are logged and swallowed here so the caller doesn't have to.
- */
-
 type ResendLike = Pick<Resend, 'emails'>;
 type TicketRow = typeof schema.tickets.$inferSelect;
 type ProjectInfo = { id: string; key: string; name: string };
@@ -25,11 +8,6 @@ type ProjectInfo = { id: string; key: string; name: string };
 let cachedClient: ResendLike | null | undefined;
 let warnedMissingFrom = false;
 
-/**
- * Returns a Resend client lazily, or `null` if `RESEND_API_KEY` is
- * absent. Logs once on the first call so an operator running without
- * email knows the surface is intentionally off, not silently broken.
- */
 export function getResendFromEnv(): ResendLike | null {
   if (cachedClient !== undefined) return cachedClient;
   const apiKey = process.env.RESEND_API_KEY;
@@ -44,18 +22,6 @@ export function getResendFromEnv(): ResendLike | null {
   return cachedClient;
 }
 
-/**
- * Test seam. Lets unit tests inject a fake Resend without touching
- * env vars or the global cache between cases. Pass `null` to force
- * the no-op path; pass `undefined` to clear the cache so the next
- * call re-reads `RESEND_API_KEY`.
- *
- * Refuses to run in production. The export stays available so the
- * unit-test harness can still call it under `NODE_ENV=test`, but a
- * production process accidentally wired up to invoke it (e.g. an
- * imported helper, or a build artifact that leaks the symbol) will
- * throw rather than silently swap the live email client.
- */
 export function __setResendForTest(client: ResendLike | null | undefined): void {
   if (process.env.NODE_ENV === 'production') {
     throw new Error(
@@ -141,15 +107,6 @@ function buildBody(row: TicketRow, project: ProjectInfo): { html: string; text: 
   return { html: htmlParts.join('\n'), text: textLines.join('\n') };
 }
 
-/**
- * Sends a "new ticket" email to the configured owner. Returns `true`
- * when an email was dispatched, `false` when it was skipped (no client,
- * no recipient, no sender) or Resend rejected the send. Never throws —
- * Resend errors are logged.
- *
- * Always call as `void notifyNewTicket(row, project)` from request
- * handlers: the widget response must not wait on Resend.
- */
 export async function notifyNewTicket(
   row: TicketRow,
   project: ProjectInfo,
@@ -173,11 +130,6 @@ export async function notifyNewTicket(
       html,
       text,
     });
-    // Resend's `send` resolves successfully even when the request is
-    // rejected — the failure surfaces as `{ data: null, error }` on the
-    // response envelope. Without this branch, an unverified sender or
-    // a blocked recipient looks like a successful send and the operator
-    // has no log to chase. Mirror the check `sendTestEmail` already does.
     const data = (response as { data?: { id?: string } | null; error?: unknown }) ?? {};
     if (data.error) {
       console.error('[koe/api] notifyNewTicket rejected by Resend', data.error);
@@ -190,13 +142,6 @@ export async function notifyNewTicket(
   }
 }
 
-/**
- * Result of `sendTestEmail`. The discriminant lets the admin route map
- * each case to the right HTTP status without leaking implementation
- * details: `no_api_key`/`no_sender`/`no_recipient` map to 422 (operator
- * needs to fix env), `send_failed` maps to 502 (Resend rejected us),
- * `ok` maps to 200.
- */
 export type TestEmailResult =
   | { ok: true; to: string; from: string; messageId: string | null }
   | {
@@ -224,18 +169,6 @@ function buildTestBody(): { html: string; text: string } {
   return { html, text };
 }
 
-/**
- * Sends a one-off test email to verify Resend is correctly wired up.
- * Driven by the admin "send test email" button — surfaces every
- * common misconfiguration (missing API key, missing sender, missing
- * recipient, Resend rejection) as a structured result instead of
- * silent no-op, so the operator gets actionable feedback instead of
- * "did anything happen?".
- *
- * Pass `to` to override the recipient resolver — useful when the admin
- * wants to send a probe to their personal inbox rather than the
- * configured owner address.
- */
 export async function sendTestEmail(opts: { to?: string } = {}): Promise<TestEmailResult> {
   const client = getResendFromEnv();
   if (!client) return { ok: false, reason: 'no_api_key' };
@@ -256,9 +189,6 @@ export async function sendTestEmail(opts: { to?: string } = {}): Promise<TestEma
       html,
       text,
     });
-    // Resend returns `{ data: { id }, error }`. A non-null `error` is a
-    // delivery rejection (bad sender domain, blocked recipient, …) and
-    // must surface as a failure even though `send()` resolved.
     const data = (response as { data?: { id?: string } | null; error?: unknown }) ?? {};
     if (data.error) {
       const msg =

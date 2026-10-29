@@ -13,17 +13,6 @@ import { getRedisFromEnv } from '../lib/redis';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
 import type { ProjectContext } from './project';
 
-/**
- * Computes the legacy identity hash. Kept exported so host apps that
- * already integrated against v1 do not need to change anything.
- *
- * v1 algorithm: `hex(HMAC-SHA256(identitySecret, reporterId))` transported
- * via header `X-Koe-User-Hash`.
- *
- * @deprecated New integrations should sign an identity token instead —
- * see `packages/api/src/lib/identityToken.ts`. v1 tokens have no TTL,
- * no nonce, and no rotation story, so a leaked hash is valid forever.
- */
 export function computeUserHash(reporterId: string, identitySecret: string): string {
   return createHmac('sha256', identitySecret).update(reporterId).digest('hex');
 }
@@ -37,40 +26,14 @@ function constantTimeEquals(a: string, b: string): boolean {
   }
 }
 
-/**
- * Verifies an identity header against the project's secrets.
- *
- * Behaviour:
- * - If `X-Koe-Identity-Token` is present, use the v2 scheme: the token's
- *   bound claims (`projectId`, `reporterId`, `iat`, `nonce`, `kid`) are
- *   checked against the project's active/retiring secrets. No silent
- *   downgrade to v1 — a malformed v2 token fails the request.
- * - Else if `X-Koe-User-Hash` is present, use the legacy v1 scheme for
- *   backward compatibility with existing integrations.
- * - Else, `project.requireIdentityVerification` decides: true → 401,
- *   false → `{verified: false}`.
- */
 export type VerifyReporterFn = (
   reporterId: string,
 ) => Promise<{ ok: true; verified: boolean } | { ok: false; reason: string }>;
 
-/**
- * Process-wide nonce cache. Redis-backed when `REDIS_URL` is set
- * (atomic across all replicas); in-memory otherwise. Nonces are keyed
- * by `kid:nonce` inside the verifier, so the cache is shared safely
- * across all projects without collisions in practice.
- */
-// `ioredis`'s `.set` has a heavily overloaded signature that doesn't
-// structurally unify with our narrow `RedisSetNxClient` interface.
-// The runtime behaviour matches precisely (`SET ... NX EX ttl`), so
-// we bridge with a typed cast at the module seam.
 const nonceCache: NonceCache = createNonceCacheFromEnv(
   getRedisFromEnv() as unknown as RedisSetNxClient | null,
 );
 
-/** Max age accepted for a v2 token. Matches the 10-minute window the
- * meeting settled on — short enough to constrain replay, long enough to
- * tolerate clock drift and the time between page-load and submit. */
 const V2_MAX_AGE_SECONDS = 600;
 
 async function loadActiveSecrets(projectId: string): Promise<Map<string, IdentitySecret>> {
@@ -83,9 +46,6 @@ async function loadActiveSecrets(projectId: string): Promise<Map<string, Identit
   const secretStore = getSecretStoreFromEnv();
   const map = new Map<string, IdentitySecret>();
   for (const r of rows) {
-    // Decrypt at the boundary. Rows written before KOE_SECRET_KEYS was
-    // configured come back as legacy plaintext — `decrypt` detects the
-    // absence of the envelope prefix and passes them through.
     map.set(r.kid, {
       kid: r.kid,
       secret: secretStore.decrypt(r.secret),
@@ -102,8 +62,6 @@ export const attachVerifier: MiddlewareHandler<{
   const suppliedToken = c.req.header('X-Koe-Identity-Token') ?? null;
   const suppliedHash = c.req.header('X-Koe-User-Hash') ?? null;
 
-  // Memoise the secret lookup so a single request does at most one DB
-  // hit, even if the route calls `verifyReporter` several times.
   let secretsPromise: Promise<Map<string, IdentitySecret>> | null = null;
   const getSecrets = () => {
     if (!secretsPromise) secretsPromise = loadActiveSecrets(project.id);
@@ -120,10 +78,6 @@ export const attachVerifier: MiddlewareHandler<{
         nonces: nonceCache,
       });
       if (!result.ok) {
-        // Granular cause goes to logs only — clients learn just the
-        // collapsed `reason` (e.g. signature_mismatch covers
-        // unknown_kid / revoked_kid / bad-mac) so probing the endpoint
-        // can't fingerprint kid validity.
         console.warn(
           '[koe/api] identity token rejected',
           JSON.stringify({

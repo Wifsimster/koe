@@ -4,9 +4,7 @@ import { fail } from '../lib/response';
 import { getRedisFromEnv } from '../lib/redis';
 
 export interface RateLimiterConfig {
-  /** Tokens added per second. */
   refillPerSecond: number;
-  /** Maximum burst size. */
   capacity: number;
 }
 
@@ -14,13 +12,6 @@ export type RateLimitDecision =
   | { allowed: true }
   | { allowed: false; retryAfter: number };
 
-/**
- * Pluggable rate limiter port. The widget CORS path uses the in-memory
- * adapter today; the infra MR swaps in a Redis adapter (sliding window,
- * keyed on projectId+ip+reporterId) without touching middleware call
- * sites. `consume` is async so adapters that make network calls fit
- * without refactoring.
- */
 export interface RateLimiter {
   consume(key: string, cost?: number): Promise<RateLimitDecision>;
 }
@@ -30,11 +21,6 @@ interface Bucket {
   lastRefill: number;
 }
 
-/**
- * In-memory token bucket. State never expires — that's fine because keys
- * are bounded (project_id + ip). Per-replica only; the moment we add a
- * second API pod, swap for Redis in the infra MR.
- */
 export function createInMemoryRateLimiter(config: RateLimiterConfig): RateLimiter {
   const buckets = new Map<string, Bucket>();
 
@@ -66,12 +52,6 @@ export function createInMemoryRateLimiter(config: RateLimiterConfig): RateLimite
   };
 }
 
-/**
- * Minimal shape of the Redis client the Redis rate limiter needs.
- * Declared here so this module stays importable in environments where
- * `ioredis` isn't installed — the Redis adapter factory is the only
- * call site that actually reaches for the real client.
- */
 export interface RedisEvalClient {
   eval(
     script: string,
@@ -81,24 +61,9 @@ export interface RedisEvalClient {
 }
 
 export interface RedisRateLimiterOptions extends RateLimiterConfig {
-  /** Key prefix so we can share the Redis DB with other data. */
   prefix?: string;
 }
 
-/*
- * Token-bucket Lua script. Runs atomically — a single EVAL call
- * does the read, the refill math, the decrement, and the TTL renew
- * without a round-trip for each. Replicas racing on the same key
- * observe a consistent bucket.
- *
- * Arguments (ARGV):
- *   1 = cost (tokens to consume)
- *   2 = refillPerSecond
- *   3 = capacity
- *   4 = nowMs (server clock; we use the caller's so Redis TIME drift doesn't surprise anyone)
- *
- * Return: [allowed(0|1), retryAfterSeconds]
- */
 const TOKEN_BUCKET_LUA = `
 local key = KEYS[1]
 local cost = tonumber(ARGV[1])
@@ -133,13 +98,6 @@ redis.call('PEXPIRE', key, math.ceil((capacity / refill) * 1000) + 1000)
 return {allowed, retryAfter}
 `;
 
-/**
- * Redis-backed rate limiter. Token bucket, atomic via a Lua script —
- * the shape is identical to the in-memory adapter so the middleware
- * call site is unchanged. A single bucket is shared across all
- * replicas that point at the same Redis instance, which is the whole
- * reason this exists.
- */
 export function createRedisRateLimiter(
   client: RedisEvalClient,
   opts: RedisRateLimiterOptions,
@@ -166,28 +124,10 @@ export function createRedisRateLimiter(
 }
 
 export interface RateLimitOptions extends RateLimiterConfig {
-  /** Extract the key to bucket on. Called per request. */
   key: (c: Parameters<MiddlewareHandler>[0]) => string;
-  /**
-   * Override the limiter implementation. Defaults to a fresh in-memory
-   * limiter seeded with `refillPerSecond`/`capacity`. Provide a shared
-   * instance (or a Redis-backed adapter) to let multiple routes share
-   * buckets or survive process restarts.
-   */
   limiter?: RateLimiter;
 }
 
-/**
- * Rate-limit middleware. Preserves the original call shape so existing
- * routes don't need to change; the underlying limiter is now
- * swappable via `opts.limiter`.
- *
- * If the key resolves to `UNKNOWN_IP_SENTINEL` (conninfo failed and no
- * trusted proxy header), every client would otherwise collapse into one
- * shared bucket — a DoS bypass. In production we **fail closed** with
- * 500; in dev we warn-and-admit so the test surface keeps working
- * without per-test conninfo plumbing.
- */
 export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
   const limiter = opts.limiter ?? createInMemoryRateLimiter(opts);
 
@@ -213,66 +153,21 @@ export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
   };
 }
 
-/**
- * Picks the right limiter based on whether Redis is configured. Use
- * this at the middleware mount site so both deployment modes — single
- * replica / in-memory, multi-replica / Redis — go through the same
- * call shape. Memoising per-config isn't worth it: limiter setup is
- * constant-time, and sharing a single limiter across unrelated routes
- * would mix their buckets.
- */
 export function createRateLimiterFromEnv(config: RateLimiterConfig & { prefix?: string }): RateLimiter {
   const redis = getRedisFromEnv();
   if (redis) {
-    // `ioredis`'s `eval` signature is overloaded; our narrow
-    // `RedisEvalClient` interface covers the single overload we need.
-    // Cast at the seam, not at every call site.
     return createRedisRateLimiter(redis as unknown as RedisEvalClient, config);
   }
   return createInMemoryRateLimiter(config);
 }
 
-/**
- * Cached at module load — re-reading the env on every request let a
- * runtime toggle slip past, and rate-limit decisions wrap every public
- * route, so the env hit was already pure overhead. If you need to
- * change it, restart the process.
- */
 const PROXY_HEADERS_TRUSTED =
   (process.env.TRUST_PROXY_HEADERS ?? 'false').toLowerCase() === 'true';
 
 const IS_PRODUCTION = (process.env.NODE_ENV ?? '').toLowerCase() === 'production';
 
-/**
- * Sentinel used in two distinct cases:
- * 1. Test/edge runtime where `getConnInfo` throws — non-node, no
- *    socket peer to read.
- * 2. Production-direct deploy (no proxy) where conninfo *did* return
- *    nothing, which is unusual but not exploitable in dev.
- *
- * Exported so the middleware factory can detect it and decide whether
- * to fail closed in production (where a global `'unknown'` bucket
- * collapses every client into one bypass-able shared pool) or admit
- * the request in dev (where matching that path keeps the test surface
- * working).
- */
 export const UNKNOWN_IP_SENTINEL = 'unknown';
 
-/**
- * Extracts the client IP for rate-limit keying.
- *
- * Proxy headers (`X-Forwarded-For`, `X-Real-IP`) are **only** honored when
- * the operator explicitly opts in with `TRUST_PROXY_HEADERS=true`. A
- * direct-to-internet deployment that trusted them unconditionally would
- * let any client rotate the header to get a fresh bucket on every
- * request — defeating the limiter. When untrusted, we read the socket
- * remote address via `@hono/node-server`'s conninfo helper, which cannot
- * be spoofed by the client.
- *
- * Returns `UNKNOWN_IP_SENTINEL` if no IP can be derived. Caller decides
- * what to do with that — `rateLimit` middleware fails closed in prod
- * and warns-then-admits in dev.
- */
 export function clientIp(c: Context): string {
   if (PROXY_HEADERS_TRUSTED) {
     const forwarded = c.req.header('x-forwarded-for');
@@ -285,8 +180,6 @@ export function clientIp(c: Context): string {
     const remote = info.remote?.address;
     if (remote) return remote;
   } catch {
-    // conninfo isn't available on non-node runtimes (tests, edge); fall
-    // through to the sentinel below.
   }
   return UNKNOWN_IP_SENTINEL;
 }

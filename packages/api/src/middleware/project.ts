@@ -16,22 +16,8 @@ export interface ProjectContext {
   };
 }
 
-/**
- * Heartbeat throttle. Writing `last_ping_at` on every widget request
- * is wasteful under any real traffic — one UPDATE per request —
- * and the dashboard only cares whether the widget has been heard
- * from "recently". 60 seconds of staleness is indistinguishable from
- * live to the operator reading an empty state.
- */
 const HEARTBEAT_THROTTLE_SECONDS = 60;
 
-/**
- * Resolves `X-Koe-Project-Key` to a project row and attaches it to the
- * Hono context. Also enforces the origin allowlist when one is
- * configured (`checkRequestOrigin`). This is the real access check: the
- * CORS preflight cannot know the project, so a disallowed origin is
- * refused here, before any handler runs.
- */
 export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = async (c, next) => {
   const key = c.req.header('X-Koe-Project-Key');
   if (!key) {
@@ -56,9 +42,6 @@ export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = 
     return fail(c, 'origin_not_allowed', originCheck.message, 403);
   }
 
-  // Decrypt at the boundary. Legacy rows stored plaintext (pre-KMS
-  // rollout) go through the same call — `decrypt` detects the lack of
-  // an envelope prefix and returns them unchanged.
   const identitySecret = getSecretStoreFromEnv().decrypt(project.identitySecret);
 
   c.set('project', {
@@ -70,10 +53,6 @@ export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = 
     requireIdentityVerification: project.requireIdentityVerification,
   });
 
-  // Heartbeat stamp. Conditional WHERE collapses the read-then-write
-  // race into a single round-trip: the update only fires when the
-  // previous stamp is older than the throttle (or null). Safe to
-  // fire-and-forget — heartbeat is observational, not on the hot path.
   void db
     .update(schema.projects)
     .set({
@@ -93,7 +72,6 @@ export const requireProject: MiddlewareHandler<{ Variables: ProjectContext }> = 
       ),
     )
     .catch((err) => {
-      // Heartbeat failure is never a request-blocker. Log and move on.
       console.warn('[koe/api] heartbeat stamp failed', err);
     });
 

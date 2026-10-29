@@ -1,11 +1,3 @@
-/**
- * Privacy redaction for captured report context. The widget applies it
- * before sending, and the API applies it again before storing, so a
- * report never carries query values, tokens or e-mail addresses that the
- * reporter did not type into the form themselves.
- */
-
-/** Opaque values: long base64/hex-ish runs. UUIDs are kept (they identify records, a replay needs them). */
 const TOKEN_RE = /^[A-Za-z0-9_\-.~+/=]{32,}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SENSITIVE_NAME_RE =
@@ -35,16 +27,9 @@ function redactParams(params: URLSearchParams, keep: readonly string[]): string 
 }
 
 export interface RedactUrlOptions {
-  /** Query parameter names whose values are kept (never for sensitive names or token-like values). */
   keepQueryParams?: readonly string[];
 }
 
-/**
- * Keeps the origin, the path and the query parameter names. Drops every
- * query value (except `keepQueryParams`), credentials, token-like path
- * segments, and hash values (`#access_token=...`). A plain `#section`
- * anchor is kept.
- */
 export function redactUrl(input: string, options: RedactUrlOptions = {}): string {
   if (!input) return input;
   const keep = options.keepQueryParams ?? [];
@@ -83,11 +68,6 @@ const KEY_VALUE_RE =
 const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const LONG_TOKEN_RE = /[A-Za-z0-9_\-+/=]{32,}/g;
 
-/**
- * Redacts free text (console messages): URLs go through `redactUrl`, then
- * JWTs, bearer credentials, `token=...`-style pairs, e-mail addresses and
- * long opaque strings are replaced. The result is truncated to `max`.
- */
 export function redactText(input: string, max = 500): string {
   const out = String(input)
     .replace(URL_IN_TEXT_RE, (u) => redactUrl(u))

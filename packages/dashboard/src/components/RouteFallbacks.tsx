@@ -1,14 +1,5 @@
 import type { ReactNode } from 'react';
 
-/**
- * Catch-all for unknown routes. Without it, an unrecognised URL would
- * render the route's empty children — i.e. a blank page — instead of
- * something the operator can act on.
- *
- * Lives in its own module (not `router.tsx`) so the router file exports
- * only route config: a file that mixes component and non-component
- * exports breaks React Fast Refresh.
- */
 export function NotFoundView(): ReactNode {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background p-6 text-center">
@@ -29,10 +20,6 @@ export function NotFoundView(): ReactNode {
   );
 }
 
-/**
- * Top-level boundary for thrown loaders / route components. Without
- * one, a thrown route loader would surface as a blank screen.
- */
 export function RouteErrorView({ error }: { error?: unknown }): ReactNode {
   const message =
     error instanceof Error && error.message

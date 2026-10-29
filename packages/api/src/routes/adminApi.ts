@@ -23,33 +23,16 @@ import { sendTestEmail } from '../lib/notifications';
 import { requireAdmin, type AdminContext } from '../middleware/adminAuth';
 import type { MiddlewareHandler } from 'hono';
 
-/**
- * JSON admin API, mounted at `/v1/admin/*`. Single-admin product —
- * one founder managing multiple of their own SaaS projects. There
- * are no roles, no members, no per-project access control: if the
- * caller proved they're the admin, every project is theirs.
- */
 export function createAdminApiRoutes() {
   const api = new Hono<{ Variables: AdminContext & { project: { id: string; key: string } } }>();
 
-  // All admin routes require a valid session.
   api.use('*', requireAdmin);
 
-  /**
-   * Identity probe. Returns the configured admin email — the dashboard
-   * calls this on load to confirm the cookie is still valid.
-   */
   api.get('/me', async (c) => {
     const admin = c.get('admin');
     return ok(c, { email: admin.email });
   });
 
-  /**
-   * Reports the current Resend configuration so the dashboard's
-   * "email setup" panel can show what's missing before the operator
-   * tries to send a test. Only booleans + the resolved (env-derived)
-   * sender / recipient strings — never the API key itself.
-   */
   api.get('/notifications/email', async (c) => {
     const apiKeySet = !!process.env.RESEND_API_KEY;
     const from = process.env.RESEND_FROM_EMAIL?.trim() || null;
@@ -65,19 +48,7 @@ export function createAdminApiRoutes() {
     });
   });
 
-  /**
-   * Sends a one-off test email so the operator can verify Resend is
-   * reachable from this deploy without waiting for a real submission.
-   * Optional `to` lets them probe a personal inbox instead of the
-   * configured owner address.
-   *
-   * Maps the structured `TestEmailResult` to canonical envelopes:
-   * misconfiguration → 422, Resend rejection → 502, success → 200.
-   */
   api.post('/notifications/email/test', async (c) => {
-    // Empty body is valid (no `to` override); only parse when we
-    // actually have JSON to consume so the dashboard can fire an
-    // empty POST without setting a Content-Type.
     let to: string | undefined;
     const raw = await c.req.text();
     if (raw.trim().length > 0) {
@@ -121,10 +92,6 @@ export function createAdminApiRoutes() {
     });
   });
 
-  /**
-   * All projects. Single-admin product, so there's no membership
-   * filter — the founder sees every project they've created.
-   */
   api.get('/projects', async (c) => {
     const rows = await db
       .select({
@@ -144,15 +111,6 @@ export function createAdminApiRoutes() {
     return ok(c, rows);
   });
 
-  /**
-   * Cross-project KPI landing. One row per project, counters are
-   * pre-aggregated in SQL so the dashboard pays a single round-trip.
-   *
-   * Left-joining `ticket_votes` multiplies voted-ticket rows, so ticket
-   * counters use `count(DISTINCT tickets.id) FILTER (…)` to collapse
-   * duplicates; the vote counter itself wants the row count and so
-   * skips DISTINCT.
-   */
   api.get('/overview', async (c) => {
     const rows = await db
       .select({
@@ -185,10 +143,6 @@ export function createAdminApiRoutes() {
     });
   });
 
-  /**
-   * Create a project. Returns the plaintext `identitySecret` once —
-   * the server encrypts it at rest and never returns it again.
-   */
   api.post('/projects', async (c) => {
     const parsed = await parseJsonBody(c, createProjectSchema, 'Invalid project payload');
     if (!parsed.ok) return parsed.response;
@@ -238,11 +192,6 @@ export function createAdminApiRoutes() {
     );
   });
 
-  /**
-   * Resolve `:key` → project id + key. Replaces the team-era
-   * `requireProjectMember`: there's no membership to check, only
-   * existence. Returns 404 on miss.
-   */
   const resolveProject: MiddlewareHandler<{
     Variables: AdminContext & { project: { id: string; key: string } };
   }> = async (c, next) => {
@@ -258,11 +207,6 @@ export function createAdminApiRoutes() {
     await next();
   };
 
-  /**
-   * Cursor format: `${isoCreatedAt}|${ticketId}`, base64url-encoded.
-   * Sort is `(created_at desc, id desc)` — the cursor predicate is
-   * `(created_at, id) < (cursorCreatedAt, cursorId)`.
-   */
   function encodeCursor(createdAt: Date, id: string): string {
     return Buffer.from(`${createdAt.toISOString()}|${id}`, 'utf-8').toString('base64url');
   }
@@ -300,8 +244,6 @@ export function createAdminApiRoutes() {
     const { kind, status, priority, verified, search, limit, cursor, sort } =
       queryResult.data;
 
-    // Features tab fits on one page at operator scale; skip the extra
-    // work of a votes-aware cursor predicate.
     if (sort === 'votes' && cursor) {
       return fail(c, 'validation_failed', 'cursor not supported with sort=votes', 422);
     }
@@ -365,13 +307,6 @@ export function createAdminApiRoutes() {
     });
   });
 
-  /**
-   * Single-ticket lookup. Returns the same row shape used in the list
-   * endpoint's `items[]` so the dashboard can swap list-and-find for
-   * get-by-id without changing types. 404 when the ticket exists in
-   * another project (or doesn't exist at all) — never leak existence
-   * across projects.
-   */
   api.get('/projects/:key/tickets/:id', resolveProject, async (c) => {
     const project = c.get('project');
     const id = c.req.param('id');
@@ -412,8 +347,6 @@ export function createAdminApiRoutes() {
         .set({
           ...(parsed.data.status ? { status: parsed.data.status } : {}),
           ...(parsed.data.priority ? { priority: parsed.data.priority } : {}),
-          // Normalise "" -> null so a cleared textarea doesn't persist
-          // an empty string that sorts different from "never written".
           ...(parsed.data.notes !== undefined
             ? { notes: parsed.data.notes ? parsed.data.notes : null }
             : {}),
@@ -479,7 +412,6 @@ export function createAdminApiRoutes() {
     return ok(c, { ...row.ticket, voteCount: row.voteCount });
   });
 
-  /** Audit trail for a ticket. Read-only. */
   api.get('/projects/:key/tickets/:id/events', resolveProject, async (c) => {
     const project = c.get('project');
     const id = c.req.param('id');
@@ -507,13 +439,6 @@ export function createAdminApiRoutes() {
     return ok(c, rows);
   });
 
-  /**
-   * Bulk PATCH — apply the same status/priority change to up to 100
-   * tickets at once. Same audit shape as the single PATCH: per-ticket
-   * events emitted independently. No batch correlation: a solo
-   * operator knows what they just bulk-changed; per-event undo on the
-   * timeline covers mistakes.
-   */
   api.post('/projects/:key/tickets/bulk', resolveProject, async (c) => {
     const project = c.get('project');
 
@@ -590,10 +515,6 @@ export function createAdminApiRoutes() {
     });
   });
 
-  /**
-   * Revert a single audit event. Rewinds the ticket field to the
-   * event's `from` value and emits a new event capturing the delta.
-   */
   api.post(
     '/projects/:key/tickets/:id/events/:eventId/revert',
     resolveProject,

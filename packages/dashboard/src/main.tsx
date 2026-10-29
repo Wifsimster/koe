@@ -5,27 +5,18 @@ import { routeTree, type RouterContext } from './router';
 import { NotFoundView, RouteErrorView } from './components/RouteFallbacks';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { ThemeProvider } from './components/theme-provider';
-// Fonts are imported here, not from styles.css: @tailwindcss/postcss inlines
-// CSS imports without rebasing Fontsource's relative `./files/*.woff2` URLs.
 import '@fontsource-variable/jetbrains-mono';
 import '@fontsource-variable/geist';
 import './styles.css';
 
-// Match the Vite `base` config so the SPA can be mounted under
-// `/admin/*` when served by the Koe API, or at `/` in standalone dev.
 const basepath = import.meta.env.BASE_URL.replace(/\/$/, '') || undefined;
 
-// Same-origin `/v1/admin` by default — the Hono server serves both
-// the SPA and the JSON API. Override for a split deploy.
 const adminApiBaseUrl = (import.meta.env.VITE_ADMIN_API_URL as string | undefined) ?? '/v1/admin';
 
 const router = createRouter({
   routeTree,
   basepath,
   context: undefined as unknown as RouterContext,
-  // Without these, an unknown URL or a thrown route loader/component
-  // would render a blank page rather than something the operator can
-  // recover from.
   defaultNotFoundComponent: NotFoundView,
   defaultErrorComponent: RouteErrorView,
 });

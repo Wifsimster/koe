@@ -34,11 +34,6 @@ type FormAction =
   | { type: 'setErrors'; errors: FieldErrors }
   | { type: 'reset' };
 
-/**
- * Field values and their validation errors travel together in one
- * reducer — every edit and every (re)validation is a single immutable
- * step, which keeps the form's hook count low and the two in sync.
- */
 function formReducer(data: FormData, action: FormAction): FormData {
   switch (action.type) {
     case 'setValue':
@@ -55,11 +50,6 @@ function formReducer(data: FormData, action: FormAction): FormData {
 }
 
 export interface FeatureRequestFormProps {
-  /**
-   * Optional callback that switches the widget to the "my requests"
-   * screen so the reporter can see their just-submitted suggestion in
-   * context. Gated by the Panel on a verified user identity.
-   */
   onViewMyRequests?: () => void;
 }
 
@@ -107,9 +97,6 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    // Bail on double-submit (typical: two clicks on the primary button)
-    // before we set up a second AbortController and produce a duplicate
-    // ticket on the server.
     if (submitting) return;
     setApiError(null);
 
@@ -121,10 +108,6 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
     dispatchForm({ type: 'setErrors', errors: nextErrors });
     if (Object.keys(nextErrors).length > 0) return;
 
-    // Abort any previous in-flight request before assigning the new one
-    // so we never leak a stale fetch — the early-return on `submitting`
-    // covers normal cases but a controller can linger after an async
-    // throw during a prior submit.
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -150,8 +133,6 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
         if (err.code === 'network_error') {
           setApiError(locale.errors.network);
         } else if (err.code === 'rate_limited') {
-          // Surface the retry hint when the server provides one so the
-          // user knows the app isn't broken — just throttled.
           const retryAfter = err.detail.retryAfter ?? 0;
           setApiError(
             retryAfter > 0

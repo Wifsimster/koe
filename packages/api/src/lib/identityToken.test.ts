@@ -59,7 +59,6 @@ describe('identityToken', () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload(), secretV1);
     const [enc, mac] = token.split('.');
-    // Flip one char in the encoded payload.
     const flipped = (enc![0] === 'a' ? 'b' : 'a') + enc!.slice(1) + '.' + mac!;
 
     const result = await verifyIdentityToken(flipped, secrets, baseOpts(createInMemoryNonceCache()));
@@ -83,10 +82,7 @@ describe('identityToken', () => {
     const result = await verifyIdentityToken(token, secrets, baseOpts(createInMemoryNonceCache()));
     assert.equal(result.ok, false);
     if (!result.ok) {
-      // Externally indistinguishable from a bad mac — attacker probing
-      // the endpoint can't tell unknown-kid from sig-mismatch.
       assert.equal(result.reason, 'signature_mismatch');
-      // Granular cause kept for server-side logs only.
       assert.equal(result.internalReason, 'unknown_kid');
     }
   });
@@ -118,7 +114,6 @@ describe('identityToken', () => {
     const secrets = makeSecrets([{ kid: 'v1', secret: secretV1 }]);
     const token = signIdentityToken(makePayload({ iat: 1_700_000_000 }), secretV1);
 
-    // Jump 20 minutes into the future — outside the 10-minute window.
     const result = await verifyIdentityToken(
       token,
       secrets,
@@ -194,14 +189,6 @@ describe('identityToken', () => {
   });
 
   it('runs the HMAC compare even when the kid is unknown (constant time)', async () => {
-    // Both kids absent from `secrets`. We can't measure timing in a
-    // unit test, but we can prove the path was traversed: the dummy
-    // secret is fixed across calls, so the *expected* MAC for two
-    // tokens with the same payload is identical regardless of which
-    // unknown kid the attacker tries. We assert the verifier returns
-    // the externally-collapsed reason for both, never leaking the
-    // distinction. The constant-time property is a property of `sign`
-    // + `timingSafeEqual` and is documented in the call site.
     const secrets = makeSecrets([]);
     const t1 = signIdentityToken(makePayload({ kid: 'v99' }), secretV1);
     const t2 = signIdentityToken(makePayload({ kid: 'v100' }), secretV1);
@@ -219,7 +206,6 @@ describe('identityToken', () => {
   });
 
   it('TTL eviction: a flood of fresh nonces does not evict a still-valid one', async () => {
-    // Drive a controllable clock so the test isn't wall-clock flaky.
     let nowMs = 1_000_000;
     const cache = createInMemoryNonceCache({
       ttlSeconds: 60,
@@ -227,19 +213,13 @@ describe('identityToken', () => {
       now: () => nowMs,
     });
 
-    // 1) The "still-valid" entry an attacker would want to push out.
     assert.equal(await cache.hasSeen('replay-target'), false);
 
-    // 2) Flood the cache with a thousand fresh nonces while the clock
-    //    moves forward by milliseconds (well under the 60s TTL).
     for (let i = 0; i < 1_000; i++) {
-      nowMs += 1; // 1ms per insert → flood spans ~1s, < TTL
+      nowMs += 1;
       assert.equal(await cache.hasSeen(`flood-${i}`), false);
     }
 
-    // 3) The still-valid entry must STILL be remembered. With the old
-    //    FIFO-by-capacity scheme, anything past the 10k cap could push
-    //    the target out; with TTL eviction, only time can.
     assert.equal(
       await cache.hasSeen('replay-target'),
       true,
@@ -254,11 +234,7 @@ describe('identityToken', () => {
       now: () => nowMs,
     });
     assert.equal(await cache.hasSeen('once'), false);
-    // Move past the TTL window.
     nowMs += 31_000;
-    // After expiry the same key should be admitted again. (This is
-    // safe because the token itself uses `iat + maxAgeSeconds` to fail
-    // any token old enough to have outlived its nonce record.)
     assert.equal(await cache.hasSeen('once'), false);
   });
 });

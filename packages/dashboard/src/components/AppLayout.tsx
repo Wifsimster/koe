@@ -3,13 +3,6 @@ import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAuth } from '../auth/AuthContext';
 import { AppShell } from './AppShell';
 
-/**
- * Route components for the router. They live here, not in `router.tsx`,
- * so that file exports only route config — a module that mixes component
- * definitions with non-component exports breaks React Fast Refresh and
- * trips `only-export-components` / `no-multi-comp`.
- */
-
 export function RootGate() {
   return <Outlet />;
 }
@@ -19,23 +12,15 @@ export function AuthenticatedLayout() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  // Mid-session 401 → kick to /login. beforeLoad only runs on
-  // navigation, so this mirror catches the case where /me starts
-  // returning 401 after the route already matched.
   useEffect(() => {
     if (state.status === 'unauthenticated' && pathname !== '/login') {
       void navigate({ to: '/login', search: { redirectTo: pathname } });
     }
   }, [state.status, navigate, pathname]);
 
-  // Pull the specific fields the effects below depend on. Depending on
-  // the whole `state` object would re-run them on every setState (the
-  // reference always changes) — including non-structural transitions
-  // like `setActiveProject`, which has nothing to do with redirects.
   const authStatus = state.status;
   const projectCount = state.status === 'authenticated' ? state.projects.length : 0;
 
-  // Mid-session empty-projects → /onboarding (mirrors beforeLoad).
   useEffect(() => {
     if (
       authStatus === 'authenticated' &&
@@ -46,7 +31,6 @@ export function AuthenticatedLayout() {
     }
   }, [authStatus, projectCount, navigate, pathname]);
 
-  // Multi-project landing — fires once per auth transition.
   const didLandingRef = useRef(false);
   useEffect(() => {
     if (authStatus === 'unauthenticated') {

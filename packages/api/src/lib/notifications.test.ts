@@ -69,9 +69,6 @@ function makeFakeResend(opts: {
       },
     },
   };
-  // The real `Resend` instance has many other members. We only ever
-  // touch `emails.send` from production code, so the cast is safe and
-  // keeps the test fixture small.
   return { client: client as unknown as Parameters<typeof __setResendForTest>[0], sent };
 }
 

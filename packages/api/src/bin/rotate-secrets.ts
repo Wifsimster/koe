@@ -7,47 +7,6 @@ import {
   readEnvelopeKid,
 } from '../lib/secretStore.js';
 
-/**
- * Re-encrypt identity secrets at rest.
- *
- * Two use cases:
- *
- *   1. First-time KMS rollout — an operator turned on
- *      `KOE_SECRET_KEYS` on a deployment that has existing plaintext
- *      rows. Default invocation migrates every plaintext row to an
- *      envelope under the current active kid.
- *
- *   2. Master key rotation — the active kid changed
- *      (`KOE_SECRET_ACTIVE_KID` points to a new entry in
- *      `KOE_SECRET_KEYS`). Rows encrypted under the old kid still
- *      decrypt as long as its key stays in `KOE_SECRET_KEYS`, but
- *      should be re-encrypted under the new one so we can drop the
- *      retired kid. Pass `--reencrypt-all` to cover that case.
- *
- * Safety posture:
- *   - Dry-run is the default. Passing `--apply` is the explicit
- *     "yes, change the DB" knob.
- *   - Refuses to run when the env only yields a plaintext store;
- *     there's nothing to rotate to.
- *   - Each row updates independently — a transient failure on one
- *     row doesn't poison the rest, and re-running the CLI is
- *     idempotent (envelopes under the active kid are skipped).
- *   - Read-modify-write guards via a WHERE on the original value
- *     so a concurrent rotator doesn't clobber our re-encryption.
- *
- * Usage:
- *
- *   # Show the plan without writing
- *   pnpm --filter @koe/api exec tsx src/bin/rotate-secrets.ts
- *
- *   # Actually migrate plaintext → envelope
- *   pnpm --filter @koe/api exec tsx src/bin/rotate-secrets.ts --apply
- *
- *   # Master key rotation: also re-encrypt rows under retired kids
- *   pnpm --filter @koe/api exec tsx src/bin/rotate-secrets.ts \
- *     --reencrypt-all --apply
- */
-
 type Args = {
   apply: boolean;
   reencryptAll: boolean;
@@ -109,8 +68,6 @@ async function main(): Promise<void> {
     );
   }
 
-  // `getSecretStoreFromEnv` will throw on a malformed KOE_SECRET_KEYS,
-  // which is the behaviour we want at the CLI entry point.
   const store = getSecretStoreFromEnv();
 
   console.log(`rotate-secrets: active kid = ${activeKid}`);
@@ -151,26 +108,15 @@ async function rotateProjects(
       continue;
     }
     if (verdict === 'other-kid' && !args.reencryptAll) {
-      // Encrypted under a retired kid but intentionally left alone
-      // (no --reencrypt-all). These are NOT on the active kid, so
-      // count them separately — folding them into skipped-active made
-      // the summary claim rotation was complete while rows still
-      // needed re-encryption.
       stats.skippedOtherKid += 1;
       continue;
     }
 
     try {
-      // Decrypt (passes through for plaintext) then encrypt under the
-      // active kid. The WHERE on the original value protects against a
-      // concurrent rotator clobbering our re-encryption mid-run.
       const plaintext = store.decrypt(row.secret);
       const next = store.encrypt(plaintext);
 
       if (args.apply) {
-        // WHERE on the original value so a concurrent rotator can't
-        // clobber our re-encryption — the UPDATE becomes a no-op if
-        // someone else got here first.
         await db
           .update(schema.projects)
           .set({ identitySecret: next })

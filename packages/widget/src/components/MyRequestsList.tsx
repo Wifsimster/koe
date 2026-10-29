@@ -4,13 +4,6 @@ import { useKoe } from '../context/KoeContext';
 import { KoeApiError } from '../api/client';
 import { Button } from './ui/Button';
 
-/**
- * "My requests" screen. Lists tickets where `reporterId` matches the
- * current identity. Gated on a real (non-anonymous) `config.user.id`
- * in `IntentPicker` so anonymous visitors never land here and see a
- * bag of tickets from other anonymous visitors sharing the same
- * fallback id.
- */
 export function MyRequestsList() {
   const { api, config, locale } = useKoe();
   const copy = locale.myRequests ?? DEFAULT_MY_REQUESTS;
@@ -48,9 +41,6 @@ export function MyRequestsList() {
 
   useEffect(() => {
     load();
-    // Copy the controller `load()` just stored so cleanup aborts *this*
-    // request — reading `controllerRef.current` in the cleanup would
-    // race a later `load()` that replaced it.
     const controller = controllerRef.current;
     return () => controller?.abort();
   }, [load]);

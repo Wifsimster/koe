@@ -2,18 +2,6 @@ import type { Context } from 'hono';
 import type { z } from 'zod';
 import { fail } from './response';
 
-/**
- * Parse an untrusted JSON body against a Zod schema, or respond with
- * the canonical `validation_failed` envelope. Collapses the
- * `if (!parsed.success) return fail(...)` block repeated across every
- * route handler.
- *
- * Returns a discriminated union the caller can destructure:
- *
- *   const result = await parseJsonBody(c, schema, 'Invalid payload');
- *   if (!result.ok) return result.response;
- *   const input = result.data;
- */
 export async function parseJsonBody<S extends z.ZodTypeAny>(
   c: Context,
   schema: S,
@@ -23,7 +11,6 @@ export async function parseJsonBody<S extends z.ZodTypeAny>(
   return validateOrFail(c, schema, body, message);
 }
 
-/** Same flow as `parseJsonBody` but for already-gathered inputs (query strings, etc.). */
 export function validateOrFail<S extends z.ZodTypeAny>(
   c: Context,
   schema: S,

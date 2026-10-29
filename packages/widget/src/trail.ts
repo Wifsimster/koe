@@ -7,22 +7,6 @@ import {
   type NetworkEntry,
 } from '@koe/shared';
 
-/**
- * Bounded recorder for what happened before a bug report: user actions,
- * console errors and warnings, and failed requests. Attached to bug
- * reports as `metadata.breadcrumbs`, `metadata.console` and
- * `metadata.network`.
- *
- * Privacy rules:
- * - Fields: a breadcrumb names the field (label, role), never its value.
- *   Keystrokes are not observed at all; one `input` breadcrumb is written
- *   per `change` event.
- * - URLs go through `redactUrl` (query and hash values dropped), console
- *   text through `redactText` (tokens, e-mails, URL values).
- * - Interactions inside the widget itself are not recorded.
- * - Each buffer keeps only its last N entries.
- */
-
 export const TRAIL_LIMITS = { breadcrumbs: 30, console: 20, network: 20 } as const;
 const NAME_MAX = 80;
 
@@ -34,7 +18,6 @@ export interface TrailSnapshot {
 
 interface TrailOptions {
   keepQueryParams?: readonly string[];
-  /** Requests under this URL prefix (the widget's own API calls) are not recorded. */
   ignorePrefix?: string;
 }
 
@@ -84,7 +67,6 @@ function isField(el: Element): boolean {
   );
 }
 
-/** Accessible name without ever reading a field's value. */
 function accessibleName(el: Element): string {
   const aria = el.getAttribute('aria-label');
   if (aria) return clip(aria);
@@ -139,10 +121,6 @@ function requestUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
-/**
- * Starts recording. Returns a handle with `snapshot()` and `stop()`.
- * `stop()` restores every patched function and removes every listener.
- */
 export function startTrail(options: TrailOptions = {}) {
   const breadcrumbs: Breadcrumb[] = [];
   const consoleBuf: ConsoleEntry[] = [];
@@ -173,7 +151,6 @@ export function startTrail(options: TrailOptions = {}) {
     const start = e.target instanceof Element ? e.target : null;
     const el = start?.closest(INTERACTIVE) ?? start;
     if (!el || inWidget(el)) return;
-    // A click on a text field is focus, not an action worth replaying.
     if (isField(el) && inputRole(el as HTMLInputElement) === 'textbox') return;
     push(
       breadcrumbs,

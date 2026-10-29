@@ -38,11 +38,6 @@ type FormAction =
   | { type: 'setErrors'; errors: FieldErrors }
   | { type: 'reset' };
 
-/**
- * Field values and their validation errors travel together in one
- * reducer — every edit and every (re)validation is a single immutable
- * step, which keeps the form's hook count low and the two in sync.
- */
 function formReducer(data: FormData, action: FormAction): FormData {
   switch (action.type) {
     case 'setValue':
@@ -59,13 +54,6 @@ function formReducer(data: FormData, action: FormAction): FormData {
 }
 
 export interface BugReportFormProps {
-  /**
-   * Optional callback that switches the widget to the "my requests"
-   * screen. When provided, the success state exposes a secondary CTA
-   * so the reporter can immediately see their just-submitted ticket
-   * in context. Gated in the Panel on a verified user identity — we
-   * never surface this for anonymous sessions.
-   */
   onViewMyRequests?: () => void;
 }
 
@@ -76,9 +64,6 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  // Cancel the in-flight request if the widget closes mid-submit so we
-  // don't update state on an unmounted component and don't waste bytes on
-  // a response nobody will read.
   const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => controllerRef.current?.abort(), []);
 
@@ -116,9 +101,6 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    // A second submit while the first is in flight is almost always a
-    // double-click on the submit button — bail before doing anything that
-    // would let two POSTs race the API and produce duplicate tickets.
     if (submitting) return;
     setApiError(null);
 
@@ -130,21 +112,15 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
     dispatchForm({ type: 'setErrors', errors: nextErrors });
     if (Object.keys(nextErrors).length > 0) return;
 
-    // Abort any previous in-flight request before assigning the new one.
-    // The early-return above covers most cases, but a stale controller
-    // can still linger if a previous submit threw asynchronously.
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     setSubmitting(true);
     try {
-      // The host-supplied user object wins over a widget-collected email.
-      // Only borrow the optional field when the host didn't give us one.
       const baseReporter = config.user ?? { id: 'anonymous' };
       const email = values.email.trim() || baseReporter.email;
       const reporter = email ? { ...baseReporter, email } : baseReporter;
 
-      // Capture the context at submit time, before the hook can change the page.
       const metadata = buildMetadata(config, { withTrail: true });
       const screenshotUrl = await hostScreenshot(config);
       if (controller.signal.aborted) return;
@@ -167,9 +143,6 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
         if (err.code === 'network_error') {
           setApiError(locale.errors.network);
         } else if (err.code === 'rate_limited') {
-          // Surface the retry hint so the user knows the app is alive
-          // and just throttled — not crashed. Bare `0` means the server
-          // didn't send Retry-After, fall back to a generic phrasing.
           const retryAfter = err.detail.retryAfter ?? 0;
           setApiError(
             retryAfter > 0
@@ -227,8 +200,6 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
         onChange={(e) => update('expected')(e.target.value)}
         rows={2}
       />
-      {/* Email field only shows when the host didn't already identify
-          the user — otherwise it's redundant and adds friction. */}
       {!config.user?.email && (
         <TextField
           label={locale.bugForm.email ?? 'Email · optional'}
@@ -257,13 +228,6 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
   );
 }
 
-/**
- * Sticky footer keeps the primary action reachable above the mobile
- * virtual keyboard. Pairs with `--koe-vvh` written by
- * `useVisualViewport` and the bottom-sheet CSS rules — together they
- * keep the form scrollable area shrinking to track the visible viewport
- * as the keyboard pops.
- */
 function FormFooter({ children }: { children: React.ReactNode }) {
   return <div className="koe-panel-form-footer">{children}</div>;
 }

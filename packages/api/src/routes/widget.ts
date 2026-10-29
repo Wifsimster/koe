@@ -18,8 +18,6 @@ import { clientIp, createRateLimiterFromEnv, rateLimit } from '../middleware/rat
 import { notifyNewTicket } from '../lib/notifications';
 import { sanitizeMetadata } from '../lib/reportContext';
 
-/** 256 KB hard cap on any widget payload. Screenshots go through a
- *  presigned upload flow, never inline base64 (see `screenshotUrl`). */
 const MAX_BODY_BYTES = 256 * 1024;
 
 type WidgetVariables = ProjectContext & { verifyReporter: VerifyReporterFn };
@@ -29,15 +27,6 @@ export const widgetRoutes = new Hono<{ Variables: WidgetVariables }>();
 widgetRoutes.use('*', widgetCors);
 widgetRoutes.use('*', bodyLimit({ maxSize: MAX_BODY_BYTES }));
 
-// Rate limit before DB work — cheap rejection for floods. 10 req/min
-// with a 30-request burst, keyed on (project key, client IP). The
-// project key is used before `requireProject` runs, so unknown keys
-// still get rate-limited by header value (preventing brute-force
-// enumeration).
-//
-// `createRateLimiterFromEnv` picks Redis if `REDIS_URL` is set so the
-// bucket is shared across replicas — critical, because an in-memory
-// bucket per pod multiplies the effective rate by the replica count.
 const widgetRateLimiter = createRateLimiterFromEnv({
   refillPerSecond: 10 / 60,
   capacity: 30,
@@ -90,9 +79,6 @@ widgetRoutes.post('/bugs', async (c) => {
       .returning(),
   );
 
-  // Fire-and-forget: never `await`. The widget response must not
-  // block on Resend latency or availability — `notifyNewTicket` swallows
-  // its own errors and no-ops when email is unconfigured.
   void notifyNewTicket(row, project);
 
   return ok(c, row, 201);
@@ -129,10 +115,6 @@ widgetRoutes.post('/features', async (c) => {
   return ok(c, { ...row, voteCount: 0, hasVoted: false }, 201);
 });
 
-/**
- * Public roadmap read. Vote counts are derived via aggregate — no
- * denormalized counter to drift out of sync.
- */
 widgetRoutes.get('/features', async (c) => {
   const project = c.get('project');
   const currentUserId = c.req.query('userId') ?? null;
@@ -160,10 +142,6 @@ widgetRoutes.get('/features', async (c) => {
   );
 });
 
-/**
- * Toggle a vote. The `(ticket_id, user_id)` primary key makes this
- * idempotent and race-free at the database level.
- */
 widgetRoutes.post('/features/:id/vote', async (c) => {
   const project = c.get('project');
   const id = c.req.param('id');
@@ -183,7 +161,6 @@ widgetRoutes.post('/features/:id/vote', async (c) => {
     return fail(c, 'not_found', 'Feature request not found', 404);
   }
 
-  // Try to insert; if the composite PK already exists it's a toggle-off.
   const inserted = await db
     .insert(schema.ticketVotes)
     .values({ ticketId: id, userId })
@@ -209,22 +186,6 @@ widgetRoutes.post('/features/:id/vote', async (c) => {
   return ok(c, { ...ticket, voteCount, hasVoted });
 });
 
-/**
- * List tickets authored by the caller ("my requests"). The widget shows
- * these in a dedicated tab so users can follow the status of what they
- * submitted without needing an account.
- *
- * Scoping: `reporterId = userId AND projectId = currentProject`. The
- * reporter id is always validated by `verifyReporter` — when the project
- * requires identity verification, unsigned calls return 401 (same posture
- * as `/features/:id/vote`). When verification is optional, we still trust
- * the `userId` query param; operators running public-facing sites should
- * flip `requireIdentityVerification=true` to block enumeration.
- *
- * Response is a deliberate projection — no `reporterEmail`, `metadata`,
- * `screenshotUrl`, or `notes`. Those are admin-side concerns and have no
- * business round-tripping through a widget response.
- */
 widgetRoutes.get('/my-requests', async (c) => {
   const project = c.get('project');
   const parsed = validateOrFail(

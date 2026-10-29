@@ -23,12 +23,6 @@ import { cn } from '../lib/utils';
 
 const inboxRoute = getRouteApi('/_authenticated/');
 
-/**
- * Bulk-selection state lives in a reducer rather than four correlated
- * `useState`s: a single dispatch advances selection, confirm-gating, and
- * the in-flight/error flags in one immutable step, which keeps the
- * single-flight guard and the destructive-confirm flow honest.
- */
 interface BulkState {
   selected: Set<string>;
   error: string | null;
@@ -117,10 +111,6 @@ export function InboxPage() {
       if (!activeKey) return;
       setError(null);
       try {
-        // URL state defines render state — when the user ships `sort`
-        // in the search params, honour it. Fall back to the previous
-        // ad-hoc default (votes when filtering ideas) only when the
-        // URL doesn't carry an explicit choice.
         const effectiveSort: 'recent' | 'votes' | undefined =
           sort === 'votes' ? 'votes' : kind === 'feature' && sort !== 'recent' ? 'votes' : sort;
         const page = await api.listTickets(
@@ -159,10 +149,6 @@ export function InboxPage() {
   const applyBulk = useCallback(
     async (patch: { status?: TicketStatus; priority?: TicketPriority }) => {
       if (!activeKey || bulk.selected.size === 0) return;
-      // Single-flight guard: the chip-level status `Select` and the
-      // confirm-dialog can both call applyBulk; while one PATCH is
-      // already in flight, drop subsequent invocations rather than
-      // double-firing.
       if (bulk.submitting) return;
       dispatch({ type: 'submitStart' });
       try {
@@ -181,8 +167,6 @@ export function InboxPage() {
 
   const requestBulkStatus = useCallback(
     (next: TicketStatus) => {
-      // Mirror the destructive-confirm gate: while a non-destructive
-      // bulk PATCH is in flight, ignore further requests.
       if (bulk.submitting) return;
       if (next === 'closed' || next === 'wont_fix') {
         dispatch({ type: 'requestConfirm', status: next, count: bulk.selected.size });
@@ -382,21 +366,12 @@ function Chip({
 }
 
 function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  // `draft` is fast local state; `value` is the committed URL param. We
-  // reconcile during render (React's "adjust state when a prop changes"
-  // pattern) instead of in an effect — that keeps the input focused
-  // while typing, since nothing remounts and no effect re-syncs. The
-  // last-seen `value` is tracked in a ref (not state): it's only read to
-  // detect a change, never rendered, so it shouldn't trigger renders.
   const [draft, setDraft] = useState(() => value);
   const lastValueRef = useRef(value);
   if (value !== lastValueRef.current) {
     lastValueRef.current = value;
     setDraft(value);
   }
-  // The debounce reads the latest `onChange` without re-subscribing when
-  // the parent re-creates it every render. Effect Events always see the
-  // current prop, so it stays out of the dependency array.
   const onChangeEvent = useEffectEvent(onChange);
   useEffect(() => {
     if (draft === value) return;
@@ -471,9 +446,6 @@ function TicketRow({
           className="absolute left-0 top-4 bottom-4 w-[2px] bg-primary"
         />
       )}
-      {/* Not a <label>: the Checkbox carries its own aria-label, and this
-          wrapper exists only to stop a click in the checkbox gutter from
-          bubbling to the row's <Link>. */}
       <div
         className="flex items-center pt-0.5 pl-3 pr-1"
         onClick={(e) => e.stopPropagation()}

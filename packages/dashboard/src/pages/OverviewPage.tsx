@@ -9,13 +9,6 @@ import { Skeleton } from '../components/ui/skeleton';
 import { INBOX_DEFAULT_SEARCH } from '../lib/searchParams';
 import { cn } from '../lib/utils';
 
-/**
- * Landing page for admins who belong to more than one project. Shows
- * one KPI tile per project in a responsive grid so an operator can see
- * the state of every project without navigating in. Click-through sets
- * the active project (so the shell's Inbox link retargets) and routes
- * to the inbox.
- */
 export function OverviewPage() {
   const { api, setActiveProject } = useAuth();
   const [projects, setProjects] = useState<WorkspaceProjectSummary[] | null>(null);

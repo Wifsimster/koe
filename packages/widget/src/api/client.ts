@@ -7,17 +7,6 @@ import type {
 } from '@koe/shared';
 import { z } from 'zod';
 
-/**
- * Validates the API response envelope shape only. The inner `data` payload
- * is left as `unknown` and trusted via the caller's generic — the server
- * is first-party and TypeScript already describes each endpoint's shape
- * through the public client methods. What we guard against here is a
- * malformed or impostor response (reverse proxy error page, captive
- * portal, etc.) slipping past the cast and blowing up downstream.
- *
- * Declared at module scope so the schema is compiled once per bundle,
- * not rebuilt on every request.
- */
 const envelopeSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: z.unknown() }),
   z.object({
@@ -27,38 +16,16 @@ const envelopeSchema = z.discriminatedUnion('ok', [
 ]);
 
 export interface RequestOptions {
-  /** Abort the request when the host component unmounts or navigates away. */
   signal?: AbortSignal;
 }
 
 export interface KoeApiClientOptions {
   apiUrl: string;
   projectKey: string;
-  /**
-   * Opaque HMAC of the reporter id signed with the project's identity
-   * secret, provided by the host app's backend.
-   *
-   * @deprecated Prefer `identityToken` — v1 hashes have no TTL, no nonce,
-   * and no rotation story. v1 remains supported for backward
-   * compatibility with existing integrations.
-   */
   userHash?: string;
-  /**
-   * Signed identity token (v2) minted by the host app's backend. Carries
-   * bound claims (`reporterId`, `projectId`, `iat`, `nonce`, `kid`) so a
-   * captured token cannot be replayed across sessions or projects, and
-   * secrets can be rotated without breaking live integrations.
-   *
-   * Sent via the `X-Koe-Identity-Token` header. Takes precedence over
-   * `userHash` when both are provided.
-   */
   identityToken?: string;
 }
 
-/**
- * Thin wrapper around fetch for the widget → Koe API. Keeps transport
- * concerns (auth header, base URL, envelope unwrapping) out of components.
- */
 export class KoeApiClient {
   private readonly apiUrl: string;
   private readonly projectKey: string;
@@ -99,12 +66,6 @@ export class KoeApiClient {
     return this.post<FeatureRequest>(`/v1/widget/features/${id}/vote`, { userId }, opts.signal);
   }
 
-  /**
-   * Tickets authored by the caller. Powers the "My requests" tab.
-   * Always sends `userId` explicitly — the API still calls
-   * `verifyReporter` against the identity headers, so a mismatched
-   * query-string id on a verification-required project is rejected.
-   */
   async listMyRequests(
     userId: string,
     opts: RequestOptions = {},
@@ -113,13 +74,6 @@ export class KoeApiClient {
     return this.get<MyRequestRow[]>(`/v1/widget/my-requests${qs}`, opts.signal);
   }
 
-  /**
-   * Build a deep-link to the public roadmap page for this project. When
-   * `ticketId` is provided, the URL anchors to that ticket's card so a
-   * reporter can jump from "my requests" straight to the row on the
-   * roadmap. The client owns this since it already has the validated
-   * `apiUrl` and the `projectKey`.
-   */
   roadmapUrl(ticketId?: string): string {
     const base = `${this.apiUrl}/r/${encodeURIComponent(this.projectKey)}`;
     return ticketId ? `${base}#t-${encodeURIComponent(ticketId)}` : base;
@@ -129,11 +83,6 @@ export class KoeApiClient {
     const res = await this.fetchSafe(this.apiUrl + path, {
       method: 'GET',
       headers: this.headers(),
-      // Identity travels in explicit headers only. `omit` prevents host
-      // cookies from leaking to the Koe API and, more importantly, keeps
-      // host fetch wrappers (Sentry, Datadog RUM) that inspect
-      // credentialed requests from recording the identity header in
-      // breadcrumbs.
       credentials: 'omit',
       signal,
     });
@@ -151,11 +100,6 @@ export class KoeApiClient {
     return this.unwrap<T>(res);
   }
 
-  // Wrap `fetch` so network failures surface as typed `KoeApiError` with a
-  // stable `network_error` code. Host error reporting (Sentry breadcrumbs,
-  // analytics) can then filter on the code instead of string-matching the
-  // browser's locale-dependent `TypeError: Failed to fetch`. AbortError is
-  // re-thrown untouched so callers can detect cancellation via the signal.
   private async fetchSafe(url: string, init: RequestInit): Promise<Response> {
     try {
       return await fetch(url, init);
@@ -171,8 +115,6 @@ export class KoeApiClient {
       'Content-Type': 'application/json',
       'X-Koe-Project-Key': this.projectKey,
     };
-    // v2 identity token takes precedence. Sending both is redundant and
-    // risks confusing host-side ops, so we pick one.
     if (this.identityToken) {
       headers['X-Koe-Identity-Token'] = this.identityToken;
     } else if (this.userHash) {
@@ -189,12 +131,6 @@ export class KoeApiClient {
     } catch {
       parseFailed = true;
     }
-    // Reverse proxies, captive portals, CDN error pages, and rate
-    // limiters very often return HTML or an empty body on the same
-    // status codes the API would otherwise return JSON for. Map the
-    // common ones to typed codes the UI can render meaningfully —
-    // otherwise every 429 reads as the generic `invalid_response` code
-    // and the user sees a blank "something went wrong" toast.
     if (parseFailed) {
       if (res.status === 429) {
         const retryAfter = parseInt(res.headers.get('Retry-After') ?? '0', 10);
@@ -230,14 +166,7 @@ export class KoeApiClient {
   }
 }
 
-/**
- * Optional structured detail attached to a `KoeApiError`. Keeping this
- * narrow means callers don't have to switch on a wide union — a
- * `rate_limited` error carries `retryAfter` (seconds), other codes carry
- * nothing.
- */
 export interface KoeApiErrorDetail {
-  /** Seconds the client should wait before retrying. Only set on `rate_limited`. */
   retryAfter?: number;
 }
 

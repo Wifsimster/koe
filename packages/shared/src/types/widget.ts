@@ -3,110 +3,32 @@ import type { WidgetUser } from './user';
 export type WidgetPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 
 export interface WidgetTheme {
-  /**
-   * Optional host tint, e.g. "#4f46e5". Paints the subtle accents only —
-   * input focus rings and inline links — while the launcher and primary
-   * buttons stay monochrome so the tint never fights the chrome. When
-   * omitted, accents fall back to the neutral foreground.
-   */
   accentColor?: string;
-  /** Force light/dark mode. Defaults to `auto` (follows prefers-color-scheme). */
   mode?: 'light' | 'dark' | 'auto';
-  /**
-   * Border radius in px applied to the widget chrome (panel, launcher,
-   * buttons, fields, vote controls). Defaults to 0 (square corners).
-   */
   radius?: number;
 }
 
 export interface WidgetConfig {
   projectKey: string;
   user?: WidgetUser;
-  /**
-   * Opaque HMAC of `user.id` produced by your backend using the
-   * project's identity secret (`hex(HMAC-SHA256(secret, user.id))`).
-   *
-   * @deprecated Prefer `identityToken`. Legacy v1 hashes have no TTL,
-   * no nonce, and no rotation story — a captured hash is valid forever.
-   * Existing integrations continue to work unchanged.
-   */
   userHash?: string;
-  /**
-   * Signed identity token (v2) minted by your backend. Binds the
-   * signature to `iat`, `nonce`, `projectId`, and `kid` so a captured
-   * token cannot be replayed across sessions, projects, or forever, and
-   * secrets can be rotated without breaking live integrations.
-   * Required when the project has identity verification turned on
-   * (takes precedence over `userHash` when both are set).
-   */
   identityToken?: string;
-  /**
-   * API base URL of your self-hosted Koe service (e.g.
-   * `https://api.support.acme.com`). Required: the widget refuses to
-   * mount without it because identity headers would otherwise be sent
-   * to a misconfigured endpoint on first submission. The standalone
-   * IIFE entrypoint (`window.Koe.init`) defaults this to
-   * `window.location.origin` when the host omits it; library consumers
-   * (`<KoeWidget />`) must pass it explicitly.
-   */
   apiUrl: string;
   position?: WidgetPosition;
   theme?: WidgetTheme;
-  /** Features to enable. Defaults to all three. */
   features?: {
     bugs?: boolean;
     features?: boolean;
     chat?: boolean;
-    /**
-     * When true, surfaces a "browse & vote on ideas" screen alongside
-     * the submission forms. Defaults to true. The vote action itself
-     * additionally requires the host to pass an identified user — the
-     * browse list still renders for anonymous visitors in read-only
-     * mode so they aren't blocked from seeing existing requests.
-     */
     vote?: boolean;
   };
-  /**
-   * Built-in language preset (BCP-47 base tag, e.g. `'fr'`, `'es'`,
-   * `'de'`). Selects one of the translations shipped in `LOCALES`.
-   * When omitted, the widget auto-detects from `<html lang>` and
-   * `navigator.language`, falling back to English. Unknown codes
-   * silently fall back to English. Strings passed via `locale` are
-   * still merged on top of the resolved preset, so a host can pick a
-   * language *and* override a few keys.
-   */
   language?: string;
-  /** Localization strings. Override individual keys on top of `language`. */
   locale?: Partial<WidgetLocale>;
-  /**
-   * Host app version and release, attached to every report as
-   * `metadata.app`, so a regression can be tied to a deploy.
-   */
   app?: { version?: string; release?: string };
-  /** What the widget records for bug reports. */
   capture?: {
-    /**
-     * Query parameter names whose values are kept in captured URLs.
-     * Every other value is dropped (`?token=` stays a name only). Names
-     * that look sensitive (`token`, `code`, `session`...) and token-like
-     * values are dropped even when listed.
-     */
     keepQueryParams?: string[];
-    /**
-     * Record the last user actions (clicks, which fields changed — never
-     * their contents), console errors and warnings, and failed requests,
-     * and attach them to bug reports. Patches `console.error/warn`,
-     * `fetch` and `XMLHttpRequest` while the widget is mounted. Default
-     * `true`; set `false` to opt out.
-     */
     trail?: boolean;
   };
-  /**
-   * Called when a bug report is submitted. Upload a screenshot to your
-   * own storage and resolve its http(s) URL; it is stored as
-   * `screenshotUrl`. Koe never receives image bytes. Rejections and
-   * slow hooks (over 5 s) are ignored, and the report is sent without it.
-   */
   captureScreenshot?: () => Promise<string | undefined>;
 }
 
@@ -114,11 +36,6 @@ export interface WidgetLocale {
   launcherLabel: string;
   title: string;
   subtitle: string;
-  /**
-   * Labels for the intent picker — the first screen of the widget.
-   * Optional for backward compatibility with locales authored before
-   * the picker shipped; English fallbacks kick in when a key is missing.
-   */
   picker?: {
     prompt: string;
     bug: string;
@@ -127,12 +44,9 @@ export interface WidgetLocale {
     featureHint: string;
     vote?: string;
     voteHint?: string;
-    /** Label for the "My requests" card. */
     myRequests?: string;
-    /** Hint shown under the "My requests" card. */
     myRequestsHint?: string;
   };
-  /** Strings for the browse-and-vote screen. */
   browse?: {
     title: string;
     loading: string;
@@ -141,19 +55,15 @@ export interface WidgetLocale {
     retry: string;
     voteAriaLabel: string;
     unvoteAriaLabel: string;
-    /** Shown inline when the host hasn't identified the reporter. */
     signInToVote: string;
   };
-  /** Strings for the "My requests" screen. */
   myRequests?: {
     title: string;
     loading: string;
     empty: string;
     error: string;
     retry: string;
-    /** CTA on a card linking to the public roadmap at `/r/:projectKey`. */
     viewOnRoadmap: string;
-    /** Per-status labels shown as a small badge on each row. */
     status: {
       open: string;
       in_progress: string;
@@ -163,13 +73,7 @@ export interface WidgetLocale {
       wont_fix: string;
     };
   };
-  /** Label for the back button that returns to the intent picker. */
   back?: string;
-  /**
-   * Legacy top-tab labels. Retained for type stability; no longer
-   * rendered since the widget switched to an intent-picker flow.
-   * @deprecated Use `picker` instead.
-   */
   tabs: {
     bug: string;
     feature: string;
@@ -178,22 +82,10 @@ export interface WidgetLocale {
   bugForm: {
     title: string;
     description: string;
-    /**
-     * Single optional "how to reproduce" textarea. Replaces the earlier
-     * triplet (steps / expected / actual) — most reporters pasted a free
-     * form repro into one field anyway.
-     */
     reproduce: string;
-    /**
-     * @deprecated Merged into `reproduce`. Retained so locales authored
-     * before the consolidation still typecheck; no longer rendered.
-     */
     steps?: string;
-    /** Optional "what did you expect?" textarea, sent as `expectedBehavior`. */
     expected?: string;
-    /** @deprecated Not rendered: "What happened?" (`description`) is the actual behavior. */
     actual?: string;
-    /** Label for the optional email field shown above submit. */
     email?: string;
     submit: string;
     success: string;
@@ -201,22 +93,15 @@ export interface WidgetLocale {
   featureForm: {
     title: string;
     description: string;
-    /** Label for the optional email field shown above submit. */
     email?: string;
     submit: string;
     success: string;
   };
-  /**
-   * Chat strings retained for forward compatibility. The chat tab is
-   * not currently rendered — a real conversation backend is wired in a
-   * later MR.
-   */
   chat: {
     placeholder: string;
     empty: string;
     send: string;
   };
-  /** Inline error messages surfaced by the widget forms. */
   errors: {
     required: string;
     invalidEmail: string;
