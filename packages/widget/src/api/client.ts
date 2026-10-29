@@ -22,6 +22,7 @@ export interface RequestOptions {
 export interface KoeApiClientOptions {
   apiUrl: string;
   projectKey: string;
+  /** @deprecated Prefer `identityToken` — v1 hashes have no TTL, no nonce, and no rotation story. v1 remains supported for backward compatibility with existing integrations. */
   userHash?: string;
   identityToken?: string;
 }
