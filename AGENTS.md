@@ -164,7 +164,7 @@ Décision du 2026-10-29 : **aucun commentaire dans le code** (tous langages, y c
 
 Seules exceptions, les directives d'outils qui changent un comportement et les en-têtes de licence :
 
-- `eslint-disable*`, `oxlint-disable*`, `@ts-expect-error`, `@ts-ignore`, `@ts-nocheck`, `/// <reference …>`
+- `eslint-disable*`, `oxlint-disable*`, `@ts-expect-error`, `@ts-ignore`, `@ts-nocheck`, `/// <reference …>`, `@deprecated` (JSDoc tag)
 - shebang (`#!/usr/bin/env …`), `# syntax=` (Dockerfile), `# shellcheck …`, `# noqa`
 - commentaires magiques de bundler (`webpackChunkName`, `@vite-ignore`, …)
 - en-têtes de licence

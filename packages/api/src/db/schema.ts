@@ -40,6 +40,7 @@ export const projects = pgTable('projects', {
   name: text('name').notNull(),
   accentColor: text('accent_color').notNull().default('#4f46e5'),
   allowedOrigins: jsonb('allowed_origins').$type<string[]>().notNull().default([]),
+  /** @deprecated Prefer signed identity tokens via `projectIdentitySecrets`. */
   identitySecret: text('identity_secret').notNull(),
   requireIdentityVerification: boolean('require_identity_verification')
     .notNull()

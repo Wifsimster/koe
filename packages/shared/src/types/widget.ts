@@ -11,6 +11,7 @@ export interface WidgetTheme {
 export interface WidgetConfig {
   projectKey: string;
   user?: WidgetUser;
+  /** @deprecated Prefer `identityToken`. Legacy v1 hashes have no TTL, no nonce, and no rotation story — a captured hash is valid forever. Existing integrations continue to work unchanged. */
   userHash?: string;
   identityToken?: string;
   apiUrl: string;
@@ -74,6 +75,7 @@ export interface WidgetLocale {
     };
   };
   back?: string;
+  /** @deprecated Use `picker` instead. */
   tabs: {
     bug: string;
     feature: string;
@@ -83,8 +85,10 @@ export interface WidgetLocale {
     title: string;
     description: string;
     reproduce: string;
+    /** @deprecated Merged into `reproduce`. Retained so locales authored before the consolidation still typecheck; no longer rendered. */
     steps?: string;
     expected?: string;
+    /** @deprecated Not rendered: "What happened?" (`description`) is the actual behavior. */
     actual?: string;
     email?: string;
     submit: string;

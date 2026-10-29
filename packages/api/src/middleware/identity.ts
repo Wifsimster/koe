@@ -13,6 +13,7 @@ import { getRedisFromEnv } from '../lib/redis';
 import { getSecretStoreFromEnv } from '../lib/secretStore';
 import type { ProjectContext } from './project';
 
+/** @deprecated New integrations should sign an identity token instead — see `packages/api/src/lib/identityToken.ts`. v1 tokens have no TTL, no nonce, and no rotation story, so a leaked hash is valid forever. */
 export function computeUserHash(reporterId: string, identitySecret: string): string {
   return createHmac('sha256', identitySecret).update(reporterId).digest('hex');
 }
