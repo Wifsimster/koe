@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { useKoe } from '../context/KoeContext';
+import { Icon, type IconName } from './ui/Icon';
 
 export type Intent = 'bug' | 'feature' | 'vote' | 'my-requests';
 
@@ -33,13 +34,10 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
       <p id="koe-picker-prompt" className="koe-sr-only">
         {picker.prompt}
       </p>
-      <fieldset
-        aria-labelledby="koe-picker-prompt"
-        className="koe-flex koe-flex-col koe-gap-2"
-      >
+      <fieldset aria-labelledby="koe-picker-prompt" className="koe-flex koe-flex-col koe-gap-2">
         {showBugs && (
           <IntentCard
-            emoji="🐞"
+            icon="bug"
             title={picker.bug}
             hint={picker.bugHint}
             onClick={() => onPick('bug')}
@@ -47,7 +45,7 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
         )}
         {showFeatures && (
           <IntentCard
-            emoji="💡"
+            icon="lightbulb"
             title={picker.feature}
             hint={picker.featureHint}
             onClick={() => onPick('feature')}
@@ -55,7 +53,7 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
         )}
         {showVote && (
           <IntentCard
-            emoji="⬆"
+            icon="arrow-up"
             title={picker.vote ?? 'Browse ideas'}
             hint={picker.voteHint ?? 'Upvote requests from other users'}
             onClick={() => onPick('vote')}
@@ -63,7 +61,7 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
         )}
         {showMyRequests && (
           <IntentCard
-            emoji="📬"
+            icon="inbox"
             title={picker.myRequests ?? 'My requests'}
             hint={picker.myRequestsHint ?? 'Follow the status of what you submitted'}
             onClick={() => onPick('my-requests')}
@@ -75,13 +73,13 @@ export function IntentPicker({ onPick }: IntentPickerProps) {
 }
 
 interface IntentCardProps {
-  emoji: string;
+  icon: IconName;
   title: string;
   hint: string;
   onClick: () => void;
 }
 
-function IntentCard({ emoji, title, hint, onClick }: IntentCardProps) {
+function IntentCard({ icon, title, hint, onClick }: IntentCardProps) {
   return (
     <button
       type="button"
@@ -94,8 +92,8 @@ function IntentCard({ emoji, title, hint, onClick }: IntentCardProps) {
         'koe-transition-colors',
       )}
     >
-      <span className="koe-text-xl koe-leading-none" aria-hidden="true">
-        {emoji}
+      <span className="koe-flex koe-shrink-0 koe-text-koe-text">
+        <Icon name={icon} size={22} />
       </span>
       <span className="koe-flex koe-flex-col koe-min-w-0">
         <span className="koe-text-sm koe-font-medium koe-text-koe-text koe-truncate">{title}</span>

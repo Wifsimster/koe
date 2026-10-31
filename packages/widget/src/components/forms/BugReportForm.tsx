@@ -70,7 +70,7 @@ export function BugReportForm({ onViewMyRequests }: BugReportFormProps = {}) {
   if (success) {
     return (
       <SuccessMessage
-        emoji="✓"
+        icon="check"
         message={locale.bugForm.success}
         onDismiss={() => {
           setSuccess(false);

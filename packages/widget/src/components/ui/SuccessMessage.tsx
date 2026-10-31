@@ -1,7 +1,8 @@
 import { Button } from './Button';
+import { Icon, type IconName } from './Icon';
 
 export interface SuccessMessageProps {
-  emoji: string;
+  icon: IconName;
   message: string;
   onDismiss: () => void;
   onViewMyRequests?: () => void;
@@ -10,7 +11,7 @@ export interface SuccessMessageProps {
 }
 
 export function SuccessMessage({
-  emoji,
+  icon,
   message,
   onDismiss,
   onViewMyRequests,
@@ -19,7 +20,9 @@ export function SuccessMessage({
 }: SuccessMessageProps) {
   return (
     <div className="koe-text-center koe-py-6">
-      <div className="koe-mb-3 koe-text-2xl">{emoji}</div>
+      <div className="koe-mb-3 koe-flex koe-justify-center">
+        <Icon name={icon} size={28} />
+      </div>
       <p className="koe-text-sm koe-mb-4">{message}</p>
       <div className="koe-flex koe-flex-col koe-items-center koe-gap-2">
         <Button variant="ghost" type="button" onClick={onDismiss}>

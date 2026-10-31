@@ -66,7 +66,7 @@ export function FeatureRequestForm({ onViewMyRequests }: FeatureRequestFormProps
   if (success) {
     return (
       <SuccessMessage
-        emoji="✨"
+        icon="sparkles"
         message={locale.featureForm.success}
         onDismiss={() => {
           setSuccess(false);
