@@ -6,7 +6,7 @@ Ce document decrit le pipeline de release du projet. Il s'adresse aux equipes pr
 
 | Artefact                          | Canal                               | Statut | Observation                                                            |
 | --------------------------------- | ----------------------------------- | ------ | ---------------------------------------------------------------------- |
-| `@wifsimster/koe` (widget)        | GitHub Releases + tags git `v*`     | Public | Non publie sur npm. Consomme via tag git ou CDN.                       |
+| `@wifsimster/koe` (widget)        | npm + GitHub Releases + tags git `v*` | Public | Publie sur npm par semantic-release. Consommable aussi via tag git ou CDN. |
 | `ghcr.io/wifsimster/koe-server`   | GitHub Container Registry           | Public | Image Docker multi-arch (API + dashboard), signee cosign, SBOM + provenance SLSA. |
 | `@koe/api`                        | workspace prive                     | Prive  | Distribue uniquement via l'image Docker.                               |
 | `@koe/dashboard`                  | workspace prive                     | Prive  | Embarque dans l'image Docker du serveur.                               |
@@ -29,7 +29,7 @@ graph LR
 
 - Chaque push sur `main` declenche le workflow `Widget release`.
 - `semantic-release` analyse les commits Conventional Commits depuis le dernier tag `v*`.
-- S'il detecte une release, il cree un tag `vX.Y.Z` via l'API GitHub et une GitHub Release avec des notes generees automatiquement.
+- S'il detecte une release, il publie `@wifsimster/koe` sur npm (secret `NPM_TOKEN`, provenance), cree un tag `vX.Y.Z` via l'API GitHub et une GitHub Release avec des notes generees automatiquement.
 - Aucun `CHANGELOG.md` n'est commit sur `main` — les notes vivent sur la page GitHub Releases.
 
 ### Serveur — image Docker
@@ -70,7 +70,9 @@ graph LR
 
 ## Consommer le widget
 
-Sans publication npm, les consommateurs ont deux options :
+Les consommateurs ont trois options :
+
+- Installer depuis npm : `npm install @wifsimster/koe`.
 
 - Installer depuis un tag git : `npm install github:Wifsimster/koe#v0.1.0`.
 - Charger la build autonome `koe.iife.js` depuis un CDN base sur GitHub, comme jsDelivr.
