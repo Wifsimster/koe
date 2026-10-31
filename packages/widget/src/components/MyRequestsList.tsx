@@ -3,6 +3,7 @@ import type { MyRequestRow, TicketStatus } from '@koe/shared';
 import { useKoe } from '../context/KoeContext';
 import { KoeApiError } from '../api/client';
 import { Button } from './ui/Button';
+import { Icon } from './ui/Icon';
 
 export function MyRequestsList() {
   const { api, config, locale } = useKoe();
@@ -85,12 +86,12 @@ function RequestRow({ item }: RequestRowProps) {
   const { locale, api } = useKoe();
   const copy = locale.myRequests ?? DEFAULT_MY_REQUESTS;
   const statusLabel = copy.status[item.status] ?? item.status;
-  const kindIcon = item.kind === 'bug' ? '🐞' : '💡';
+  const kindIcon = item.kind === 'bug' ? 'bug' : 'lightbulb';
 
   return (
     <li className="koe-flex koe-gap-3 koe-py-3 koe-border-b koe-border-koe-border last:koe-border-b-0">
-      <span className="koe-text-lg koe-leading-none koe-mt-0.5" aria-hidden="true">
-        {kindIcon}
+      <span className="koe-flex koe-shrink-0 koe-mt-0.5 koe-text-koe-text">
+        <Icon name={kindIcon} size={18} />
       </span>
       <div className="koe-min-w-0 koe-flex-1">
         <p className="koe-text-sm koe-font-medium koe-text-koe-text koe-m-0 koe-truncate">
@@ -99,7 +100,10 @@ function RequestRow({ item }: RequestRowProps) {
         <div className="koe-flex koe-items-center koe-gap-2 koe-mt-1 koe-flex-wrap">
           <StatusBadge status={item.status} label={statusLabel} />
           {item.kind === 'feature' && item.voteCount > 0 && (
-            <span className="koe-text-[11px] koe-text-koe-text-muted">▲ {item.voteCount}</span>
+            <span className="koe-inline-flex koe-items-center koe-gap-1 koe-text-[11px] koe-text-koe-text-muted">
+              <Icon name="arrow-up" size={11} />
+              {item.voteCount}
+            </span>
           )}
           {item.isPublicRoadmap && (
             <a

@@ -35,7 +35,7 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 - `pnpm dev`
 - `pnpm typecheck`
 - `pnpm lint` (soft-fail en CI, seul le widget a un script `lint` defini)
-- `pnpm test` : `turbo run test`, seul `@koe/api` a un script `test` (`node --import tsx --test src/lib/*.test.ts`). Couvre uniquement `packages/api/src/lib/*.test.ts` ; seul `widgetOrigin.test.ts` exerce un middleware (`createWidgetCors`), aucun test de route. Pas de vitest/jest. Pas de suites cote widget/dashboard/shared. En CI l'etape test est en `continue-on-error`.
+- `pnpm test` : `turbo run test`, seul `@koe/api` a un script `test` (`node --import tsx --test src/lib/*.test.ts`). Couvre uniquement `packages/api/src/lib/*.test.ts` ; seul `widgetOrigin.test.ts` exerce un middleware (`createWidgetCors`), aucun test de route. Pas de vitest/jest. Cote widget, seul `packages/widget/test/noEmoji.test.mjs` existe (garde : aucun emoji dans `src/` ni dans `dist/`, icones SVG inline via `components/ui/Icon.tsx`). Pas d'autre suite widget/dashboard/shared. En CI l'etape test est en `continue-on-error`.
 - `pnpm release:dry` : verification semantic-release
 
 ### Par package

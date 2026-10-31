@@ -3,6 +3,7 @@ import type { FeatureRequest } from '@koe/shared';
 import { useKoe } from '../context/KoeContext';
 import { KoeApiError } from '../api/client';
 import { Button } from './ui/Button';
+import { Icon } from './ui/Icon';
 
 export function BrowseList() {
   const { api, config, locale } = useKoe();
@@ -153,9 +154,7 @@ function VoteRow({ item, canVote, onToggle, onError }: VoteRowProps) {
         disabled={!canVote || pending}
         onClick={onClick}
       >
-        <span className="koe-vote-arrow" aria-hidden="true">
-          ▲
-        </span>
+        <Icon name="arrow-up" size={14} className="koe-vote-arrow" />
         <span className="koe-vote-count">{item.voteCount}</span>
       </button>
       <div className="koe-min-w-0 koe-flex-1">
