@@ -6,7 +6,7 @@ touche ce dépôt.
 
 ## Vue d'ensemble
 
-Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-hosted destine aux produits SaaS (bugs, demandes d'evolution, vote public) et son back-office. Produit auto-heberge : aucune instance geree. Distribue sous forme d'image Docker `ghcr.io/wifsimster/koe-server` (API + dashboard bundles) et de tags git `v*` pour le widget (consomme via `github:Wifsimster/koe#vX.Y.Z` ou jsDelivr ; non publie sur npm). Le widget (bugs, demandes d'evolution, vote) et l'API d'administration (inbox, bulk actions, audit) sont branches. Le chat temps reel existe comme onglet de preview local mais n'est pas branche.
+Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-hosted destine aux produits SaaS (bugs, demandes d'evolution, vote public) et son back-office. Produit auto-heberge : aucune instance geree. Distribue sous forme d'image Docker `ghcr.io/wifsimster/koe-server` (API + dashboard bundles) et de tags git `v*` pour le widget (widget aussi publie sur npm sous `@wifsimster/koe` par semantic-release ; consommable via npm, `github:Wifsimster/koe#vX.Y.Z` ou jsDelivr). Le widget (bugs, demandes d'evolution, vote) et l'API d'administration (inbox, bulk actions, audit) sont branches. Le chat temps reel existe comme onglet de preview local mais n'est pas branche.
 
 ## Packages
 
@@ -119,7 +119,7 @@ TanStack Router, shadcn/ui sur Tailwind. Pages : `InboxPage`, `TicketDetailPage`
 - **Conventional Commits** obligatoires (`feat(widget): ...`, `fix(api): ...`) — `semantic-release` les consomme. Voir `CONTRIBUTING.md` pour les impacts de release par type et l'usage de `!` / `BREAKING CHANGE:` pour un major.
 - CI GitHub Actions sur push et pull request vers `main`.
 - Deux pipelines de release independants sur `main` :
-  - Widget (`.github/workflows/widget-release.yml`) : semantic-release, tags `vX.Y.Z`, GitHub Release avec notes auto. Pas de `CHANGELOG.md` committe. Publication npm de `@wifsimster/koe` via `@semantic-release/npm` (`pkgRoot: packages/widget`, secret `NPM_TOKEN`).
+  - Widget (`.github/workflows/widget-release.yml`) : semantic-release, tags `vX.Y.Z`, GitHub Release avec notes auto. Pas de `CHANGELOG.md` committe. Publication npm de `@wifsimster/koe` via `@semantic-release/npm` 13 (`pkgRoot: packages/widget`, trusted publishing OIDC, sans secret).
   - Image serveur (`.github/workflows/server-image.yml`) : declenche sur push touchant `packages/api/**`, `packages/shared/**` ou `pnpm-lock.yaml`. Tags roulants `:edge` + `:sha-*` a chaque push. Tags stables `:latest`, `:x.y.z`, `:x.y`, `:x` **uniquement** sur push d'un tag git `server-vX.Y.Z`. Multi-arch (amd64+arm64), cosign keyless, SLSA provenance, SBOM, scan Trivy (soft-fail).
 - Ne pas modifier `.github/workflows/widget-release.yml` ou `.releaserc.json` sans besoin explicite de publication.
 - Le proxy git de l'environnement **refuse les push de tags et les suppressions de refs**. Passer par l'UI GitHub ou un poste local pour ces operations.

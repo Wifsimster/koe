@@ -94,7 +94,7 @@ Two pipelines run in parallel on `main`. They don't share tags.
 
 No `CHANGELOG.md` is committed back to the repo — release notes live on the GitHub Releases page.
 
-The widget is not published to npm. Consumers pin to a git tag (e.g. `npm install github:Wifsimster/koe#v0.1.0`) or load the IIFE bundle from a GitHub-backed CDN such as jsDelivr.
+The widget is published to npm as `@wifsimster/koe` by semantic-release on each release. Consumers can also pin to a git tag (e.g. `npm install github:Wifsimster/koe#v0.1.0`) or load the IIFE bundle from a GitHub-backed CDN such as jsDelivr.
 
 **Server image (`Server image` workflow)** — triggered by push to `main` touching `packages/api/**`, `packages/shared/**` or the lockfile:
 
