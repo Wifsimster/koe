@@ -29,7 +29,7 @@ graph LR
 
 - Chaque push sur `main` declenche le workflow `Widget release`.
 - `semantic-release` analyse les commits Conventional Commits depuis le dernier tag `v*`.
-- S'il detecte une release, il publie `@wifsimster/koe` sur npm (secret `NPM_TOKEN`, provenance), cree un tag `vX.Y.Z` via l'API GitHub et une GitHub Release avec des notes generees automatiquement.
+- S'il detecte une release, il publie `@wifsimster/koe` sur npm (trusted publishing OIDC, sans token, avec provenance), cree un tag `vX.Y.Z` via l'API GitHub et une GitHub Release avec des notes generees automatiquement.
 - Aucun `CHANGELOG.md` n'est commit sur `main` — les notes vivent sur la page GitHub Releases.
 
 ### Serveur — image Docker
@@ -94,3 +94,14 @@ docker pull ghcr.io/wifsimster/koe-server:0.1.0
 - Les workflows ne commit pas de changement de version sur `main`.
 - `GITHUB_TOKEN` sert a creer les tags widget, publier sur GHCR et signer les images via cosign (OIDC keyless).
 - Les tags git `v*` (widget) et `server-v*` (image) cohabitent sans se chevaucher.
+
+## Configuration npm (trusted publishing)
+
+Reglage unique a faire par le mainteneur sur npmjs.com : package `@wifsimster/koe` > Settings > Trusted Publisher > GitHub Actions, avec :
+
+- Organization or user : `Wifsimster`
+- Repository : `koe`
+- Workflow filename : `widget-release.yml`
+- Environment name : vide (le job n'utilise pas d'environment)
+
+Le job release utilise Node `22.14`+ et `permissions: id-token: write`; aucun secret `NPM_TOKEN` n'est requis et le secret peut etre supprime apres la premiere publication reussie.
