@@ -19,7 +19,7 @@ Koe est un monorepo `pnpm` + Turborepo pour un widget support embarquable self-h
 
 ## Stack et versions
 
-- Node `>=20.8.1`, `pnpm@9.12.0`, TypeScript `5.6.x`, Turbo `2.3.x`, Prettier `3.3.x`
+- Node `>=22.14.0` (exige par `@semantic-release/npm` 13), `pnpm@9.12.0`, TypeScript `5.6.x`, Turbo `2.3.x`, Prettier `3.3.x`
 - React `19.x`, Vite `6.x`, Tailwind `3.4.x`, TanStack Router `1.82.x`
 - Hono `4.6.x`, Drizzle ORM `0.36.x`, `postgres` `3.4.x`, Zod `3.23.x`
 - Auth admin : `@node-rs/argon2` `2.0.x`, cookies HMAC
@@ -117,7 +117,7 @@ TanStack Router, shadcn/ui sur Tailwind. Pages : `InboxPage`, `TicketDetailPage`
 
 - Branche de base : `main`. Branches de travail : `claude/...`.
 - **Conventional Commits** obligatoires (`feat(widget): ...`, `fix(api): ...`) — `semantic-release` les consomme. Voir `CONTRIBUTING.md` pour les impacts de release par type et l'usage de `!` / `BREAKING CHANGE:` pour un major.
-- CI GitHub Actions sur push et pull request vers `main`.
+- CI GitHub Actions sur push vers `main` et sur toute pull request, quelle que soit sa base (PR empilees comprises).
 - Deux pipelines de release independants sur `main` :
   - Widget (`.github/workflows/widget-release.yml`) : semantic-release, tags `vX.Y.Z`, GitHub Release avec notes auto. Pas de `CHANGELOG.md` committe. Publication npm de `@wifsimster/koe` via `@semantic-release/npm` 13 (`pkgRoot: packages/widget`, trusted publishing OIDC, sans secret).
   - Image serveur (`.github/workflows/server-image.yml`) : declenche sur push touchant `packages/api/**`, `packages/shared/**` ou `pnpm-lock.yaml`. Tags roulants `:edge` + `:sha-*` a chaque push. Tags stables `:latest`, `:x.y.z`, `:x.y`, `:x` **uniquement** sur push d'un tag git `server-vX.Y.Z`. Multi-arch (amd64+arm64), cosign keyless, SLSA provenance, SBOM, scan Trivy (soft-fail).
