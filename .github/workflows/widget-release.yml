@@ -12,7 +12,7 @@ concurrency:
 jobs:
   release:
     name: Widget release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.repository == 'wifsimster/koe'
     permissions:
       contents: write
