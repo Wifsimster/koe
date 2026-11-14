@@ -23,7 +23,7 @@ Prerequisites:
 
 - `pnpm install` at the repo root.
 - Docker.
-- Node 20 or later.
+- Node 22.14 or later (`engine-strict=true` makes `pnpm install` refuse older versions).
 - `playwright-core` plus its Chromium. Koe has no Playwright dependency, so install it as a dev tool outside the repo (`doctor` reports when it is missing):
 
   ```bash
